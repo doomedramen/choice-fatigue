@@ -120,6 +120,18 @@ export const auth = betterAuth({
       const inviteCode = process.env.BETA_INVITE_CODE;
       const suppliedCode = ctx.headers?.get("x-beta-invite-code");
       if (!inviteCode || !suppliedCode || suppliedCode !== inviteCode) {
+        const suppliedEmail = (ctx.body as { email?: unknown } | undefined)?.email;
+        if (accountCount === 1 && typeof suppliedEmail === "string") {
+          const existingAccount = await prisma.user.findFirst({
+            where: { email: { equals: suppliedEmail.trim(), mode: "insensitive" } },
+            select: { role: true },
+          });
+          if (existingAccount?.role === "admin") {
+            throw new APIError("FORBIDDEN", {
+              message: "The administrator account already exists. Sign in with that account instead.",
+            });
+          }
+        }
         throw new APIError("FORBIDDEN", {
           message: "A valid Choice Fatigue beta invite is required to sign up.",
         });

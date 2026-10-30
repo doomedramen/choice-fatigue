@@ -18,12 +18,14 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [signInInstead, setSignInInstead] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
     setPending(true);
     setError("");
+    setSignInInstead(false);
     try {
       if (isSignUp && password !== confirmPassword) {
         setError("Passwords do not match.");
@@ -40,7 +42,11 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
           })
         : await signIn.email({ email: email.trim(), password, callbackURL: "/" });
 
-      if (result.error) setError(result.error.message || "We couldn’t complete that request. Please try again.");
+      if (result.error) {
+        const message = result.error.message || "We couldn’t complete that request. Please try again.";
+        setError(message);
+        setSignInInstead(isSignUp && message.includes("administrator account already exists"));
+      }
       else window.location.replace("/");
     } catch {
       setError("We couldn’t reach Choice Fatigue. Check your connection and try again.");
@@ -74,7 +80,7 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
             <span className="auth-password-wrap"><input name="confirmPassword" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" required minLength={8} maxLength={128} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} aria-invalid={confirmPassword.length > 0 && password !== confirmPassword} aria-describedby="confirm-password-help" /><button className="auth-password-toggle" type="button" aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword(value => !value)}>{showConfirmPassword ? "Hide" : "Show"}<span className="sr-only"> confirmation</span></button></span>
             <span className={`auth-field-hint ${confirmPassword.length > 0 && password !== confirmPassword ? "auth-field-error" : ""}`} id="confirm-password-help" aria-live="polite">{confirmPassword.length > 0 && password !== confirmPassword ? "Passwords do not match." : "Enter the same password again."}</span>
           </label>}
-          {error && <p className="auth-error" role="alert">{error}</p>}
+          {error && <p className="auth-error" role="alert">{error}{signInInstead && <> <Link href="/sign-in">Sign in instead</Link></>}</p>}
           <button className="auth-submit" type="submit" disabled={pending}>{pending ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}</button>
         </form>
 

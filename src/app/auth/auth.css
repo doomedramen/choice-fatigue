@@ -20,6 +20,7 @@
 .auth-password-wrap input { padding-right:74px; }
 .auth-password-toggle { position:absolute; top:5px; right:5px; min-width:64px; min-height:38px; border:0; border-radius:6px; background:#202a3d; color:#d7ccff; font-size:12px; font-weight:800; }
 .auth-error { margin:0; padding:11px 12px; border:1px solid #8e514d; border-radius:8px; background:#351f27; color:#ffd0c9; font-size:14px; line-height:1.45; }
+.auth-error a { color:#fff; font-weight:800; text-underline-offset:3px; }
 .auth-success { display:grid; gap:11px; padding:15px; border:1px solid #42634e; border-radius:9px; background:#192b23; color:#d7f3df; font-size:14px; line-height:1.5; }
 .auth-success strong { color:#fff; font-size:15px; }
 .auth-success p { margin:0; }
