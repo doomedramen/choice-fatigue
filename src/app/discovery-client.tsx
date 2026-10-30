@@ -16,6 +16,17 @@ interface SessionState {
   ageVerified: boolean;
 }
 const initialState = (): SessionState => ({ category:"Movies", decisions:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
+const seerrAvailabilityLabels: Record<string, string> = {
+  "not-listed": "No matching result in Seerr",
+  "not-requested": "Not requested",
+  unknown: "Seerr status unknown",
+  pending: "Request pending",
+  processing: "Being added",
+  "partially-available": "Partly available",
+  available: "Available in your library",
+  deleted: "Removed from Seerr",
+};
+const seerrTrackedStatuses = new Set(["pending", "processing", "partially-available", "available"]);
 
 type IconName = "spark"|"back"|"close"|"left"|"check"|"bookmark"|"arrow"|"info"|"rewind"|"lock";
 function Icon({ name }: { name: IconName }) {
@@ -64,6 +75,8 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
   const [requestingKey, setRequestingKey] = useState("");
   const [requestMessages, setRequestMessages] = useState<Record<string, string>>({});
+  const [availabilityCheckingKey, setAvailabilityCheckingKey] = useState("");
+  const [availabilityResults, setAvailabilityResults] = useState<Record<string, { status: string | null; message: string; ok: boolean }>>({});
   const [notice, setNotice] = useState("");
   const [cardExiting, setCardExiting] = useState(false);
   const drag = useRef<{ x:number }|null>(null);
@@ -150,7 +163,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     window.setTimeout(() => setNotice(""), 2100);
   }
   async function requestSavedTitle(pick: MediaItem) {
-    if (!selectedSeerrId || !pick.requestable || requestingKey) return;
+    if (!selectedSeerrId || !pick.requestable || requestingKey || availabilityCheckingKey) return;
     const key = `${selectedSeerrId}:${pick.id}`;
     setRequestingKey(key);
     setRequestMessages(current => ({ ...current, [key]: "" }));
@@ -161,13 +174,43 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
         body: JSON.stringify({ catalogueEntryId: pick.id }),
       });
       if (response.status === 401) { window.location.replace("/sign-in"); return; }
-      const data = await response.json() as { requested?: boolean; error?: string };
-      if (!response.ok || data.requested !== true) throw new Error(data.error || "Seerr could not accept this title.");
+      const data = await response.json() as { requested?: boolean; alreadyTracked?: boolean; availability?: string; error?: string };
+      if (!response.ok) throw new Error(data.error || "Seerr could not accept this title.");
+      if (data.alreadyTracked && data.availability) {
+        const message = seerrAvailabilityLabels[data.availability] ?? "Already tracked in Seerr";
+        setAvailabilityResults(current => ({ ...current, [key]: { status: data.availability ?? null, message, ok: true } }));
+        return;
+      }
+      if (data.requested !== true) throw new Error(data.error || "Seerr could not accept this title.");
       setRequestMessages(current => ({ ...current, [key]: "Request sent to Seerr." }));
+      setAvailabilityResults(current => ({ ...current, [key]: { status: "pending", message: "Request sent to Seerr.", ok: true } }));
     } catch (cause) {
       setRequestMessages(current => ({ ...current, [key]: cause instanceof Error ? cause.message : "Seerr could not accept this title." }));
     } finally {
       setRequestingKey("");
+    }
+  }
+  async function checkSavedAvailability(pick: MediaItem) {
+    if (!selectedSeerrId || !pick.requestable || availabilityCheckingKey || requestingKey) return;
+    const key = `${selectedSeerrId}:${pick.id}`;
+    setAvailabilityCheckingKey(key);
+    setAvailabilityResults(current => ({ ...current, [key]: { status: null, message: "Checking Seerr…", ok: false } }));
+    setRequestMessages(current => ({ ...current, [key]: "" }));
+    try {
+      const response = await fetch(`/api/integrations/${selectedSeerrId}/availability`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ catalogueEntryId: pick.id }),
+      });
+      if (response.status === 401) { window.location.replace("/sign-in"); return; }
+      const data = await response.json() as { availability?: string; error?: string };
+      if (!response.ok || typeof data.availability !== "string") throw new Error(data.error || "Seerr availability could not be checked.");
+      const availability = data.availability;
+      setAvailabilityResults(current => ({ ...current, [key]: { status: availability, message: seerrAvailabilityLabels[availability] ?? "Seerr status unknown", ok: true } }));
+    } catch (cause) {
+      setAvailabilityResults(current => ({ ...current, [key]: { status: null, message: cause instanceof Error ? cause.message : "Seerr availability could not be checked.", ok: false } }));
+    } finally {
+      setAvailabilityCheckingKey("");
     }
   }
   function decide(decision:Decision) {
@@ -334,7 +377,38 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     </main>
     {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><Poster item={details} className="modal-poster"/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(!session.shortlisted.includes(details.id)){setSession(current=>({...current,decisions:{...current.decisions,[details.id]:"keep"},shortlisted:[...current.shortlisted,details.id],history:[...current.history,{id:details.id,decision:"keep"}]}));}setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
     {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes. Artwork in this prototype is non-explicit.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult"}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
-    {savedOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setSavedOpen(false);}}><section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title"><button className="modal-close" onClick={()=>setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close"/></button><div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div><h2 id="saved-title">Saved for later</h2><p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>{saved.length>0&&seerrConnections.length>0&&<label className="saved-connection-select">Send requests to<select value={selectedSeerrId} onChange={event=>setSelectedSeerrId(event.target.value)}>{seerrConnections.map(connection=><option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>}{saved.length>0&&seerrConnections.length===0&&<p className="saved-connect-prompt">Connect a Seerr server to request eligible titles. <a href="/integrations">Manage connections →</a></p>}{saved.length?<div className="saved-grid">{saved.map(pick=>{const key=`${selectedSeerrId}:${pick.id}`;const status=requestMessages[key];return <div className="saved-item" key={pick.id}><Poster item={pick} className="saved-poster"/><div className="saved-item-copy"><strong>{pick.title}</strong><small>{pick.year} · {pick.category}</small>{status&&<small className={status.startsWith("Request sent")?"request-success":"request-feedback"} role="status">{status}</small>}</div>{pick.requestable&&seerrConnections.length>0?<button className="saved-request-button" type="button" onClick={()=>void requestSavedTitle(pick)} disabled={!selectedSeerrId||requestingKey!==""||saveStatus==="saving"||status?.startsWith("Request sent")===true}>{saveStatus==="saving"?"Syncing…":requestingKey===key?"Sending…":status?.startsWith("Request sent")?"Requested":"Request"}</button>:<span className="saved-request-note">{pick.requestable?"Connect Seerr":"TMDB link needed"}</span>}</div>;})}</div>:<div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}<button className="button button-dark saved-done" onClick={()=>setSavedOpen(false)}>Done</button></section></div>}
+    {savedOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
+      <section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title">
+        <button className="modal-close" onClick={() => setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close" /></button>
+        <div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div>
+        <h2 id="saved-title">Saved for later</h2>
+        <p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>
+        {saved.length > 0 && seerrConnections.length > 0 && <label className="saved-connection-select">Send requests to
+          <select value={selectedSeerrId} onChange={event => setSelectedSeerrId(event.target.value)}>{seerrConnections.map(connection => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select>
+        </label>}
+        {saved.length > 0 && seerrConnections.length === 0 && <p className="saved-connect-prompt">Connect a Seerr server to check availability or request eligible titles. <a href="/integrations">Manage connections →</a></p>}
+        {saved.length ? <div className="saved-grid">{saved.map(pick => {
+          const key = `${selectedSeerrId}:${pick.id}`;
+          const requestMessage = requestMessages[key];
+          const availability = availabilityResults[key];
+          const message = requestMessage || availability?.message;
+          const requestSent = requestMessage?.startsWith("Request sent") === true;
+          const tracked = requestSent || (availability?.status ? seerrTrackedStatuses.has(availability.status) : false);
+          const messageIsPositive = requestMessage ? requestSent : availability?.ok === true;
+          return <div className="saved-item" key={pick.id}>
+            <Poster item={pick} className="saved-poster" />
+            <div className="saved-item-copy"><strong>{pick.title}</strong><small>{pick.year} · {pick.category}</small>
+              {message && <small className={messageIsPositive ? "request-success" : "request-feedback"} role="status">{message}</small>}
+            </div>
+            {pick.requestable && seerrConnections.length > 0 ? <div className="saved-actions">
+              <button className="saved-availability-button" type="button" onClick={() => void checkSavedAvailability(pick)} disabled={!selectedSeerrId || availabilityCheckingKey !== "" || requestingKey !== "" || saveStatus === "saving"} aria-label={`Check ${pick.title} in Seerr`}>{availabilityCheckingKey === key ? "Checking…" : "Check"}</button>
+              <button className="saved-request-button" type="button" onClick={() => void requestSavedTitle(pick)} disabled={!selectedSeerrId || requestingKey !== "" || availabilityCheckingKey !== "" || saveStatus === "saving" || tracked}>{saveStatus === "saving" ? "Syncing…" : requestingKey === key ? "Sending…" : tracked ? "Tracked" : "Request"}</button>
+            </div> : <span className="saved-request-note">{pick.requestable ? "Connect Seerr" : "TMDB link needed"}</span>}
+          </div>;
+        })}</div> : <div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}
+        <button className="button button-dark saved-done" onClick={() => setSavedOpen(false)}>Done</button>
+      </section>
+    </div>}
     <div className={`toast ${notice?"show":""}`} role="status" aria-live="polite">{notice}</div>
   </div>;
 }
