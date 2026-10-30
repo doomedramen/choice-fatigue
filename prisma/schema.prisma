@@ -125,6 +125,7 @@ model CatalogueEntry {
   art            String?
   label          String?
   artworkUrl     String?
+  backdropUrl    String?
   ageRestriction Int?
   contentFlags   String[] @default([])
   active         Boolean  @default(true)

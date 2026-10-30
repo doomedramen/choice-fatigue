@@ -220,8 +220,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .review-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 14px 0; }
 .review-card { display: grid; min-width: 0; grid-template-columns: 100px minmax(0,1fr); min-height: 0; overflow: hidden; border: 1px solid #38445a; border-radius: 12px; background: var(--surface); }
 .review-poster { width: 100%; min-height: 0; aspect-ratio: 2 / 3; align-self: start; }
-.card-poster .poster-artwork, .review-poster .poster-artwork, .tray-poster .poster-artwork, .restore-poster .poster-artwork, .saved-poster .poster-artwork, .modal-poster .poster-artwork { object-fit: contain; }
-.modal-poster.has-artwork { background: #0b111c; }
+.card-poster .poster-artwork, .review-poster .poster-artwork, .tray-poster .poster-artwork, .restore-poster .poster-artwork, .saved-poster .poster-artwork { object-fit: contain; }
 .review-poster .poster-copy strong { font-size: 14px; }
 .review-poster .poster-copy small { font-size: 9px; }
 .review-card-info { min-width: 0; padding: 13px; }
@@ -249,10 +248,12 @@ button:active:not(:disabled) { transform: scale(.98); }
 .review-footnote { margin-top: 22px; color: #aab5c9; font-size: 13px; text-align: center; }
 
 .modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 14px; background: #060913d9; backdrop-filter: blur(5px); }
-.details-modal { position: relative; display: grid; width: min(680px, 100%); max-height: min(92vh, 850px); grid-template-rows: 170px minmax(0,1fr); overflow: auto; border: 1px solid #3d4961; border-radius: 16px; background: #151b29; box-shadow: 0 25px 80px #0009; }
-.modal-poster { min-height: 0; }
-.modal-poster .poster-copy strong { font-size: 29px; }
-.modal-info { align-self: center; padding: 22px; }
+.details-modal { position: relative; display: grid; width: min(760px, 100%); max-height: min(92vh, 850px); grid-template-rows: clamp(180px, 32vh, 280px) minmax(0,1fr); overflow: hidden; border: 1px solid #3d4961; border-radius: 16px; background: #151b29; box-shadow: 0 25px 80px #0009; }
+.modal-backdrop-art { position: relative; min-height: 0; overflow: hidden; background: linear-gradient(145deg, var(--p1), var(--p2) 54%, var(--p3)); }
+.modal-backdrop-art::after { position: absolute; inset: 40% 0 0; background: linear-gradient(0deg, #090d17a6, transparent); content: ""; pointer-events: none; }
+.modal-backdrop-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.modal-backdrop-art img.poster-fallback { object-fit: contain; background: #0b111c; }
+.modal-info { min-height: 0; overflow-y: auto; overscroll-behavior: contain; align-self: start; padding: 20px; }
 .modal-info h2 { margin: 9px 0 12px; color: #fff; font-family: "Manrope", sans-serif; font-size: 30px; font-weight: 800; }
 .modal-info p { font-size: 15px; }
 .modal-info .button { width: 100%; margin-top: 17px; }
@@ -350,8 +351,8 @@ button:active:not(:disabled) { transform: scale(.98); }
   .review-card-info p { font-size: 14px; }
   .review-poster .poster-copy strong { font-size: clamp(14px, 1.7vw, 20px); }
   .modal-backdrop { padding: 24px; }
-  .details-modal { grid-template-columns: 42% 58%; grid-template-rows: minmax(460px, 65vh); }
-  .modal-info { padding: 34px; }
+  .details-modal { grid-template-columns: minmax(0,1fr); grid-template-rows: clamp(240px, 34vh, 320px) minmax(0,1fr); }
+  .modal-info { padding: 26px 30px 30px; }
   .modal-info h2 { font-size: 38px; }
   .saved-grid { grid-template-columns: 1fr; }
   .saved-modal { padding: 30px; }

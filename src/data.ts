@@ -11,6 +11,7 @@ export interface MediaItem {
   genre: string[];
   synopsis: string;
   artworkUrl?: string;
+  backdropUrl?: string;
   palette: [string, string, string];
   art: string;
   label: string;

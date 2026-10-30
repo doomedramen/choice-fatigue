@@ -15,6 +15,7 @@ type TmdbRecord = {
   first_air_date?: unknown;
   overview?: unknown;
   poster_path?: unknown;
+  backdrop_path?: unknown;
   media_type?: unknown;
   vote_average?: unknown;
   vote_count?: unknown;
@@ -65,6 +66,11 @@ function posterUrl(pathValue: unknown) {
   return path.startsWith("/") ? `https://image.tmdb.org/t/p/w500${path}` : undefined;
 }
 
+function backdropUrl(pathValue: unknown) {
+  const path = text(pathValue);
+  return path.startsWith("/") ? `https://image.tmdb.org/t/p/w1280${path}` : undefined;
+}
+
 function mediaTypeFor(record: TmdbRecord, category: TmdbCategory): TmdbMediaType | null {
   if (category === "Movies") return "movie";
   if (category === "TV") return "tv";
@@ -91,6 +97,7 @@ export async function searchTmdb(query: string, category: TmdbCategory) {
       if (!title) return null;
       const year = yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date);
       const artwork = posterUrl(record.poster_path);
+      const backdrop = backdropUrl(record.backdrop_path);
       return {
         tmdbId: record.id,
         mediaType,
@@ -98,6 +105,7 @@ export async function searchTmdb(query: string, category: TmdbCategory) {
         ...(year ? { year } : {}),
         synopsis: text(record.overview),
         ...(artwork ? { posterUrl: artwork } : {}),
+        ...(backdrop ? { backdropUrl: backdrop } : {}),
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
@@ -136,6 +144,7 @@ function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder
     art: "mist",
     label: title,
     artworkUrl: posterUrl(record.poster_path) ?? null,
+    backdropUrl: backdropUrl(record.backdrop_path) ?? null,
     ageRestriction: null,
     contentFlags: [],
     active: true,
@@ -168,8 +177,24 @@ export async function syncTmdbDiscoveryCatalogue() {
       .map((record, index) => discoveryEntry(record, "TV", 100 + pageIndex * 20 + index, tvGenreMap))),
   ].filter((row): row is NonNullable<typeof row> => row !== null);
 
-  if (rows.length > 0) {
-    await prisma.catalogueEntry.createMany({ data: rows, skipDuplicates: true });
+  if (rows.length === 0) return 0;
+
+  const existing = await prisma.catalogueEntry.findMany({
+    where: { source: "tmdb", sourceId: { in: rows.map(row => row.sourceId) } },
+    select: { sourceId: true, backdropUrl: true },
+  });
+  const existingBySourceId = new Map(existing.map(entry => [entry.sourceId, entry.backdropUrl]));
+  const newRows = rows.filter(row => !existingBySourceId.has(row.sourceId));
+  const missingBackdrops = rows.filter(row => existingBySourceId.has(row.sourceId) && !existingBySourceId.get(row.sourceId) && row.backdropUrl);
+
+  if (newRows.length > 0) {
+    await prisma.catalogueEntry.createMany({ data: newRows, skipDuplicates: true });
+  }
+  if (missingBackdrops.length > 0) {
+    await prisma.$transaction(missingBackdrops.map(row => prisma.catalogueEntry.update({
+      where: { source_sourceId: { source: "tmdb", sourceId: row.sourceId } },
+      data: { backdropUrl: row.backdropUrl },
+    })));
   }
   return rows.length;
 }
@@ -214,6 +239,7 @@ export async function importTmdbEntry(input: { tmdbId: number; mediaType: TmdbMe
     ? Math.min(10, Math.max(0, record.vote_average))
     : null;
   const artwork = posterUrl(record.poster_path);
+  const backdrop = backdropUrl(record.backdrop_path);
   const sourceId = `${mediaType}:${tmdbId}`;
   const existing = await prisma.catalogueEntry.findUnique({ where: { source_sourceId: { source: "tmdb", sourceId } } });
   const lastInCategory = await prisma.catalogueEntry.findFirst({ where: { category }, orderBy: { displayOrder: "desc" }, select: { displayOrder: true } });
@@ -230,6 +256,7 @@ export async function importTmdbEntry(input: { tmdbId: number; mediaType: TmdbMe
     art: "mist",
     label: text(record.tagline) || title,
     artworkUrl: artwork ?? null,
+    backdropUrl: backdrop ?? null,
     ageRestriction: null,
     contentFlags: [],
     active: true,

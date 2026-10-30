@@ -126,7 +126,7 @@ function normalizedTitle(value: string) {
   return value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 }
 
-async function tmdbPosterFor(title: string, year: number | undefined, category: TvdbCategory) {
+async function tmdbArtworkFor(title: string, year: number | undefined, category: TvdbCategory) {
   try {
     const matches = await searchTmdb(title, category as TmdbCategory);
     const normalized = normalizedTitle(title);
@@ -136,10 +136,10 @@ async function tmdbPosterFor(title: string, year: number | undefined, category: 
       && (category !== "Movies" || match.mediaType === "movie")
       && (category !== "TV" || match.mediaType === "tv"),
     );
-    return exact.length === 1 ? exact[0].posterUrl : undefined;
+    return exact.length === 1 ? { posterUrl: exact[0].posterUrl, backdropUrl: exact[0].backdropUrl } : {};
   } catch {
     // TVDB remains usable on its own if TMDB is unconfigured or unavailable.
-    return undefined;
+    return {};
   }
 }
 
@@ -189,7 +189,7 @@ export async function importTvdbEntry(input: { tvdbId: number; mediaType: TvdbMe
   if (!title) throw new TvdbRequestError();
 
   const year = yearFrom(record.year, record.firstAired);
-  const posterUrl = await tmdbPosterFor(title, year, input.category);
+  const artwork = await tmdbArtworkFor(title, year, input.category);
   const category = input.category;
   const sourceId = `${input.mediaType}:${input.tvdbId}`;
   const lastInCategory = await prisma.catalogueEntry.findFirst({ where: { category }, orderBy: { displayOrder: "desc" }, select: { displayOrder: true } });
@@ -205,7 +205,8 @@ export async function importTvdbEntry(input: { tvdbId: number; mediaType: TvdbMe
     palette: ["#344255", "#263244", "#151d2c"],
     art: "mist",
     label: title,
-    artworkUrl: posterUrl ?? null,
+    artworkUrl: artwork.posterUrl ?? null,
+    backdropUrl: artwork.backdropUrl ?? null,
     ageRestriction: null,
     contentFlags: [],
     active: true,

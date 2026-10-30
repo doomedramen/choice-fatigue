@@ -28,6 +28,7 @@ function fromDatabase(entry: Awaited<ReturnType<typeof prisma.catalogueEntry.fin
     genre: entry.genres.length > 0 ? entry.genres : fixture?.genre ?? [],
     synopsis: entry.synopsis ?? fixture?.synopsis ?? "",
     ...(entry.artworkUrl ? { artworkUrl: entry.artworkUrl } : {}),
+    ...(entry.backdropUrl ? { backdropUrl: entry.backdropUrl } : {}),
     palette,
     art: entry.art ?? fixture?.art ?? "mist",
     label: entry.label ?? fixture?.label ?? entry.title,
