@@ -3,7 +3,7 @@
 import { useId, useState, type FormEvent } from "react";
 import styles from "./tmdb-catalogue.module.css";
 
-type Category = "Movies" | "TV";
+type Category = "Movies" | "Shows";
 type MediaType = "movie" | "tv";
 interface SearchResult {
   tmdbId: number;
@@ -91,9 +91,9 @@ export default function TmdbCatalogue() {
       <div>
         <p className={styles.eyebrow}>CURATE THE CATALOGUE</p>
         <h3 id="tmdb-catalogue-title">Find titles on TMDB</h3>
-        <p>Discovery loads popular movies and TV series from TMDB automatically. Search here to add a specific title to the catalogue. Anime series are found under TV; anime films are found under Movies.</p>
+        <p>Discovery loads popular movies and series from TMDB automatically. Search here to add a specific title to the catalogue. Anime series are found under Shows; anime films are found under Movies.</p>
       </div>
-      <span className={styles.sourceBadge}>Movies · TV</span>
+      <span className={styles.sourceBadge}>Movies · Shows</span>
     </div>
 
     <form className={styles.searchForm} onSubmit={search}>
@@ -105,7 +105,7 @@ export default function TmdbCatalogue() {
         <span>Add to</span>
         <select id={categoryId} value={category} disabled={searching || importingKey !== null} onChange={event => { setCategory(event.target.value as Category); setResults([]); setSearched(false); setError(""); setMessage(""); }}>
           <option value="Movies">Movies</option>
-          <option value="TV">TV</option>
+          <option value="Shows">Shows</option>
         </select>
       </label>
       <button className={styles.searchButton} type="submit" disabled={searching || importingKey !== null || query.trim().length < 2}>
@@ -129,7 +129,7 @@ export default function TmdbCatalogue() {
             {result.posterUrl ? <img className={styles.poster} src={result.posterUrl} alt="" width="58" height="84" loading="lazy" /> : <span className={styles.posterPlaceholder} aria-hidden="true">✳</span>}
             <div className={styles.resultCopy}>
               <h4>{result.title}{result.year ? <span> · {result.year}</span> : null}</h4>
-              <p className={styles.resultMeta}>{result.mediaType === "movie" ? "Movie" : "TV series"}</p>
+              <p className={styles.resultMeta}>{result.mediaType === "movie" ? "Movie" : "Series"}</p>
               <p className={styles.synopsis}>{result.synopsis || "No overview is available."}</p>
             </div>
             <button className={styles.addButton} type="button" onClick={() => void addResult(result)} disabled={isAdded || importingKey !== null || searching} aria-label={isAdded ? `${result.title} added` : `Add ${result.title} to ${category}`}>

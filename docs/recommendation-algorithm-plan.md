@@ -35,14 +35,14 @@ The first implementation is a deterministic, content-based ranker. It needs no r
 
 - Respect the selected category and its access rules.
 - Exclude titles already seen in the current session, plus titles the user has permanently hidden or saved when that matches their settings.
-- Do not let Adult choices affect Movies or TV profiles, or the reverse.
+- Do not let Adult choices affect Movies or Shows profiles, or the reverse.
 - Keep service availability (already in a library or already requested) as an eligibility or display signal, separate from taste.
 
 ### 2. Represent user and title interests
 
-The current ranker uses source genres, release decade, and title type. For each feature, it averages the current-session keep, pass, or star-rating signals. Decade and type use smaller feature weights (0.25 each); genre features use 1.0. The source rating adds a small quality prior, bounded from −0.05 to +0.05, so it helps order close candidates without overriding explicit choices. Category is a strict candidate boundary: the selected category is ranked on its own, and Adult choices cannot affect Movies or TV.
+The current ranker uses source genres, release decade, and title type. For each feature, it averages the current-session keep, pass, or star-rating signals. Decade and type use smaller feature weights (0.25 each); genre features use 1.0. The source rating adds a small quality prior, bounded from −0.05 to +0.05, so it helps order close candidates without overriding explicit choices. Category is a strict candidate boundary: the selected category is ranked on its own, and Adult choices cannot affect Movies or Shows.
 
-The main catalogue combines imported metadata-source entries with an automatic TMDB starter pool: two popularity-sorted discovery pages each for Movies and TV, with source genres, ratings, years, and poster paths. TMDB responses are cached for six hours and genre names for a day; discovered records are stored in PostgreSQL so session and saved-title IDs remain stable. Adult-flagged TMDB results are excluded. Local fixture rows are for development seeding and are not presented as discovery content. If no metadata source has available titles, the app shows its existing empty state.
+The main catalogue combines imported metadata-source entries with an automatic TMDB starter pool: two popularity-sorted discovery pages each for Movies and Shows, with source genres, ratings, years, and poster paths. TMDB responses are cached for six hours and genre names for a day; discovered records are stored in PostgreSQL so session and saved-title IDs remain stable. Adult-flagged TMDB results are excluded. Local fixture rows are for development seeding and are not presented as discovery content. If no metadata source has available titles, the app shows its existing empty state.
 
 This is a within-session first pass, not a lasting taste profile. Starting a fresh session clears the signals used by the ranker. Persisting preferences across sessions requires the per-account event history described below. Later versions can add well-supported features such as language, runtime, and carefully normalized themes or keywords, and can decay older evidence.
 
@@ -79,7 +79,7 @@ Keep the current saved/shortlist snapshot for fast UI restore. Treat the event h
 
 ## Adult-section boundary
 
-Keep the Adult profile, signals, candidates, and retrieval isolated from general categories. Never use Adult interactions to personalize Movies or TV. Do not introduce cross-user collaborative signals for Adult in the first versions. Preserve the existing age gate and provider boundaries at candidate generation, not only in the interface.
+Keep the Adult profile, signals, candidates, and retrieval isolated from general categories. Never use Adult interactions to personalize Movies or Shows. Do not introduce cross-user collaborative signals for Adult in the first versions. Preserve the existing age gate and provider boundaries at candidate generation, not only in the interface.
 
 ## Evaluation and rollout
 

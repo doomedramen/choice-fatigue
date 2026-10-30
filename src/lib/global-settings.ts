@@ -14,7 +14,7 @@ export async function getGlobalSettings() {
   const settings = await prisma.globalSettings.findUnique({ where: { id: GLOBAL_SETTINGS_ID } });
   return {
     appName: settings?.appName ?? "Choice Fatigue",
-    defaultCategory: settings?.defaultCategory ?? "Movies",
+    defaultCategory: settings?.defaultCategory === "TV" ? "Shows" : settings?.defaultCategory ?? "Movies",
     adultSectionEnabled: settings?.adultSectionEnabled === true,
     allowPrivateNetworkTargets: settings?.allowPrivateNetworkTargets === true,
   };
@@ -24,7 +24,7 @@ export async function getAdminGlobalSettings() {
   const settings = await prisma.globalSettings.findUnique({ where: { id: GLOBAL_SETTINGS_ID } });
   return {
     appName: settings?.appName ?? "Choice Fatigue",
-    defaultCategory: settings?.defaultCategory ?? "Movies",
+    defaultCategory: settings?.defaultCategory === "TV" ? "Shows" : settings?.defaultCategory ?? "Movies",
     adultSectionEnabled: settings?.adultSectionEnabled === true,
     allowPrivateNetworkTargets: settings?.allowPrivateNetworkTargets === true,
     betaInviteCodeConfigured: Boolean(settings?.betaInviteCodeHash),

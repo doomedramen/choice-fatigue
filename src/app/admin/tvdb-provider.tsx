@@ -3,7 +3,7 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import styles from "./tvdb-provider.module.css";
 
-type Category = "Movies" | "TV";
+type Category = "Movies" | "Shows";
 type MediaType = "movie" | "series";
 export interface TvdbProviderStatus {
   credentialConfigured: boolean;
@@ -33,7 +33,7 @@ export default function TvdbProvider({ status, onStatusChange }: { status: TvdbP
   const [enabled, setEnabled] = useState(status.enabled);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<Category>("TV");
+  const [category, setCategory] = useState<Category>("Shows");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [added, setAdded] = useState<Set<string>>(() => new Set());
   const [searching, setSearching] = useState(false);
@@ -132,7 +132,7 @@ export default function TvdbProvider({ status, onStatusChange }: { status: TvdbP
         <label className={styles.field} htmlFor={keyId}><span>Project API key</span><input id={keyId} type="password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} value={apiKey} maxLength={512} required={!status.credentialConfigured} placeholder={status.credentialConfigured ? "Saved · leave blank to keep" : "Paste the API key from your TVDB dashboard"} onChange={event => setApiKey(event.target.value)} /></label>
         <label className={styles.field} htmlFor={pinId}><span>Subscriber PIN <small>Optional · only for user-supported keys</small></span><input id={pinId} type="password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} value={pin} maxLength={128} placeholder={status.pinConfigured ? "Saved · leave blank to keep" : "Enter the PIN if your key requires one"} onChange={event => setPin(event.target.value)} disabled={clearPin} /></label>
         {status.pinConfigured && <label className={styles.clearPin}><input type="checkbox" checked={clearPin} onChange={event => setClearPin(event.target.checked)} /><span>Remove the saved PIN</span></label>}
-        <label className={styles.enable}><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /><span><strong>Enable TheTVDB search</strong><small>Use TVDB metadata for Movies and TV. TMDB is used for artwork only when a title and year match exactly.</small></span></label>
+        <label className={styles.enable}><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /><span><strong>Enable TheTVDB search</strong><small>Use TVDB metadata for Movies and Shows. TMDB is used for artwork only when a title and year match exactly.</small></span></label>
         <button className={styles.save} type="submit" disabled={!status.encryptionConfigured || saving}>{saving ? "Saving…" : "Save TheTVDB settings"}</button>
       </form>
       {error && <p className={styles.error} role="alert">{error}</p>}
@@ -141,10 +141,10 @@ export default function TvdbProvider({ status, onStatusChange }: { status: TvdbP
     </section>
 
     {status.enabled && <section className={styles.catalogue} aria-labelledby="tvdb-catalogue-title">
-      <div className={styles.heading}><div><p className={styles.eyebrow}>CURATE THE CATALOGUE</p><h3 id="tvdb-catalogue-title">Find titles on TheTVDB</h3><p>Search TVDB for text metadata, then add matching titles to the local catalogue.</p></div><span className={styles.sourceBadge}>Movies · TV</span></div>
+      <div className={styles.heading}><div><p className={styles.eyebrow}>CURATE THE CATALOGUE</p><h3 id="tvdb-catalogue-title">Find titles on TheTVDB</h3><p>Search TVDB for text metadata, then add matching titles to the local catalogue.</p></div><span className={styles.sourceBadge}>Movies · Shows</span></div>
       <form className={styles.searchForm} onSubmit={search}>
         <label className={styles.field}><span>Title</span><input value={query} maxLength={80} autoComplete="off" placeholder="Try a film or series name" disabled={searching || importingKey !== null} onChange={event => setQuery(event.target.value)} /></label>
-        <label className={styles.field} htmlFor={categoryId}><span>Add to</span><select id={categoryId} value={category} disabled={searching || importingKey !== null} onChange={event => { setCategory(event.target.value as Category); setResults([]); setSearched(false); setError(""); setMessage(""); }}><option value="TV">TV</option><option value="Movies">Movies</option></select></label>
+        <label className={styles.field} htmlFor={categoryId}><span>Add to</span><select id={categoryId} value={category} disabled={searching || importingKey !== null} onChange={event => { setCategory(event.target.value as Category); setResults([]); setSearched(false); setError(""); setMessage(""); }}><option value="Shows">Shows</option><option value="Movies">Movies</option></select></label>
         <button className={styles.searchButton} type="submit" disabled={searching || importingKey !== null || query.trim().length < 2}>{searching ? "Searching…" : "Search TVDB"}</button>
       </form>
       {searching && <p className={styles.state} role="status" aria-live="polite">Searching TheTVDB…</p>}
@@ -154,7 +154,7 @@ export default function TvdbProvider({ status, onStatusChange }: { status: TvdbP
           const key = resultKey(result);
           const isAdded = added.has(key);
           const isImporting = importingKey === key;
-          return <li className={styles.result} key={key}><div className={styles.posterMark} aria-hidden="true">TVDB</div><div className={styles.resultCopy}><h4>{result.title}{result.year && <span> · {result.year}</span>}</h4><p className={styles.meta}>{category === "TV" ? "Series" : "Movie"}</p>{result.synopsis && <p className={styles.synopsis}>{result.synopsis}</p>}</div><button className={styles.add} type="button" disabled={isAdded || importingKey !== null} onClick={() => void addResult(result)}>{isImporting ? "Adding…" : isAdded ? "Added" : "Add"}</button></li>;
+          return <li className={styles.result} key={key}><div className={styles.posterMark} aria-hidden="true">TVDB</div><div className={styles.resultCopy}><h4>{result.title}{result.year && <span> · {result.year}</span>}</h4><p className={styles.meta}>{category === "Shows" ? "Series" : "Movie"}</p>{result.synopsis && <p className={styles.synopsis}>{result.synopsis}</p>}</div><button className={styles.add} type="button" disabled={isAdded || importingKey !== null} onClick={() => void addResult(result)}>{isImporting ? "Adding…" : isAdded ? "Added" : "Add"}</button></li>;
         })}
       </ul></>}
       <p className={styles.attribution}>Text metadata provided by <a href="https://thetvdb.com" target="_blank" rel="noreferrer">TheTVDB ↗</a>. Posters are sourced separately from TMDB when an exact match is available.</p>

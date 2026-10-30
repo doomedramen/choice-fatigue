@@ -8,7 +8,7 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_COLLECTION_ITEMS = 5_000;
 const MAX_ID_LENGTH = 128;
 
-type Category = "Movies" | "TV" | "Adult";
+type Category = "Movies" | "Shows" | "Adult";
 type Decision = "keep" | "pass" | "seen";
 interface SessionState {
   category: Category;
@@ -22,7 +22,7 @@ interface SessionState {
   view: "discover" | "review";
   ageVerified: boolean;
 }
-type PersistedSessionState = Omit<SessionState, "lockedItemId" | "ratings"> & { lockedItemId?: string | null; ratings?: Record<string, number> };
+type PersistedSessionState = Omit<SessionState, "lockedItemId" | "ratings" | "category"> & { category: Category | "TV"; lockedItemId?: string | null; ratings?: Record<string, number> };
 
 const defaultState: SessionState = {
   category: "Movies",
@@ -60,7 +60,7 @@ function isSessionState(value: unknown): value is PersistedSessionState {
   const valueKeys = Object.keys(value);
   if (!requiredKeys.every(key => key in value) || valueKeys.some(key => !requiredKeys.includes(key) && !optionalKeys.includes(key))) return false;
   if (value.lockedItemId !== undefined && value.lockedItemId !== null && !isId(value.lockedItemId)) return false;
-  if (value.category !== "Movies" && value.category !== "TV" && value.category !== "Adult") return false;
+  if (value.category !== "Movies" && value.category !== "Shows" && value.category !== "TV" && value.category !== "Adult") return false;
   if (value.view !== "discover" && value.view !== "review") return false;
   if (typeof value.ageVerified !== "boolean") return false;
   if (!isIdList(value.shortlisted) || !isIdList(value.saved) || !isIdList(value.reviewRemoved)) return false;
@@ -96,10 +96,11 @@ export async function GET() {
       console.error("Stored discovery state failed validation for the current account.");
       return jsonError("Saved discovery data could not be read.", 500);
     }
-    if (state.category === "Adult" && !settings.adultSectionEnabled) {
+    const category: Category = state.category === "TV" ? "Shows" : state.category;
+    if (category === "Adult" && !settings.adultSectionEnabled) {
       return NextResponse.json({ ...defaultState, category: settings.defaultCategory as Category, decisions: state.decisions, ratings: state.ratings ?? {}, shortlisted: state.shortlisted, saved: state.saved, history: state.history, reviewRemoved: state.reviewRemoved });
     }
-    return NextResponse.json({ ...state, lockedItemId: state.lockedItemId ?? null, ratings: state.ratings ?? {} }, { headers: { "x-discovery-state-exists": "true" } });
+    return NextResponse.json({ ...state, category, lockedItemId: state.lockedItemId ?? null, ratings: state.ratings ?? {} }, { headers: { "x-discovery-state-exists": "true" } });
   } catch (error) {
     console.error("Unable to read discovery state.", error);
     return jsonError("Saved discovery data could not be read.", 500);
@@ -142,7 +143,7 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
-    const normalizedState = { ...value, lockedItemId: value.lockedItemId ?? null };
+    const normalizedState = { ...value, category: value.category === "TV" ? "Shows" : value.category, lockedItemId: value.lockedItemId ?? null };
     await saveDiscoveryState(JSON.parse(JSON.stringify(normalizedState)));
     return NextResponse.json(normalizedState);
   } catch (error) {

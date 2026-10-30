@@ -117,6 +117,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const mediaCard = useRef<HTMLElement|null>(null);
   const ratingInput = useRef<HTMLInputElement|null>(null);
   const seenButton = useRef<HTMLButtonElement|null>(null);
+  const accountMenu = useRef<HTMLDetailsElement|null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveVersion = useRef(0);
   const catalogue = mediaItems.filter(item => adultSectionEnabled || item.category !== "Adult");
@@ -145,14 +146,15 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           try {
             const legacy = localStorage.getItem("elsewhere-discovery-v1");
             if (legacy) {
-              const parsed = JSON.parse(legacy) as Omit<Partial<SessionState>, "category"> & { category?: Category | "Anime" };
-              const validShape = parsed && ["Movies", "TV", "Anime", "Adult"].includes(parsed.category ?? "") && typeof parsed.decisions === "object" && parsed.decisions !== null && Array.isArray(parsed.shortlisted) && Array.isArray(parsed.saved) && Array.isArray(parsed.history) && Array.isArray(parsed.reviewRemoved) && (parsed.view === "discover" || parsed.view === "review") && typeof parsed.ageVerified === "boolean";
-              if (validShape) { stored = { ...parsed, category: parsed.category === "Anime" ? "TV" : parsed.category }; hasLegacyState = true; }
+              const parsed = JSON.parse(legacy) as Omit<Partial<SessionState>, "category"> & { category?: Category | "TV" | "Anime" };
+              const validShape = parsed && ["Movies", "Shows", "TV", "Anime", "Adult"].includes(parsed.category ?? "") && typeof parsed.decisions === "object" && parsed.decisions !== null && Array.isArray(parsed.shortlisted) && Array.isArray(parsed.saved) && Array.isArray(parsed.history) && Array.isArray(parsed.reviewRemoved) && (parsed.view === "discover" || parsed.view === "review") && typeof parsed.ageVerified === "boolean";
+              if (validShape) { stored = { ...parsed, category: parsed.category === "Anime" || parsed.category === "TV" ? "Shows" : parsed.category }; hasLegacyState = true; }
             }
           } catch { /* Ignore invalid browser-local data and start clean. */ }
         }
         if (cancelled) return;
         const next = { ...initialState(), ...stored };
+        if ((next.category as string) === "TV") next.category = "Shows";
         if (!adultSectionEnabled && next.category === "Adult") next.category = "Movies";
         const availableIds = new Set(catalogue.map(candidate => candidate.id));
         next.shortlisted = next.shortlisted.filter(id => typeof id === "string" && availableIds.has(id));
@@ -204,6 +206,22 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   useEffect(() => {
     if (ratingSelectorOpen) ratingInput.current?.focus();
   }, [ratingSelectorOpen]);
+
+  useEffect(() => {
+    function closeAccountMenu(event: globalThis.PointerEvent) {
+      const menu = accountMenu.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    }
+    function closeAccountMenuOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && accountMenu.current?.open) accountMenu.current.open = false;
+    }
+    document.addEventListener("pointerdown", closeAccountMenu);
+    document.addEventListener("keydown", closeAccountMenuOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeAccountMenu);
+      document.removeEventListener("keydown", closeAccountMenuOnEscape);
+    };
+  }, []);
 
   function showNotice(message:string) {
     setNotice(message);
@@ -465,7 +483,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     <header className="topbar">
       <a className="brand" href="/" aria-label={`${appName} home`}><span className="brand-symbol">✳</span><span>{appName.toLowerCase()}</span></a>
       <nav className="category-nav" aria-label="Media categories">{categories.filter(category=>adultSectionEnabled || category!=="Adult").map(category=>{const index=categories.indexOf(category); return <button key={category} className={`nav-item ${session.category===category?"active":""} ${category==="Adult"?"adult-nav":""}`} onClick={()=>changeCategory(category)} aria-pressed={session.category===category}>{category==="Adult"?<><Icon name="lock"/><span>Adult</span></>:<><span className={`nav-dot dot-${index}`}/><span>{category}</span></>}</button>;})}</nav>
-      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details className="account-menu"><summary className="avatar" title={userName} aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
+      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details ref={accountMenu} className="account-menu"><summary className="avatar" title={userName} aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
     </header>
     <main className={`main ${session.view==="review"?"review-mode":""}`}>
       <section className="content-area">
@@ -482,7 +500,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
-          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Shortlists, passes, and your star ratings shape what appears next.":"Pass, shortlist, or mark a title as seen and rate it to shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
+          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>{session.category}</h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Shortlists, passes, and your star ratings shape what appears next.":"Pass, shortlist, or mark a title as seen and rate it to shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className={`card-stack ${nextItem ? "has-next-card" : ""}`} aria-label="Media discovery card">
               {nextItem && renderMediaCard(nextItem, false)}

@@ -57,7 +57,7 @@ volta run pnpm admin:promote -- exact-account-email@example.com
 
 Metadata provider keys and enablement are saved through Admin → Metadata sources. The keys and optional TVDB PIN are encrypted before storage. The API reports only configured and enabled status; secrets are never returned to the browser.
 
-- TMDB search/import supports Movies and TV. Anime series are included in TV search; anime films are included in Movies search. It uses `include_adult=false`, rejects adult-flagged results, and stores imported titles in `CatalogueEntry`. `/credits` contains TMDB attribution.
+- TMDB search/import supports Movies and Shows. Anime series are included in Shows; anime films are included in Movies. The adapter uses TMDB's TV endpoints for Shows, sets `include_adult=false`, rejects adult-flagged results, and stores imported titles in `CatalogueEntry`. `/credits` contains TMDB attribution.
 - TheTVDB v4 search is configured with a project API key and optional subscriber PIN. TMDB artwork may be matched only when title and year match exactly.
 - ThePornDB and StashDB can be used for text-only Adult entries. Source artwork is not imported or displayed. Adult imports are marked age-restricted and stored in the Adult category.
 

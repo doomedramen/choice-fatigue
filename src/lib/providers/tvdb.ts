@@ -7,7 +7,7 @@ import { getEnabledTvdbConfig, TvdbConfigurationError, TvdbNotEnabledError } fro
 const API_BASE = "https://api4.thetvdb.com/v4";
 const TOKEN_TTL_MS = 25 * 24 * 60 * 60 * 1000;
 
-export const tvdbCategories = ["Movies", "TV"] as const;
+export const tvdbCategories = ["Movies", "Shows"] as const;
 export type TvdbCategory = (typeof tvdbCategories)[number];
 export type TvdbMediaType = "movie" | "series";
 
@@ -134,7 +134,7 @@ async function tmdbArtworkFor(title: string, year: number | undefined, category:
       normalizedTitle(match.title) === normalized
       && (!year || match.year === year)
       && (category !== "Movies" || match.mediaType === "movie")
-      && (category !== "TV" || match.mediaType === "tv"),
+      && (category !== "Shows" || match.mediaType === "tv"),
     );
     return exact.length === 1 ? { posterUrl: exact[0].posterUrl, backdropUrl: exact[0].backdropUrl } : {};
   } catch {
@@ -178,7 +178,7 @@ function runtimeFrom(record: TvdbRecord, mediaType: TvdbMediaType) {
 }
 
 export async function importTvdbEntry(input: { tvdbId: number; mediaType: TvdbMediaType; category: TvdbCategory }) {
-  if ((input.category === "Movies" && input.mediaType !== "movie") || (input.category === "TV" && input.mediaType !== "series")) {
+  if ((input.category === "Movies" && input.mediaType !== "movie") || (input.category === "Shows" && input.mediaType !== "series")) {
     throw new TypeError("The selected category does not match the TheTVDB item type.");
   }
   const endpoint = input.mediaType === "movie" ? "movies" : "series";
@@ -197,7 +197,7 @@ export async function importTvdbEntry(input: { tvdbId: number; mediaType: TvdbMe
     title,
     category,
     year: year ?? null,
-    type: input.mediaType === "movie" ? "Movie" : "TV series",
+    type: input.mediaType === "movie" ? "Movie" : "Series",
     runtime: runtimeFrom(record, input.mediaType),
     rating: null,
     genres: genresFrom(record.genres),

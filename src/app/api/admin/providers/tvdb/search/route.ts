@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("query")?.trim() ?? "";
   const category = request.nextUrl.searchParams.get("category") ?? "";
   if (query.length < 2 || query.length > 80 || !tvdbCategories.includes(category as typeof tvdbCategories[number])) {
-    return NextResponse.json({ error: "Enter a search of 2 to 80 characters and choose Movies or TV." }, { status: 400 });
+    return NextResponse.json({ error: "Enter a search of 2 to 80 characters and choose Movies or Shows." }, { status: 400 });
   }
 
   try {

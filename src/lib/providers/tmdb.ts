@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
 
-export const tmdbCategories = ["Movies", "TV"] as const;
+export const tmdbCategories = ["Movies", "Shows"] as const;
 export type TmdbCategory = (typeof tmdbCategories)[number];
 export type TmdbMediaType = "movie" | "tv";
 
@@ -73,7 +73,7 @@ function backdropUrl(pathValue: unknown) {
 
 function mediaTypeFor(record: TmdbRecord, category: TmdbCategory): TmdbMediaType | null {
   if (category === "Movies") return "movie";
-  if (category === "TV") return "tv";
+  if (category === "Shows") return "tv";
   return null;
 }
 
@@ -135,7 +135,7 @@ function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder
     title,
     category,
     year: yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date) ?? null,
-    type: mediaType === "movie" ? "Movie" : "TV series",
+    type: mediaType === "movie" ? "Movie" : "Series",
     runtime: mediaType === "movie" ? "—" : "Series",
     rating,
     genres,
@@ -174,7 +174,7 @@ export async function syncTmdbDiscoveryCatalogue() {
     ...moviePages.flatMap((payload, pageIndex) => (Array.isArray(payload.results) ? payload.results : [])
       .map((record, index) => discoveryEntry(record, "Movies", 100 + pageIndex * 20 + index, movieGenreMap))),
     ...tvPages.flatMap((payload, pageIndex) => (Array.isArray(payload.results) ? payload.results : [])
-      .map((record, index) => discoveryEntry(record, "TV", 100 + pageIndex * 20 + index, tvGenreMap))),
+      .map((record, index) => discoveryEntry(record, "Shows", 100 + pageIndex * 20 + index, tvGenreMap))),
   ].filter((row): row is NonNullable<typeof row> => row !== null);
 
   if (rows.length === 0) return 0;
@@ -216,7 +216,7 @@ function formatRuntime(record: TmdbRecord & { runtime?: unknown; episode_run_tim
 export async function importTmdbEntry(input: { tmdbId: number; mediaType: TmdbMediaType; category: TmdbCategory }) {
   const token = await getEnabledTmdbToken();
   const { tmdbId, mediaType, category } = input;
-  if ((category === "Movies" && mediaType !== "movie") || (category === "TV" && mediaType !== "tv")) {
+  if ((category === "Movies" && mediaType !== "movie") || (category === "Shows" && mediaType !== "tv")) {
     throw new TypeError("The selected category does not match the TMDB item type.");
   }
 
@@ -247,7 +247,7 @@ export async function importTmdbEntry(input: { tmdbId: number; mediaType: TmdbMe
     title,
     category,
     year: year ?? null,
-    type: mediaType === "movie" ? "Movie" : "TV series",
+    type: mediaType === "movie" ? "Movie" : "Series",
     runtime: formatRuntime(record, mediaType),
     rating,
     genres,
