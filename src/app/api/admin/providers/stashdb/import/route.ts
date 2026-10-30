@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, AuthenticationError, AuthorizationError } from "@/lib/auth-session";
 import { importStashDbScene, StashDbMissingSceneError, StashDbNotEnabledError, StashDbRequestError } from "@/lib/providers/stashdb";
+import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 
 export const dynamic = "force-dynamic";
 
 function errorResponse(error: unknown) {
   if (error instanceof AuthenticationError) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
   if (error instanceof AuthorizationError) return NextResponse.json({ error: "Administrator access is required." }, { status: 403 });
+  if (error instanceof IntegrationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof StashDbNotEnabledError) return NextResponse.json({ error: "StashDB is not enabled for Adult on this server." }, { status: 503 });
   if (error instanceof StashDbMissingSceneError) return NextResponse.json({ error: "This StashDB scene could not be found." }, { status: 404 });
   if (error instanceof StashDbRequestError) return NextResponse.json({ error: "StashDB could not complete the request. Try again shortly." }, { status: 502 });
@@ -17,12 +19,11 @@ function errorResponse(error: unknown) {
 export async function POST(request: NextRequest) {
   try {
     await requireAdmin();
+    requireSameOrigin(request);
   } catch (error) {
     return errorResponse(error);
   }
 
-  const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return NextResponse.json({ error: "Expected a JSON request." }, { status: 400 });
 
   let body: unknown;

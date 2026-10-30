@@ -9,7 +9,20 @@ export class IntegrationRequestError extends Error {
 
 export function requireSameOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) throw new IntegrationRequestError(403, "Request origin is not allowed.");
+  if (!origin) throw new IntegrationRequestError(403, "Request origin is not allowed.");
+  try {
+    const suppliedOrigin = new URL(origin);
+    const requestUrl = new URL(request.url);
+    const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0].trim();
+    const host = forwardedHost || request.headers.get("host") || requestUrl.host;
+    const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+    const protocol = forwardedProtocol ? `${forwardedProtocol.replace(/:$/, "")}:` : requestUrl.protocol;
+    if (suppliedOrigin.host.toLowerCase() !== host.toLowerCase() || suppliedOrigin.protocol !== protocol) {
+      throw new Error("Origin mismatch.");
+    }
+  } catch {
+    throw new IntegrationRequestError(403, "Request origin is not allowed.");
+  }
 }
 
 export async function readIntegrationJson(request: NextRequest, maxBytes: number) {

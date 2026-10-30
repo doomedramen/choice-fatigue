@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, AuthenticationError, AuthorizationError } from "@/lib/auth-session";
-import { importTmdbEntry, tmdbCategories, TmdbAdultResultError, TmdbNotEnabledError, TmdbRequestError, type TmdbMediaType } from "@/lib/providers/tmdb";
+import { importTmdbEntry, tmdbCategories, TmdbAdultResultError, TmdbConfigurationError, TmdbNotEnabledError, TmdbRequestError, type TmdbMediaType } from "@/lib/providers/tmdb";
+import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 
 export const dynamic = "force-dynamic";
 
 function errorResponse(error: unknown) {
   if (error instanceof AuthenticationError) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
   if (error instanceof AuthorizationError) return NextResponse.json({ error: "Administrator access is required." }, { status: 403 });
+  if (error instanceof IntegrationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+  if (error instanceof TmdbConfigurationError) return NextResponse.json({ error: "TMDB credentials could not be decrypted. Check secure server storage." }, { status: 503 });
   if (error instanceof TmdbNotEnabledError) return NextResponse.json({ error: "TMDB is not enabled on this server." }, { status: 503 });
   if (error instanceof TmdbAdultResultError) return NextResponse.json({ error: "Adult-flagged results cannot be added to this catalogue." }, { status: 400 });
   if (error instanceof TmdbRequestError) return NextResponse.json({ error: "TMDB could not complete the request. Try again shortly." }, { status: 502 });
@@ -18,12 +21,11 @@ function errorResponse(error: unknown) {
 export async function POST(request: NextRequest) {
   try {
     await requireAdmin();
+    requireSameOrigin(request);
   } catch (error) {
     return errorResponse(error);
   }
 
-  const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return NextResponse.json({ error: "Expected a JSON request." }, { status: 400 });
 
   let body: unknown;

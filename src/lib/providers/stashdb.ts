@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getGlobalSettings } from "@/lib/global-settings";
-import { serverConfig } from "@/lib/server-config";
+import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 
 const ENDPOINT = "https://stashdb.org/graphql";
 const RESULT_LIMIT = 12;
@@ -27,14 +27,13 @@ export class StashDbRequestError extends Error {}
 export class StashDbMissingSceneError extends Error {}
 
 async function getApiKey() {
-  const apiKey = process.env.STASHDB_API_KEY;
-  if (!apiKey || process.env.STASHDB_METADATA_ENABLED !== "true" || !serverConfig.adultSectionEnabled) {
-    throw new StashDbNotEnabledError();
-  }
-
   const settings = await getGlobalSettings();
   if (!settings.adultSectionEnabled) throw new StashDbNotEnabledError();
-  return apiKey;
+  try {
+    return (await getEnabledAdultMetadataProviderConfig("stashdb")).apiKey;
+  } catch {
+    throw new StashDbNotEnabledError();
+  }
 }
 
 async function graphql<T>(query: string, variables: Record<string, unknown>, apiKey: string): Promise<T> {

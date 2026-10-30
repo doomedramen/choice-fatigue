@@ -78,11 +78,35 @@ model DiscoveryState {
 }
 
 model GlobalSettings {
-  id                  String   @id @default("global")
-  appName             String   @default("Choice Fatigue")
-  defaultCategory     String   @default("Movies")
-  adultSectionEnabled Boolean  @default(false)
-  updatedAt           DateTime @updatedAt
+  id                         String   @id @default("global")
+  appName                    String   @default("Choice Fatigue")
+  defaultCategory            String   @default("Movies")
+  adultSectionEnabled        Boolean  @default(false)
+  betaInviteCodeHash         String?  @db.VarChar(64)
+  allowPrivateNetworkTargets Boolean  @default(false)
+  smtpEnabled                Boolean  @default(false)
+  smtpFrom                   String?
+  encryptedSmtpUrl           String?  @db.Text
+  updatedAt                  DateTime @updatedAt
+}
+
+model MetadataProviderCredential {
+  provider        String   @id
+  encryptedConfig String   @db.Text
+  enabled         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AdminServiceIntegration {
+  id              String   @id @default(cuid())
+  service         String
+  name            String
+  encryptedConfig String   @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([service, createdAt])
 }
 
 model CatalogueEntry {

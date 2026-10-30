@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
 
 export const tmdbCategories = ["Movies", "TV", "Anime"] as const;
 export type TmdbCategory = (typeof tmdbCategories)[number];
@@ -23,17 +24,9 @@ type TmdbRecord = {
 
 type TmdbSearchPayload = { results?: TmdbRecord[] };
 
-export class TmdbNotEnabledError extends Error {}
 export class TmdbRequestError extends Error {}
 export class TmdbAdultResultError extends Error {}
-
-function accessToken() {
-  const token = process.env.TMDB_API_READ_ACCESS_TOKEN;
-  if (process.env.TMDB_METADATA_ENABLED !== "true" || !token) {
-    throw new TmdbNotEnabledError();
-  }
-  return token;
-}
+export { TmdbConfigurationError, TmdbNotEnabledError };
 
 async function requestTmdb<T>(path: string, token: string): Promise<T> {
   const controller = new AbortController();
@@ -85,7 +78,7 @@ function looksLikeAnime(record: TmdbRecord) {
 }
 
 export async function searchTmdb(query: string, category: TmdbCategory) {
-  const token = accessToken();
+  const token = await getEnabledTmdbToken();
   const encoded = encodeURIComponent(query);
   const endpoint = category === "Movies"
     ? `/search/movie?query=${encoded}&include_adult=false&language=en-US&page=1`
@@ -130,7 +123,7 @@ function formatRuntime(record: TmdbRecord & { runtime?: unknown; episode_run_tim
 }
 
 export async function importTmdbEntry(input: { tmdbId: number; mediaType: TmdbMediaType; category: TmdbCategory }) {
-  const token = accessToken();
+  const token = await getEnabledTmdbToken();
   const { tmdbId, mediaType, category } = input;
   if ((category === "Movies" && mediaType !== "movie") || (category === "TV" && mediaType !== "tv")) {
     throw new TypeError("The selected category does not match the TMDB item type.");

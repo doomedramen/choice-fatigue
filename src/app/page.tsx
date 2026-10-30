@@ -12,8 +12,8 @@ export default async function HomePage() {
   const [settings, mediaItems, seerrConnections, plexConnections] = await Promise.all([
     getGlobalSettings(),
     getCatalogue(),
-    prisma.userIntegration.findMany({ where: { userId: session.user.id, service: "seerr" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
-    prisma.userIntegration.findMany({ where: { userId: session.user.id, service: "plex" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
+    prisma.adminServiceIntegration.findMany({ where: { service: "seerr" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
+    prisma.adminServiceIntegration.findMany({ where: { service: "plex" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
   ]);
   return <DiscoveryClient
     appName={settings.appName}

@@ -9,5 +9,5 @@ export default async function AccountPage() {
   const session = await getSession();
   if (!session) redirect("/sign-in");
 
-  return <AccountClient name={session.user.name} email={session.user.email} />;
+  return <AccountClient name={session.user.name} email={session.user.email} isAdmin={session.user.role === "admin"} />;
 }

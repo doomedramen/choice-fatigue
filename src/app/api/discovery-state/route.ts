@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/auth-session";
 import { getDiscoveryState, saveDiscoveryState } from "@/lib/discovery-state";
 import { getGlobalSettings } from "@/lib/global-settings";
+import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_COLLECTION_ITEMS = 5_000;
@@ -88,8 +89,12 @@ export async function PUT(request: NextRequest) {
   const session = await getSession();
   if (!session) return jsonError("Authentication required.", 401);
 
-  const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) return jsonError("Request origin is not allowed.", 403);
+  try {
+    requireSameOrigin(request);
+  } catch (error) {
+    if (error instanceof IntegrationRequestError) return jsonError(error.message, error.status);
+    return jsonError("Request origin is not allowed.", 403);
+  }
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     return jsonError("Expected a JSON discovery state.", 400);
   }

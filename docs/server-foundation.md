@@ -1,86 +1,100 @@
 # Server foundation contract
 
-This is the server-side foundation for Choice Fatigue. Discovery data persists per account in PostgreSQL. The admin can optionally search and import TMDB titles; automatic recommendations are not connected.
+Choice Fatigue stores account discovery state, app settings, metadata-provider credentials, and shared media-service connections in PostgreSQL. Application configuration is managed through the administrator UI. Environment variables are reserved for server infrastructure and runtime secrets.
 
 ## Local setup
 
-Copy `.env.example` to `.env` for Prisma commands and `.env.local` for Next.js. The example explicitly enables development-only console email delivery for password-reset links. Signup and sign-in do not use email. Start PostgreSQL with `docker compose up -d postgres`, then run `npm run db:setup`.
+Requirements: Node.js 20.9+, pnpm 12.16.1, and Docker Compose. The project declares pnpm 12.16.1 in `package.json`; with Volta, install it using `volta install pnpm@12.16.1` and run project commands with `volta run pnpm`.
 
-Set a unique `BETTER_AUTH_SECRET` and the canonical `BETTER_AUTH_URL` for shared deployments. Configure `BETA_INVITE_CODE` for later signups. When the database has no accounts, the first account can sign up without an invite and receives the administrator role. After that, signup requires `x-beta-invite-code`; it is checked by a server-side Better Auth hook and is never stored. Signup and sign-in do not send or require email verification and do not require mail configuration.
+Copy `.env.example` to `.env` for Prisma and `.env.local` for Next.js. The supported environment settings are:
 
-Email delivery is optional and only used for password recovery. If enabled in a shared deployment, set `AUTH_EMAIL_MODE=smtp`, `SMTP_URL` (a Nodemailer SMTP connection URL), and `SMTP_FROM` (the sender address). Development can explicitly use `AUTH_EMAIL_MODE=console` to print reset links to the server terminal; this mode is rejected outside `NODE_ENV=development`. Password resets revoke existing sessions.
+- `DATABASE_URL` for PostgreSQL.
+- `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` for authentication runtime configuration.
+- `INTEGRATION_CREDENTIALS_KEY`, a private 32-byte base64 key used to encrypt saved provider, SMTP, and media-service credentials.
 
-`ADULT_SECTION_ENABLED` defaults to `false`. Adult access is available only when this server setting and `GlobalSettings.adultSectionEnabled` in PostgreSQL are both true. The discovery-state endpoint rejects selecting Adult while disabled and avoids returning a saved Adult selection when the feature is off.
+Generate the encryption key with `openssl rand -base64 32`. Keep a secure backup: saved encrypted credentials cannot be recovered without it. Do not put invite codes, SMTP settings, Adult access, provider credentials, or service URLs in environment variables; administrators set those in the UI.
 
-Per-user service connections require a separate `INTEGRATION_CREDENTIALS_KEY` containing 32 random bytes encoded as base64. Generate one with `openssl rand -base64 32`; keep it in the deployment secret store, separate from the database, and keep a secure backup because losing it makes saved credentials unrecoverable. Connection addresses and API credentials are encrypted with AES-256-GCM before storage, bound to the owning user and connection ID, and never returned by the API. Seerr, Plex, Radarr, Sonarr, and Whisparr v2/v3 connection checks are available. Saved TMDB-linked movie/TV items can be checked against Seerr or Plex, and Seerr can accept requests for eligible items.
+Start PostgreSQL and prepare the database:
 
-## Authentication routes and recovery
+```sh
+docker compose up -d postgres
+volta run pnpm db:setup
+volta run pnpm db:seed
+volta run pnpm dev
+```
+
+For a shared deployment, run `volta run pnpm db:deploy` before starting the app. `volta run pnpm dev` starts Next.js in live development mode; production deployments use the package `build` and `start` scripts.
+
+## Authentication and invitations
 
 Better Auth is mounted at `/api/auth/*`:
 
-- `POST /api/auth/sign-up/email` creates and signs in an account. The first account in an empty database does not need `x-beta-invite-code` and becomes administrator. Later accounts must include the configured invite code.
-- `POST /api/auth/sign-in/email` signs in an account without checking email ownership.
-- `POST /api/auth/request-password-reset` accepts an email and redirect URL; Better Auth emails the reset link.
+- `POST /api/auth/sign-up/email` creates and signs in an account. When no accounts exist, the first account does not need an invite and receives the administrator role. Later accounts must provide the invitation code configured in Admin settings.
+- `POST /api/auth/sign-in/email` signs in without checking email ownership.
+- `POST /api/auth/request-password-reset` accepts an email and redirect URL; Better Auth sends the reset link only when SMTP is enabled in Admin settings.
 - `POST /api/auth/reset-password` accepts the reset token and new password and revokes existing sessions.
 
-The frontend includes `/forgot-password` and `/reset-password` screens. The reset email callback redirects back with a short-lived token, and the reset form submits the new password through Better Auth.
+Email is not used for account creation, verification, or sign-in. SMTP is optional and is used only for password recovery. Admins can enable it and enter the connection URL and sender address in Global settings. The URL is encrypted before storage. In development, when SMTP is disabled, reset links are printed in the server terminal.
 
 ## Account data and deletion
 
-- `GET /api/account/export` downloads the signed-in account's profile and discovery state as JSON, with catalogue labels for referenced local titles and non-secret service connection labels. It excludes password hashes, sessions, verification tokens, server addresses, and provider credentials.
-- `/account` provides the export link and account deletion flow. Deletion requires the current password in both the UI and the Better Auth server hook. The deletion hook protects the last active administrator; account-owned discovery state is deleted with its user row, Better Auth removes accounts and sessions, and the post-delete hook removes remaining verification records for that user.
-- Account deletion is permanent. The user should download their export before confirming deletion if they want a copy.
-
-## Discovery API
-
 - `GET /api/discovery-state` returns the authenticated user's saved discovery state, or the default state on first use.
-- `PUT /api/discovery-state` accepts the same JSON state shape, validates size and fields, and writes it for the authenticated user.
+- `PUT /api/discovery-state` validates and writes the state for the authenticated user. The account ID comes from the session cookie; the request body cannot choose another user's row. Writes require a matching same-origin `Origin` header and are limited to 256 KiB.
+- `GET /api/account/export` downloads the signed-in account's profile and discovery state as JSON. It excludes password hashes, sessions, verification tokens, server addresses, and credentials.
+- `/account` provides the export link and account deletion flow. Deletion requires the current password and typed confirmation. The server protects the last active administrator and removes the account's discovery state and sessions.
 
-Both methods require a signed-in Better Auth session. The account ID always comes from the session cookie; request bodies cannot choose another user's row. Requests are limited to 256 KiB. Writes require a matching same-origin `Origin` header.
+## Administrator settings
 
-## Catalogue boundary
+`GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton `GlobalSettings` row. It stores the app name, default category, Adult-section flag, hashed invite code, private-network access flag, and optional SMTP configuration. Adult entries and Adult-only services remain unavailable until the administrator enables the section.
 
-`CatalogueEntry` is the normalized server-side catalogue table. It stores a stable local ID, source and source ID, category, display fields, genres, artwork reference, age restriction, content flags, visibility, and display order. `npm run db:seed` idempotently loads the current local fixtures. The discovery page reads active entries from PostgreSQL and falls back to the bundled fixtures if the table is empty or unavailable. Adult rows are filtered before they reach the browser unless both Adult gates are enabled.
+`GET /api/admin/users` returns a limited account list. Same-origin `PATCH /api/admin/users` disables or restores an account, revokes sessions when disabling, and protects the current and last active administrator. Administrator roles are managed from a trusted shell:
 
-TMDB search and import are available only when `TMDB_API_READ_ACCESS_TOKEN` and `TMDB_METADATA_ENABLED=true` are set on the server. Requests require an administrator session, use `include_adult=false`, reject adult-flagged results, and are not cached by the app. Imports re-fetch selected details server-side and store them in `CatalogueEntry`; imported records are limited to Movies, TV, or Anime. Anime search is narrowed to Japanese-language/origin animation. `/credits` contains TMDB attribution. Check provider retention terms before enabling this path in a hosted environment.
+```sh
+volta run pnpm admin:promote -- exact-account-email@example.com
+```
 
-ThePornDB and StashDB search/import require their server credential, their matching `*_METADATA_ENABLED=true` flag, `ADULT_SECTION_ENABLED=true`, and the Adult setting in PostgreSQL. Routes require an administrator session and re-fetch selected records before import. Records are stored only in the Adult category with an age restriction and adult flag; provider images are not requested or displayed. `GET /api/admin/providers/theporndb/search` and `/api/admin/providers/stashdb/search` search their respective sources. `POST` to each matching `/import` route adds a selected record.
+## Metadata sources
 
-`GET /api/admin/providers` requires an administrator session and returns only whether configured credentials exist plus provider feature-flag states. `GET /api/admin/providers/tmdb/search` searches TMDB; `POST /api/admin/providers/tmdb/import` imports one selected record and requires same-origin JSON.
+Metadata provider keys and enablement are saved through Admin → Metadata sources. The keys and optional TVDB PIN are encrypted before storage. The API reports only configured and enabled status; secrets are never returned to the browser.
 
-`GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton global settings. Adult can only be enabled when both the server flag and database setting allow it. `GET /api/admin/users` returns a limited account list; same-origin `PATCH /api/admin/users` disables or restores an account, revokes sessions when disabling, and protects the current and last active administrator.
+- TMDB search/import supports Movies, TV, and Anime. It uses `include_adult=false`, rejects adult-flagged results, and stores imported titles in `CatalogueEntry`. `/credits` contains TMDB attribution.
+- TheTVDB v4 search is configured with a project API key and optional subscriber PIN. TMDB artwork may be matched only when title and year match exactly.
+- ThePornDB and StashDB can be used for text-only Adult entries. Source artwork is not imported or displayed. Adult imports are marked age-restricted and stored in the Adult category.
 
-`/integrations` and `/api/integrations` are account-scoped. The API accepts same-origin create/update/delete requests, limits each account to 24 instances, encrypts configuration, and stores audit events with action, service, and connection name only. When the encryption key is available, `GET` returns service, name, and the owning account's server address, but never its credential. Adult connections require both Adult gates. `npm run integrations:rotate-key` rotates stored credentials atomically: stop the app, set `INTEGRATION_CREDENTIALS_OLD_KEY` to the old key and `INTEGRATION_CREDENTIALS_KEY` to a new key, run the command, then remove the old key and restart.
+All provider calls require an administrator session, an enabled provider, and saved credentials. No provider-specific environment flags are used. Review [provider-review.md](provider-review.md) before enabling provider calls on a hosted instance.
 
-Connection checks and requests run server-side, pin DNS resolution for each request, do not follow redirects, and limit response size and time. Raw service response bodies are not forwarded to the browser. By default, outbound connections must use public HTTPS addresses. A self-hosted operator can set `INTEGRATION_ALLOW_PRIVATE_NETWORKS=true` to reach private LAN services; only do this when the accounts allowed to use the instance are trusted, because it expands the server's outbound network access. `POST /api/integrations/:id/test` checks saved Seerr, Plex, Radarr, Sonarr, and Whisparr v2/v3 credentials. Whisparr checks require both Adult feature gates. Plex tokens are sent in the `X-Plex-Token` header. `POST /api/integrations/:id/availability` requires an account-saved, non-Adult, TMDB-linked title and returns only a Seerr availability value or a Plex in-library boolean. Plex lookup uses its library matching endpoint with the TMDB GUID, title, year, and media type; it does not enumerate or store library contents. `POST /api/integrations/:id/request` requires the title to be in the signed-in account's permanently saved list, rejects Adult or non-TMDB entries, checks for an existing library item or request, then sends the movie/TV TMDB ID to Seerr. Since a Seerr API key can grant administrative API access, each account should connect only its own Seerr instance and intentionally choose Request from the Saved list.
+## Shared media services
 
-The planned recommendation approach and required event data are in [`recommendation-algorithm-plan.md`](recommendation-algorithm-plan.md). The current discovery state is a UI snapshot, not a preference-learning event history; do not turn on personalization until the action history can distinguish pass, shortlist, review keep/remove/restore, save, and undo.
+Seerr, Plex, Radarr, Sonarr, Whisparr v2/v3, Stash, Jellyfin, and Emby are configured by administrators in Admin → Services. Each saved connection has an encrypted address and credential in `AdminServiceIntegration`; the key is never returned to the browser. Service settings are shared across the instance. Private and local network addresses are blocked by default; the administrator can allow them in Global settings for trusted homelab deployments.
+
+- `GET /api/admin/integrations` lists saved shared connections for administrators and returns a server address, but never a credential.
+- `POST /api/admin/integrations`, `PATCH /api/admin/integrations/:id`, and `DELETE /api/admin/integrations/:id` require an administrator session and a same-origin request.
+- `POST /api/admin/integrations/:id/test` checks supported services server-side. Seerr, Plex, Radarr, Sonarr, and Whisparr v2/v3 checks are available; connection tests do not expose raw service responses.
+- `GET /api/integrations` returns only the shared service names and IDs to signed-in users so the discovery UI can offer configured Seerr and Plex services. It never returns an address or credential.
+- `POST /api/integrations/:id/availability` checks the signed-in user's permanently saved, non-Adult, TMDB-linked title against a configured Seerr or Plex service.
+- `POST /api/integrations/:id/request` requires the title to be saved by the signed-in user, rejects Adult or non-TMDB entries, checks for an existing item or request, then sends the title to Seerr.
+
+Connection checks, availability checks, and requests run server-side, pin DNS resolution per request, do not follow redirects, and limit response size and time. Raw service response bodies are not forwarded to the browser. Since a Seerr API key may grant administrative API access, use a dedicated least-privilege service account where possible.
+
+To rotate the encryption key, stop the app, set the temporary `INTEGRATION_CREDENTIALS_OLD_KEY` to the current key and `INTEGRATION_CREDENTIALS_KEY` to a new key, then run `volta run pnpm integrations:rotate-key`. Remove the old key and restart the app after the rotation succeeds.
+
+## Catalogue and recommendation boundary
+
+`CatalogueEntry` is the normalized server-side catalogue table. `volta run pnpm db:seed` idempotently loads local fixtures. The discovery page reads active entries from PostgreSQL and falls back to fixtures when the table is empty or unavailable. Adult rows are filtered before they reach the browser unless Adult access is enabled.
+
+The planned recommendation approach and required event data are in [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md). The current discovery state is a UI snapshot, not a preference-learning event history; do not turn on personalization until the action history can distinguish pass, shortlist, review keep/remove/restore, save, and undo.
 
 ## Server helpers
 
 Import these only from server code:
 
-- `getSession(): Promise<AuthSession | null>` reads the current request cookies and returns the authenticated user/session or `null`.
-- `requireSession(): Promise<AuthSession>` returns the current session or throws `AuthenticationError` (HTTP status 401).
-- `requireAdmin(): Promise<AuthSession>` returns an administrator session or throws `AuthenticationError` / `AuthorizationError` (HTTP status 401/403).
-- `getDiscoveryState(): Promise<Prisma.JsonValue | null>` reads the current signed-in user's JSON state.
-- `saveDiscoveryState(state: Prisma.InputJsonValue): Promise<Prisma.JsonValue>` upserts the current signed-in user's state. The user ID always comes from the verified session, never caller input.
-- `getGlobalSettings()` returns public display settings with Adult enabled only if both the server flag and database setting are true.
+- `getSession()` reads the current request cookies and returns the authenticated user/session or `null`.
+- `requireSession()` returns the current session or throws `AuthenticationError` (HTTP 401).
+- `requireAdmin()` returns an administrator session or throws `AuthenticationError` / `AuthorizationError` (HTTP 401/403).
+- `getDiscoveryState()` reads the current signed-in user's JSON state.
+- `saveDiscoveryState(state)` upserts the current signed-in user's state using the verified session ID.
+- `getGlobalSettings()` returns public display settings from the database, including the Adult-section flag.
 
-## Database models and administrator bootstrap
+## Database models
 
-Better Auth owns the `User`, `Session`, `Account`, and `Verification` records. `User.role` defaults to `user`; on an empty installation, a serialized server-side database hook promotes the oldest account to administrator. For an existing installation that needs administrator recovery, promote an account from a trusted shell with:
-
-```sh
-npm run admin:promote -- exact-account-email@example.com
-```
-
-The command requires an exact existing email. It does not accept email or role values from signup requests.
-
-`DiscoveryState` stores the UI state as one JSON row per user, keyed by `userId`; it keeps decisions, temporary shortlist, saved titles, undo history, and review state together while the data model is evolving. `GlobalSettings` is a singleton row for app name, default category, and the Adult feature flag.
-
-## Reference documentation
-
-- [Better Auth with Next.js](https://better-auth.com/docs/integrations/next)
-- [Better Auth Prisma adapter](https://better-auth.com/docs/adapters/prisma)
-- [Better Auth email and password](https://better-auth.com/docs/concepts/email)
+Better Auth owns `User`, `Session`, `Account`, and `Verification`. On an empty installation, a serialized server-side hook promotes the first account to administrator. `DiscoveryState` stores per-account discovery data. `GlobalSettings` stores shared application options. `MetadataProviderCredential` stores encrypted metadata-provider keys. `AdminServiceIntegration` stores encrypted shared media-service connections.

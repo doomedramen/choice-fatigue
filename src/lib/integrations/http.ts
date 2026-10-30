@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import * as http from "node:http";
 import * as https from "node:https";
 import type { IntegrationConfig } from "@/lib/integrations/crypto";
+import { getGlobalSettings } from "@/lib/global-settings";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const DNS_TIMEOUT_MS = 3_000;
@@ -152,7 +153,7 @@ export async function requestIntegrationService(
   endpoint: string,
   options: { method?: "GET" | "POST"; body?: unknown; credentialHeader?: "x-api-key" | "x-plex-token" } = {},
 ): Promise<ServiceResponse> {
-  const allowPrivate = process.env.INTEGRATION_ALLOW_PRIVATE_NETWORKS === "true";
+  const allowPrivate = (await getGlobalSettings()).allowPrivateNetworkTargets;
   let target: URL;
   try {
     const base = new URL(config.baseUrl);

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, AuthenticationError, AuthorizationError } from "@/lib/auth-session";
 import { getGlobalSettings } from "@/lib/global-settings";
+import { getTvdbProviderStatus } from "@/lib/providers/tvdb-config";
+import { getTmdbProviderStatus } from "@/lib/providers/tmdb-config";
+import { getAdultMetadataProviderStatus } from "@/lib/providers/adult-metadata-config";
 
 function errorResponse(error: unknown) {
   if (error instanceof AuthenticationError) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
@@ -12,16 +15,20 @@ function errorResponse(error: unknown) {
 export async function GET() {
   try {
     await requireAdmin();
-    const tmdbCredentialConfigured = Boolean(process.env.TMDB_API_READ_ACCESS_TOKEN);
-    const thePornDbCredentialConfigured = Boolean(process.env.THEPORNDB_API_TOKEN);
-    const stashDbCredentialConfigured = Boolean(process.env.STASHDB_API_KEY);
-    const settings = await getGlobalSettings();
+    const [settings, tmdb, tvdb, theporndb, stashdb] = await Promise.all([
+      getGlobalSettings(),
+      getTmdbProviderStatus(),
+      getTvdbProviderStatus(),
+      getAdultMetadataProviderStatus("theporndb"),
+      getAdultMetadataProviderStatus("stashdb"),
+    ]);
     return NextResponse.json({
       adultSectionEnabled: settings.adultSectionEnabled,
       providers: {
-        tmdb: { credentialConfigured: tmdbCredentialConfigured, enabled: tmdbCredentialConfigured && process.env.TMDB_METADATA_ENABLED === "true", integration: "configured" },
-        theporndb: { credentialConfigured: thePornDbCredentialConfigured, enabled: settings.adultSectionEnabled && thePornDbCredentialConfigured && process.env.THEPORNDB_METADATA_ENABLED === "true", integration: "configured" },
-        stashdb: { credentialConfigured: stashDbCredentialConfigured, enabled: settings.adultSectionEnabled && stashDbCredentialConfigured && process.env.STASHDB_METADATA_ENABLED === "true", integration: "configured" },
+        tmdb: { ...tmdb, integration: "configured" },
+        tvdb: { ...tvdb, integration: "configured" },
+        theporndb: { ...theporndb, integration: "configured" },
+        stashdb: { ...stashdb, integration: "configured" },
       },
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

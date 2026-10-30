@@ -1,11 +1,11 @@
 import "server-only";
-import { decryptIntegrationConfig, integrationEncryptionContext } from "@/lib/integrations/crypto";
+import { adminIntegrationEncryptionContext, decryptIntegrationConfig } from "@/lib/integrations/crypto";
 import { IntegrationRequestError } from "@/lib/integrations/request";
 import { prisma } from "@/lib/prisma";
 
 export async function getSavedTmdbTitle(userId: string, integrationId: string, catalogueEntryId: string, service: "seerr" | "plex") {
   const [connection, discovery, entry] = await Promise.all([
-    prisma.userIntegration.findFirst({ where: { id: integrationId, userId } }),
+    prisma.adminServiceIntegration.findUnique({ where: { id: integrationId } }),
     prisma.discoveryState.findUnique({ where: { userId }, select: { state: true } }),
     prisma.catalogueEntry.findFirst({ where: { id: catalogueEntryId, active: true } }),
   ]);
@@ -25,7 +25,7 @@ export async function getSavedTmdbTitle(userId: string, integrationId: string, c
     throw new IntegrationRequestError(409, `This title has no supported TMDB link for ${serviceName}.`);
   }
 
-  const config = decryptIntegrationConfig(connection.encryptedConfig, integrationEncryptionContext(connection.userId, connection.id));
+  const config = decryptIntegrationConfig(connection.encryptedConfig, adminIntegrationEncryptionContext(connection.id));
   return { connection, entry, config, mediaType: sourceMatch[1] as "movie" | "tv", tmdbId };
 }
 

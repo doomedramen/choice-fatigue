@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { requireAdmin, AuthenticationError, AuthorizationError } from "@/lib/auth-session";
 import { prisma } from "@/lib/prisma";
+import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 
 export async function GET() {
   try {
@@ -42,8 +43,11 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Account could not be updated." }, { status: 500 });
   }
 
-  const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
+  try { requireSameOrigin(request); }
+  catch (error) {
+    if (error instanceof IntegrationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: "Request origin is not allowed." }, { status: 403 });
+  }
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return NextResponse.json({ error: "Expected a JSON request." }, { status: 400 });
   const contentLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > 4096) return NextResponse.json({ error: "Request body is too large." }, { status: 413 });

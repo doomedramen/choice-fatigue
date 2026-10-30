@@ -1,26 +1,25 @@
 import "server-only";
 import nodemailer, { type Transporter } from "nodemailer";
+import { getEnabledSmtpSettings } from "@/lib/global-settings";
 
 type AuthMessage = { to: string; subject: string; text: string };
 
-function canUseConsoleDelivery() {
-  return process.env.NODE_ENV === "development" && process.env.AUTH_EMAIL_MODE === "console";
-}
-
 let transporter: Transporter | undefined;
+let activeSmtpUrl: string | undefined;
 
 export async function sendAuthEmail(message: AuthMessage) {
-  if (canUseConsoleDelivery()) {
+  const settings = await getEnabledSmtpSettings();
+  if (!settings && process.env.NODE_ENV === "development") {
     console.info(`[Choice Fatigue auth email: ${message.subject}] To: ${message.to}\n${message.text}`);
     return;
   }
-
-  const smtpURL = process.env.SMTP_URL;
-  const from = process.env.SMTP_FROM;
-  if (process.env.AUTH_EMAIL_MODE !== "smtp" || !smtpURL || !from) {
+  if (!settings) {
     throw new Error("Authentication email is not configured.");
   }
 
-  transporter ??= nodemailer.createTransport(smtpURL);
-  await transporter.sendMail({ from, to: message.to, subject: message.subject, text: message.text });
+  if (!transporter || activeSmtpUrl !== settings.smtpUrl) {
+    transporter = nodemailer.createTransport(settings.smtpUrl);
+    activeSmtpUrl = settings.smtpUrl;
+  }
+  await transporter.sendMail({ from: settings.smtpFrom, to: message.to, subject: message.subject, text: message.text });
 }

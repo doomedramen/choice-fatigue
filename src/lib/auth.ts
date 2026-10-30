@@ -4,6 +4,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "@/lib/prisma";
 import { sendAuthEmail } from "@/lib/auth-email";
+import { hasValidBetaInviteCode } from "@/lib/global-settings";
 
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:4173";
 const secret = process.env.BETTER_AUTH_SECRET;
@@ -119,9 +120,9 @@ export const auth = betterAuth({
       const accountCount = await prisma.user.count();
       if (accountCount === 0) return;
 
-      const inviteCode = process.env.BETA_INVITE_CODE;
       const suppliedCode = ctx.headers?.get("x-beta-invite-code");
-      if (!inviteCode || !suppliedCode || suppliedCode !== inviteCode) {
+      const inviteIsValid = suppliedCode ? await hasValidBetaInviteCode(suppliedCode) : false;
+      if (!inviteIsValid) {
         const suppliedEmail = (ctx.body as { email?: unknown } | undefined)?.email;
         if (accountCount === 1 && typeof suppliedEmail === "string") {
           const existingAccount = await prisma.user.findFirst({

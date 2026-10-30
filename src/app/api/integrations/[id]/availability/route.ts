@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (typeof catalogueEntryId !== "string" || catalogueEntryId.length > 128) return jsonError("Choose a saved title to check.", 400);
 
     const { id } = await params;
-    const connection = await prisma.userIntegration.findFirst({ where: { id, userId: session.user.id }, select: { service: true } });
+    const connection = await prisma.adminServiceIntegration.findUnique({ where: { id }, select: { service: true } });
     if (!connection) return jsonError("Connection not found.", 404);
     if (connection.service === "seerr") {
       const title = await getSavedSeerrTitle(session.user.id, id, catalogueEntryId);

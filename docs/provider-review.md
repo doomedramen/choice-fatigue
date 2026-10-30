@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-10-30
 
-This is an implementation planning record, not a legal determination. TMDB search/import and text-only ThePornDB/StashDB search/import are implemented behind server-only opt-ins. The admin status endpoint only reports whether server environment variables are present and enabled; it never returns credentials or validates a provider key.
+This is an implementation planning record, not a legal determination. TMDB search/import and text-only ThePornDB/StashDB search/import are implemented behind administrator-managed settings. Provider credentials are encrypted in PostgreSQL; the admin status endpoint reports only whether a credential is configured and whether its source is enabled. It never returns credentials or validates a provider key.
 
 ## TMDB
 
@@ -15,7 +15,7 @@ Sources: [TMDB FAQ](https://developer.themoviedb.org/docs/faq), [application aut
 
 ## ThePornDB and StashDB
 
-The Stash documentation explicitly lists StashDB and ThePornDB as supported Stash-Box sources and explains how to connect either to a user's Stash installation. ThePornDB also publishes API docs for scene, movie, performer, and related metadata. Choice Fatigue uses ThePornDB and StashDB for Adult-category records, with server-side credentials and no source artwork.
+The Stash documentation explicitly lists StashDB and ThePornDB as supported Stash-Box sources and explains how to connect either to a user's Stash installation. ThePornDB also publishes API docs for scene, movie, performer, and related metadata. Choice Fatigue uses ThePornDB and StashDB for Adult-category records, with administrator-managed encrypted credentials and no source artwork.
 
 The Stash guide describes pulling metadata into a local Stash library. It does not document Choice Fatigue's hosted deployment, request-volume, or cache policy, so those details remain a launch check. This does not block building the server adapters against the documented endpoints.
 

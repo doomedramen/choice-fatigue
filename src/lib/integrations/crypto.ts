@@ -19,6 +19,11 @@ export interface IntegrationConfig {
   apiKey: string;
 }
 
+export interface MetadataProviderConfig {
+  apiKey: string;
+  subscriberPin: string;
+}
+
 export function parseIntegrationEncryptionKey(value: string | undefined) {
   if (!value || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new IntegrationEncryptionUnavailableError();
   const key = Buffer.from(value, "base64");
@@ -27,8 +32,9 @@ export function parseIntegrationEncryptionKey(value: string | undefined) {
 }
 
 export function isIntegrationEncryptionConfigured() {
+  const value = process.env.INTEGRATION_CREDENTIALS_KEY;
   try {
-    parseIntegrationEncryptionKey(process.env.INTEGRATION_CREDENTIALS_KEY);
+    parseIntegrationEncryptionKey(value);
     return true;
   } catch {
     return false;
@@ -68,6 +74,68 @@ export function decryptIntegrationConfig(ciphertext: string, context: string, va
   }
 }
 
+export function encryptMetadataProviderConfig(config: MetadataProviderConfig, provider: string, value = process.env.INTEGRATION_CREDENTIALS_KEY) {
+  const key = parseIntegrationEncryptionKey(value);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`choice-fatigue:metadata-provider:${provider}`));
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(config), "utf8"), cipher.final()]);
+  return `v1.${Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64")}`;
+}
+
+export function decryptMetadataProviderConfig(ciphertext: string, provider: string, value = process.env.INTEGRATION_CREDENTIALS_KEY): MetadataProviderConfig {
+  try {
+    const [version, payload] = ciphertext.split(".");
+    if (version !== "v1" || !payload) throw new Error("Unknown ciphertext version.");
+    const packed = Buffer.from(payload, "base64");
+    if (packed.byteLength < 29) throw new Error("Ciphertext is too short.");
+    const key = parseIntegrationEncryptionKey(value);
+    const iv = packed.subarray(0, 12);
+    const tag = packed.subarray(12, 28);
+    const encrypted = packed.subarray(28);
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAAD(Buffer.from(`choice-fatigue:metadata-provider:${provider}`));
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+    const config = JSON.parse(plaintext) as Partial<MetadataProviderConfig>;
+    if (typeof config.apiKey !== "string" || typeof config.subscriberPin !== "string") throw new Error("Invalid config payload.");
+    return { apiKey: config.apiKey, subscriberPin: config.subscriberPin };
+  } catch (error) {
+    if (error instanceof IntegrationEncryptionUnavailableError) throw error;
+    throw new IntegrationCiphertextError();
+  }
+}
+
+export function encryptApplicationSecret(secret: string, purpose: string, value = process.env.INTEGRATION_CREDENTIALS_KEY) {
+  const key = parseIntegrationEncryptionKey(value);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`choice-fatigue:application-secret:${purpose}`));
+  const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+  return `v1.${Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64")}`;
+}
+
+export function decryptApplicationSecret(ciphertext: string, purpose: string, value = process.env.INTEGRATION_CREDENTIALS_KEY) {
+  try {
+    const [version, payload] = ciphertext.split(".");
+    if (version !== "v1" || !payload) throw new Error("Unknown ciphertext version.");
+    const packed = Buffer.from(payload, "base64");
+    if (packed.byteLength < 29) throw new Error("Ciphertext is too short.");
+    const key = parseIntegrationEncryptionKey(value);
+    const decipher = createDecipheriv("aes-256-gcm", key, packed.subarray(0, 12));
+    decipher.setAAD(Buffer.from(`choice-fatigue:application-secret:${purpose}`));
+    decipher.setAuthTag(packed.subarray(12, 28));
+    return Buffer.concat([decipher.update(packed.subarray(28)), decipher.final()]).toString("utf8");
+  } catch (error) {
+    if (error instanceof IntegrationEncryptionUnavailableError) throw error;
+    throw new IntegrationCiphertextError();
+  }
+}
+
 export function integrationEncryptionContext(userId: string, integrationId: string) {
   return `choice-fatigue:user-integration:${userId}:${integrationId}`;
+}
+
+export function adminIntegrationEncryptionContext(integrationId: string) {
+  return `choice-fatigue:admin-service-integration:${integrationId}`;
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getGlobalSettings } from "@/lib/global-settings";
-import { serverConfig } from "@/lib/server-config";
+import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 
 export const thePornDBKinds = ["scene", "movie"] as const;
 export type ThePornDBKind = (typeof thePornDBKinds)[number];
@@ -28,14 +28,13 @@ export class ThePornDBInvalidRecordError extends Error {}
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 async function accessToken() {
-  const token = process.env.THEPORNDB_API_TOKEN;
-  if (process.env.THEPORNDB_METADATA_ENABLED !== "true" || !token || !serverConfig.adultSectionEnabled) {
-    throw new ThePornDBNotEnabledError();
-  }
-
   const settings = await getGlobalSettings();
   if (!settings.adultSectionEnabled) throw new ThePornDBNotEnabledError();
-  return token;
+  try {
+    return (await getEnabledAdultMetadataProviderConfig("theporndb")).apiKey;
+  } catch {
+    throw new ThePornDBNotEnabledError();
+  }
 }
 
 async function requestThePornDB<T>(path: string, token: string): Promise<T> {
