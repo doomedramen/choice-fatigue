@@ -1,7 +1,7 @@
 # Choice Fatigue: product roadmap
 
 **Status:** implementation in progress
-**Checkpoint:** server foundation and account data controls are implemented; database-backed runtime validation is still pending.
+**Checkpoint:** server foundation, account data controls, fixture catalogue, and protected provider-readiness status are implemented; database-backed runtime validation is still pending.
 **Planning assumption:** begin with a small invite beta; expand after the core discovery loop and provider terms are settled.
 
 ## Where the project is today
@@ -38,13 +38,12 @@ The app now has invite-only Better Auth accounts, required email verification, p
 - Add caching, request limits, timeouts, retries, provider health status, and a way to fall back to cached or seeded catalogue data.
 - Evaluate Anime coverage against a representative list before adding a dedicated anime provider.
 
-**Progress:** the normalized catalogue model, fixture seeder, server loader, and empty-table fallback are implemented. Provider adapters, live metadata, attribution, caching, and provider-health handling remain open.
+**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, and protected status reporting are implemented. No provider API calls are active. Live metadata, attribution, caching, and provider-health handling remain open.
 
 **Provider notes:**
 
 - **TMDB:** its FAQ says the developer API is free for non-commercial use with attribution, and commercial use requires contacting TMDB. It also says its data and images may not be used in connection with pornographic content. This creates an unresolved conflict with a single Choice Fatigue product that includes an Adult section. Get written guidance from TMDB or keep the TMDB-powered experience and Adult experience separate before launch. [TMDB API FAQ](https://developer.themoviedb.org/docs/faq)
-- **StashDB:** the Stash community documents a GraphQL endpoint and per-user API key for accessing scene, performer, and studio metadata. Validate its fields and permitted use for this product before building the adapter. [StashDB access guide](https://guidelines.stashdb.org/docs/faq_getting-started/stashdb/accessing-stashdb/), [stash-box API project](https://github.com/stashapp/stash-box)
-- **The Poster Database (TPDb):** I could not confirm a supported public API or API terms from official documentation during this planning pass. Do not build around scraping. Ask TPDb about supported access and image display rights; otherwise use artwork from a provider with a documented API or locally created placeholder art.
+- **ThePornDB and StashDB:** Stash's docs list both as supported Stash-Box metadata sources, and ThePornDB publishes API documentation for scenes and movies. Choice Fatigue will use them for Adult metadata, with credentials kept on the server and no explicit artwork in the first integration. The Stash guide describes a local Stash installation, so request-volume and cache behavior still need to be confirmed for the hosted beta. [Stash guide](https://docs.stashapp.cc/beginner-guides/guide-to-scraping/), [Stash-Box instances](https://docs.stashapp.cc/metadata-sources/stash-box-instances/), [ThePornDB API docs](https://api.theporndb.net/docs), [StashDB access guide](https://guidelines.stashdb.org/docs/faq_getting-started/stashdb/accessing-stashdb/)
 
 **Exit condition:** the app can serve a reliable, attributed catalogue through one provider adapter without putting credentials in the client, and provider failures do not break discovery.
 
@@ -82,6 +81,6 @@ Use beta feedback to choose among collaborative sessions, shareable shortlists, 
 ## Immediate next steps
 
 1. Start PostgreSQL, apply the migration, and exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence.
-2. Confirm provider terms and the Adult-content boundary before connecting TMDB, TPDb, or StashDB; keep Adult disabled meanwhile.
-3. Add one permitted provider adapter with attribution and cache behavior.
+2. Confirm TMDB's cache/retention terms and the Adult-content boundary; confirm ThePornDB/StashDB request-volume and cache guidance for hosted use.
+3. Add provider adapters: TMDB for Movies/TV/Anime and ThePornDB/StashDB for Adult, keeping source data separate and credentials server-only.
 4. Choose hosting and rehearse database backup restoration before inviting anyone outside local development.

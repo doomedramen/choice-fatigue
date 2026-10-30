@@ -38,12 +38,12 @@ For a code check, run `npm run typecheck`. Before `npm run build`, set a non-emp
 - Temporary shortlists stay separate from permanently saved titles.
 - Discovery state is saved to PostgreSQL per account. Existing browser prototype data is imported once when the account has no saved server session.
 - `/account` downloads a JSON copy of the profile and discovery state. Permanent deletion requires the current password and typed confirmation.
-- `/admin` is restricted to administrators. Global app defaults are saved in PostgreSQL; admins can list accounts and disable or restore access.
+- `/admin` is restricted to administrators. Global app defaults are saved in PostgreSQL; admins can list accounts, disable or restore access, and see whether provider credentials exist on the server without exposing their values. `/provider-review` records provider scope and remaining implementation checks.
 - The catalogue is stored in a normalized PostgreSQL table. `npm run db:seed` loads the local fixtures; the app falls back to fixtures if the catalogue table has no entries.
 - Sign-up is invite-only and requires email verification. Sign-in and password recovery use the configured email delivery mode.
 - Adult is disabled by default and remains unavailable until both the server flag and admin setting enable it. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 
-Metadata source cards are planning placeholders. No provider API calls or real API credentials are used. The example catalogue and artwork are local.
+No provider API calls are active. Provider readiness only reports credential presence from protected server-side checks; it does not validate credentials or connect to the service. The example catalogue and artwork are local.
 
 ## Configuration for a shared deployment
 
