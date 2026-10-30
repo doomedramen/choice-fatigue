@@ -86,12 +86,13 @@ button:active:not(:disabled) { transform: scale(.98); }
 .deck-meta { display: flex; justify-content: space-between; margin: 0 2px 10px; color: #c0c9d8; font-size: 12px; font-weight: 800; letter-spacing: .7px; }
 .deck-meta i { padding: 0 4px; color: #75839c; font-style: normal; }
 .deck-meta small { color: #8794aa; font-size: 12px; }
-.card-stack { position: relative; display: grid; padding: 0 6px 8px; touch-action: pan-y; }
-.card-stack.has-next-card { padding-bottom: 102px; }
-.media-card { position: relative; z-index: 1; display: grid; grid-area: 1 / 1; grid-template-rows: minmax(0, 3fr) minmax(0, 1fr); aspect-ratio: 3 / 4; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
+.card-stack { --card-inset: 6px; position: relative; isolation: isolate; display: grid; padding: 0 6px 8px; touch-action: pan-y; }
+.card-stack.has-next-card::before, .card-stack.has-next-card::after { position: absolute; z-index: 0; top: 4px; right: calc(var(--card-inset) - 5px); bottom: 0; left: calc(var(--card-inset) + 5px); border: 1px solid #38445c; border-radius: 16px; content: ""; pointer-events: none; }
+.card-stack.has-next-card::before { background: #202a3d; box-shadow: 0 12px 26px #0004; transform: rotate(.9deg); }
+.card-stack.has-next-card::after { top: 2px; right: calc(var(--card-inset) - 9px); bottom: -1px; left: calc(var(--card-inset) + 9px); background: #192234; box-shadow: 0 14px 30px #0005; transform: rotate(1.7deg); }
+.media-card { position: relative; z-index: 2; display: grid; grid-area: 1 / 1; grid-template-rows: minmax(0, 3fr) minmax(0, 1fr); aspect-ratio: 3 / 4; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
 .media-card.control-exit { transition: box-shadow 160ms ease-out, transform 230ms var(--ease-out), opacity 170ms ease-out; }
-.media-card.card-under { position: absolute; top: 0; right: 0; left: 0; z-index: 0; transform: translate(12px, 100px) scale(.98); box-shadow: 0 14px 30px #0005; pointer-events: none; transition: transform 180ms var(--ease-out), box-shadow 160ms ease-out; }
-.media-card.card-under.card-promoting { transform: translate(0, 0) scale(1); }
+.media-card.card-under { z-index: 1; box-shadow: none; pointer-events: none; }
 .media-card.card-under .card-poster, .media-card.card-under .card-content { pointer-events: none; }
 .media-card.drag-keep { box-shadow: 0 18px 42px #7151e966; }
 .media-card.drag-pass { box-shadow: 0 18px 42px #f06e5e66; }
@@ -128,15 +129,6 @@ button:active:not(:disabled) { transform: scale(.98); }
 .card-poster .poster-artwork { object-fit: contain; }
 .card-poster .poster-copy, .card-poster .poster-year { display: none; }
 .card-content { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: 9px 12px; }
-.card-under-content { display: grid; grid-template-columns: clamp(52px, 15%, 72px) minmax(0,1fr); align-items: center; gap: 10px; padding: 8px 12px; }
-.card-under-poster { width: 100%; aspect-ratio: 2 / 3; border: 1px solid #ffffff2b; border-radius: 6px; }
-.card-under-poster .poster-copy, .card-under-poster .poster-year { display: none; }
-.card-under-copy { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
-.card-under-copy .card-overline { gap: 5px; font-size: 9px; letter-spacing: .2px; }
-.card-under-copy .card-overline span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-under-copy h2 { display: -webkit-box; overflow: hidden; margin: 0; color: #fff; font-family: "Manrope", sans-serif; font-size: clamp(15px, 4vw, 20px); font-weight: 800; line-height: 1.05; letter-spacing: -.4px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.card-under-copy .tag-row { flex-wrap: nowrap; gap: 4px; overflow: hidden; }
-.card-under-copy .tag-row span { overflow: hidden; padding: 3px 5px; font-size: 9px; text-overflow: ellipsis; }
 .card-overline { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #bac4d5; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
 .card-overline svg { width: 15px; height: 15px; margin-right: 3px; color: #b8a4ff; vertical-align: middle; }
 .card-content .card-overline { font-size: 10px; }
@@ -318,10 +310,7 @@ button:active:not(:disabled) { transform: scale(.98); }
   .discover-intro h1, .review-head h1 { font-size: clamp(42px, 5vw, 58px); }
   .discover-intro p, .review-head p { font-size: 16px; }
   .deck-wrap { margin-top: 4px; }
-  .card-stack { padding: 0 11px 10px; }
-  .card-stack.has-next-card { padding-bottom: 118px; }
-  .media-card.card-under { transform: translate(14px, 116px) scale(.98); }
-  .media-card.card-under.card-promoting { transform: translate(0, 0) scale(1); }
+  .card-stack { --card-inset: 11px; padding: 0 11px 10px; }
   .card-content { padding: clamp(10px, 1.6vw, 16px); }
   .card-content h2 { font-size: clamp(20px, 2.5vw, 26px); }
   .decision-row { gap: 25px; margin: 19px 0 8px; }

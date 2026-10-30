@@ -109,7 +109,6 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const [plexAvailabilityResults, setPlexAvailabilityResults] = useState<Record<string, { inLibrary: boolean; message: string }>>({});
   const [notice, setNotice] = useState("");
   const [cardExiting, setCardExiting] = useState(false);
-  const [promotingItemId, setPromotingItemId] = useState<string | null>(null);
   const drag = useRef<{ x:number }|null>(null);
   const swipeExit = useRef(false);
   const mediaCard = useRef<HTMLElement|null>(null);
@@ -287,7 +286,6 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     const element=mediaCard.current;
     if (!element) { decide(decision); return; }
     swipeExit.current=true;
-    setPromotingItemId(nextItem?.id ?? null);
     setCardExiting(true);
     element.style.transform=`translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
     element.style.opacity="0";
@@ -297,7 +295,6 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     const handoffDelay=window.matchMedia("(prefers-reduced-motion: reduce)").matches?0:source==="control"?230:150;
     window.setTimeout(()=>{
       swipeExit.current=false;
-      setPromotingItemId(null);
       setCardExiting(false);
       decide(decision);
     },handoffDelay);
@@ -375,13 +372,10 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   }
 
   function renderMediaCard(candidate: MediaItem, active: boolean) {
-    const className = active
-      ? "media-card card-active"
-      : `media-card card-under${promotingItemId === candidate.id ? " card-promoting" : ""}`;
     return <article
       key={candidate.id}
       ref={active ? mediaCard : null}
-      className={className}
+      className={`media-card ${active ? "card-active" : "card-under"}`}
       tabIndex={active ? 0 : -1}
       aria-hidden={active ? undefined : true}
       aria-label={active ? `${candidate.title}, ${candidate.year}. Use left and right arrow keys to pass or shortlist.` : undefined}
@@ -391,21 +385,14 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
       onPointerCancel={active ? onCardPointerCancel : undefined}
     >
       <Poster item={candidate} className="card-poster" loading="eager"/>
-      {active ? <div className="card-content">
+      <div className="card-content">
           <div className="card-overline"><span>{candidate.type} · {candidate.year}</span><span><Icon name="spark"/> {candidate.rating}</span></div>
           <h2>{candidate.title}</h2>
           <div className="card-footer">
             <div className="tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{candidate.runtime}</span></div>
-            <button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`More about ${candidate.title}`}><Icon name="info"/><span>Details</span></button>
+            {active && <button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`More about ${candidate.title}`}><Icon name="info"/><span>Details</span></button>}
           </div>
-        </div> : <div className="card-content card-under-content">
-          <Poster item={candidate} className="card-under-poster" loading="eager"/>
-          <div className="card-under-copy">
-            <div className="card-overline"><span>{candidate.type} · {candidate.year}</span><span>★ {candidate.rating}</span></div>
-            <h2>{candidate.title}</h2>
-            <div className="tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{candidate.runtime}</span></div>
-          </div>
-        </div>}
+        </div>
       {active && <><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div></>}
     </article>;
   }
