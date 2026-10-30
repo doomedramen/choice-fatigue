@@ -150,7 +150,7 @@ async function resolveTarget(hostname: string, allowPrivate: boolean): Promise<L
 export async function requestIntegrationService(
   config: IntegrationConfig,
   endpoint: string,
-  options: { method?: "GET" | "POST"; body?: unknown } = {},
+  options: { method?: "GET" | "POST"; body?: unknown; credentialHeader?: "x-api-key" | "x-plex-token" } = {},
 ): Promise<ServiceResponse> {
   const allowPrivate = process.env.INTEGRATION_ALLOW_PRIVATE_NETWORKS === "true";
   let target: URL;
@@ -176,7 +176,11 @@ export async function requestIntegrationService(
   const headers: http.OutgoingHttpHeaders = {
     accept: "application/json",
     "accept-encoding": "identity",
-    "x-api-key": config.apiKey,
+    [options.credentialHeader ?? "x-api-key"]: config.apiKey,
+    ...(options.credentialHeader === "x-plex-token" ? {
+      "x-plex-client-identifier": "choice-fatigue-web",
+      "x-plex-product": "Choice Fatigue",
+    } : {}),
     ...(body ? { "content-type": "application/json", "content-length": body.byteLength } : {}),
   };
   const requestPath = `${target.pathname}${target.search}`;

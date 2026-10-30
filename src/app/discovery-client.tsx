@@ -61,9 +61,10 @@ interface DiscoveryClientProps {
   adultSectionEnabled: boolean;
   mediaItems: MediaItem[];
   seerrConnections: Array<{ id: string; name: string }>;
+  plexConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems, seerrConnections }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems, seerrConnections, plexConnections }: DiscoveryClientProps) {
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -73,10 +74,13 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const [ageOpen, setAgeOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
+  const [selectedPlexId, setSelectedPlexId] = useState(plexConnections[0]?.id ?? "");
   const [requestingKey, setRequestingKey] = useState("");
   const [requestMessages, setRequestMessages] = useState<Record<string, string>>({});
   const [availabilityCheckingKey, setAvailabilityCheckingKey] = useState("");
   const [availabilityResults, setAvailabilityResults] = useState<Record<string, { status: string | null; message: string; ok: boolean }>>({});
+  const [plexAvailabilityCheckingKey, setPlexAvailabilityCheckingKey] = useState("");
+  const [plexAvailabilityResults, setPlexAvailabilityResults] = useState<Record<string, { inLibrary: boolean; message: string }>>({});
   const [notice, setNotice] = useState("");
   const [cardExiting, setCardExiting] = useState(false);
   const drag = useRef<{ x:number }|null>(null);
@@ -163,7 +167,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     window.setTimeout(() => setNotice(""), 2100);
   }
   async function requestSavedTitle(pick: MediaItem) {
-    if (!selectedSeerrId || !pick.requestable || requestingKey || availabilityCheckingKey) return;
+    if (!selectedSeerrId || !pick.requestable || requestingKey || availabilityCheckingKey || plexAvailabilityCheckingKey) return;
     const key = `${selectedSeerrId}:${pick.id}`;
     setRequestingKey(key);
     setRequestMessages(current => ({ ...current, [key]: "" }));
@@ -191,7 +195,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     }
   }
   async function checkSavedAvailability(pick: MediaItem) {
-    if (!selectedSeerrId || !pick.requestable || availabilityCheckingKey || requestingKey) return;
+    if (!selectedSeerrId || !pick.requestable || availabilityCheckingKey || requestingKey || plexAvailabilityCheckingKey) return;
     const key = `${selectedSeerrId}:${pick.id}`;
     setAvailabilityCheckingKey(key);
     setAvailabilityResults(current => ({ ...current, [key]: { status: null, message: "Checking Seerr…", ok: false } }));
@@ -211,6 +215,27 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
       setAvailabilityResults(current => ({ ...current, [key]: { status: null, message: cause instanceof Error ? cause.message : "Seerr availability could not be checked.", ok: false } }));
     } finally {
       setAvailabilityCheckingKey("");
+    }
+  }
+  async function checkSavedPlexAvailability(pick: MediaItem) {
+    if (!selectedPlexId || !pick.requestable || plexAvailabilityCheckingKey || availabilityCheckingKey || requestingKey) return;
+    const key = `${selectedPlexId}:${pick.id}`;
+    setPlexAvailabilityCheckingKey(key);
+    setPlexAvailabilityResults(current => ({ ...current, [key]: { inLibrary: false, message: "Checking Plex…" } }));
+    try {
+      const response = await fetch(`/api/integrations/${selectedPlexId}/availability`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ catalogueEntryId: pick.id }),
+      });
+      if (response.status === 401) { window.location.replace("/sign-in"); return; }
+      const data = await response.json() as { inLibrary?: boolean; error?: string };
+      if (!response.ok || typeof data.inLibrary !== "boolean") throw new Error(data.error || "Plex could not check this title.");
+      setPlexAvailabilityResults(current => ({ ...current, [key]: { inLibrary: data.inLibrary === true, message: data.inLibrary ? "In your Plex library" : "Not in your Plex library" } }));
+    } catch (cause) {
+      setPlexAvailabilityResults(current => ({ ...current, [key]: { inLibrary: false, message: cause instanceof Error ? cause.message : "Plex could not check this title." } }));
+    } finally {
+      setPlexAvailabilityCheckingKey("");
     }
   }
   function decide(decision:Decision) {
@@ -383,14 +408,19 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
         <div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div>
         <h2 id="saved-title">Saved for later</h2>
         <p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>
-        {saved.length > 0 && seerrConnections.length > 0 && <label className="saved-connection-select">Send requests to
+        {saved.length > 0 && seerrConnections.length > 0 && <label className="saved-connection-select">Seerr server
           <select value={selectedSeerrId} onChange={event => setSelectedSeerrId(event.target.value)}>{seerrConnections.map(connection => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select>
         </label>}
-        {saved.length > 0 && seerrConnections.length === 0 && <p className="saved-connect-prompt">Connect a Seerr server to check availability or request eligible titles. <a href="/integrations">Manage connections →</a></p>}
+        {saved.length > 0 && plexConnections.length > 0 && <label className="saved-connection-select">Plex library
+          <select value={selectedPlexId} onChange={event => setSelectedPlexId(event.target.value)}>{plexConnections.map(connection => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select>
+        </label>}
+        {saved.length > 0 && seerrConnections.length === 0 && plexConnections.length === 0 && <p className="saved-connect-prompt">Connect Seerr to request eligible titles or Plex to check what’s already in your library. <a href="/integrations">Manage connections →</a></p>}
         {saved.length ? <div className="saved-grid">{saved.map(pick => {
           const key = `${selectedSeerrId}:${pick.id}`;
+          const plexKey = `${selectedPlexId}:${pick.id}`;
           const requestMessage = requestMessages[key];
           const availability = availabilityResults[key];
+          const plexAvailability = plexAvailabilityResults[plexKey];
           const message = requestMessage || availability?.message;
           const requestSent = requestMessage?.startsWith("Request sent") === true;
           const tracked = requestSent || (availability?.status ? seerrTrackedStatuses.has(availability.status) : false);
@@ -399,11 +429,15 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
             <Poster item={pick} className="saved-poster" />
             <div className="saved-item-copy"><strong>{pick.title}</strong><small>{pick.year} · {pick.category}</small>
               {message && <small className={messageIsPositive ? "request-success" : "request-feedback"} role="status">{message}</small>}
+              {plexAvailability && <small className={plexAvailability.inLibrary ? "request-success" : plexAvailability.message.startsWith("Not in your Plex") || plexAvailability.message.startsWith("Checking Plex") ? "request-neutral" : "request-feedback"} role="status">{plexAvailability.message}</small>}
             </div>
-            {pick.requestable && seerrConnections.length > 0 ? <div className="saved-actions">
-              <button className="saved-availability-button" type="button" onClick={() => void checkSavedAvailability(pick)} disabled={!selectedSeerrId || availabilityCheckingKey !== "" || requestingKey !== "" || saveStatus === "saving"} aria-label={`Check ${pick.title} in Seerr`}>{availabilityCheckingKey === key ? "Checking…" : "Check"}</button>
-              <button className="saved-request-button" type="button" onClick={() => void requestSavedTitle(pick)} disabled={!selectedSeerrId || requestingKey !== "" || availabilityCheckingKey !== "" || saveStatus === "saving" || tracked}>{saveStatus === "saving" ? "Syncing…" : requestingKey === key ? "Sending…" : tracked ? "Tracked" : "Request"}</button>
-            </div> : <span className="saved-request-note">{pick.requestable ? "Connect Seerr" : "TMDB link needed"}</span>}
+            {pick.requestable && (seerrConnections.length > 0 || plexConnections.length > 0) ? <div className="saved-actions">
+              {seerrConnections.length > 0 && <>
+                <button className="saved-availability-button" type="button" onClick={() => void checkSavedAvailability(pick)} disabled={!selectedSeerrId || availabilityCheckingKey !== "" || requestingKey !== "" || plexAvailabilityCheckingKey !== "" || saveStatus === "saving"} aria-label={`Check ${pick.title} in Seerr`}>{availabilityCheckingKey === key ? "Checking…" : "Seerr check"}</button>
+                <button className="saved-request-button" type="button" onClick={() => void requestSavedTitle(pick)} disabled={!selectedSeerrId || requestingKey !== "" || availabilityCheckingKey !== "" || plexAvailabilityCheckingKey !== "" || saveStatus === "saving" || tracked}>{saveStatus === "saving" ? "Syncing…" : requestingKey === key ? "Sending…" : tracked ? "Tracked" : "Request"}</button>
+              </>}
+              {plexConnections.length > 0 && <button className="saved-availability-button" type="button" onClick={() => void checkSavedPlexAvailability(pick)} disabled={!selectedPlexId || plexAvailabilityCheckingKey !== "" || availabilityCheckingKey !== "" || requestingKey !== "" || saveStatus === "saving"} aria-label={`Check ${pick.title} in Plex`}>{plexAvailabilityCheckingKey === plexKey ? "Checking…" : "Plex check"}</button>}
+            </div> : <span className="saved-request-note">{pick.requestable ? "Connect Seerr or Plex" : "TMDB link needed"}</span>}
           </div>;
         })}</div> : <div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}
         <button className="button button-dark saved-done" onClick={() => setSavedOpen(false)}>Done</button>

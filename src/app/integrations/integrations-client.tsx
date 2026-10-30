@@ -168,14 +168,14 @@ export default function IntegrationsClient({ adultSectionEnabled }: { adultSecti
         {connections?.length === 0 && <p className={styles.empty}>No services connected yet. Saved connections will appear here.</p>}
         {connections && connections.length > 0 && <ul className={styles.list}>{connections.map(connection => <li key={connection.id} className={styles.connection}>
           <div className={styles.connectionBody}><div className={styles.connectionTitle}><span className={styles.serviceMark} aria-hidden="true">{serviceName(connection.service).slice(0, 1)}</span><div><h3>{connection.name}</h3><p>{serviceName(connection.service)} · Credential saved · {connectionChecks[connection.id]?.message ?? "Not checked"}</p></div></div><p className={styles.url}>{connection.baseUrl ?? "Server address hidden until secure storage is configured"}</p>{connectionChecks[connection.id] && <p className={connectionChecks[connection.id].ok ? styles.checkSuccess : styles.checkError} role="status">{connectionChecks[connection.id].message}</p>}</div>
-          <div className={styles.connectionActions}>{["seerr", "radarr", "sonarr"].includes(connection.service) && <button type="button" onClick={() => void checkConnection(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>{checkingId === connection.id ? "Checking…" : "Test"}</button>}<button type="button" onClick={() => beginEdit(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>Edit</button><button type="button" onClick={() => void removeConnection(connection)} disabled={pending || checkingId !== null}>Remove</button></div>
+          <div className={styles.connectionActions}>{["seerr", "plex", "radarr", "sonarr"].includes(connection.service) && <button type="button" onClick={() => void checkConnection(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>{checkingId === connection.id ? "Checking…" : "Test"}</button>}<button type="button" onClick={() => beginEdit(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>Edit</button><button type="button" onClick={() => void removeConnection(connection)} disabled={pending || checkingId !== null}>Remove</button></div>
         </li>)}</ul>}
       </section>
 
       <section className={styles.futurePanel} aria-labelledby="trakt-title"><p className={styles.eyebrow}>COMING NEXT</p><h2 id="trakt-title">Trakt watch history</h2><p>Trakt uses a user-authorized sign-in flow, so it will connect separately from the server-key services above. Your watch history will stay private to your account.</p></section>
 
       <p className={styles.status} role="status" aria-live="polite">{notice}</p>
-      <p className={styles.nextStep}>Seerr, Radarr, and Sonarr connections can be checked here. TMDB-linked movies and shows in your Saved list can be checked and sent to Seerr. Library lookups and the other service actions are coming later.</p>
+      <p className={styles.nextStep}>Seerr, Plex, Radarr, and Sonarr connections can be checked here. TMDB-linked movies and shows in your Saved list can be checked against Plex and Seerr; eligible titles can be sent to Seerr.</p>
     </main>
   </div>;
 }

@@ -29,13 +29,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ? "api/v1/settings/network"
       : row.service === "radarr" || row.service === "sonarr"
         ? "api"
+        : row.service === "plex"
+          ? ""
         : null;
-    if (!endpoint) return jsonError("Connection checks are available for Seerr, Radarr, and Sonarr in this release.", 409);
+    if (endpoint === null) return jsonError("Connection checks are available for Seerr, Plex, Radarr, and Sonarr in this release.", 409);
 
     const config = decryptIntegrationConfig(row.encryptedConfig, integrationEncryptionContext(row.userId, row.id));
-    const response = await requestIntegrationService(config, endpoint);
-    const serviceName = row.service === "seerr" ? "Seerr" : row.service === "radarr" ? "Radarr" : "Sonarr";
-    if (response.status === 401 || response.status === 403) return jsonError(`${serviceName} rejected this API key. Check its service settings.`, 422);
+    const response = await requestIntegrationService(config, endpoint, row.service === "plex" ? { credentialHeader: "x-plex-token" } : {});
+    const serviceName = row.service === "seerr" ? "Seerr" : row.service === "plex" ? "Plex" : row.service === "radarr" ? "Radarr" : "Sonarr";
+    if (response.status === 401 || response.status === 403) return jsonError(`${serviceName} rejected this credential. Check the token or service settings.`, 422);
     if (response.status < 200 || response.status >= 300) return jsonError(`${serviceName} responded, but its API could not verify the connection.`, 502);
 
     let payload: unknown;
@@ -45,9 +47,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return jsonError(`The address responded, but it did not return valid ${serviceName} API data.`, 422);
     }
     const fields = payload as Record<string, unknown>;
+    const plexContainer = fields.MediaContainer;
     const validResponse = row.service === "seerr"
       ? typeof fields.applicationTitle === "string"
-      : (typeof fields.current === "string" || fields.current === null) && Array.isArray(fields.deprecated);
+      : row.service === "plex"
+        ? Boolean(plexContainer && typeof plexContainer === "object" && !Array.isArray(plexContainer)
+          && typeof (plexContainer as Record<string, unknown>).machineIdentifier === "string"
+          && typeof (plexContainer as Record<string, unknown>).friendlyName === "string")
+        : (typeof fields.current === "string" || fields.current === null) && Array.isArray(fields.deprecated);
     if (!validResponse) {
       return jsonError(`The address responded, but it does not look like a ${serviceName} server.`, 422);
     }

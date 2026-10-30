@@ -9,10 +9,11 @@ export default async function HomePage() {
   const session = await getSession();
   if (!session) redirect("/sign-in");
 
-  const [settings, mediaItems, seerrConnections] = await Promise.all([
+  const [settings, mediaItems, seerrConnections, plexConnections] = await Promise.all([
     getGlobalSettings(),
     getCatalogue(),
     prisma.userIntegration.findMany({ where: { userId: session.user.id, service: "seerr" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
+    prisma.userIntegration.findMany({ where: { userId: session.user.id, service: "plex" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
   ]);
   return <DiscoveryClient
     appName={settings.appName}
@@ -21,5 +22,6 @@ export default async function HomePage() {
     adultSectionEnabled={settings.adultSectionEnabled}
     mediaItems={mediaItems.filter(item => settings.adultSectionEnabled || item.category !== "Adult")}
     seerrConnections={seerrConnections}
+    plexConnections={plexConnections}
   />;
 }

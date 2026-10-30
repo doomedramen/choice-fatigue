@@ -3,7 +3,7 @@ import { AuthenticationError, requireSession } from "@/lib/auth-session";
 import { IntegrationCiphertextError, IntegrationEncryptionUnavailableError } from "@/lib/integrations/crypto";
 import { IntegrationTargetError, requestIntegrationService } from "@/lib/integrations/http";
 import { IntegrationRequestError, readIntegrationJson, requireSameOrigin } from "@/lib/integrations/request";
-import { getSavedSeerrTitle } from "@/lib/integrations/saved-seerr-title";
+import { getSavedSeerrTitle } from "@/lib/integrations/saved-tmdb-title";
 import { getSeerrAvailability, SeerrApiError, seerrAlreadyTracksTitle } from "@/lib/integrations/seerr";
 import { prisma } from "@/lib/prisma";
 
