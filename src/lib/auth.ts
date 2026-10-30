@@ -72,7 +72,9 @@ export const auth = betterAuth({
           // Serialize bootstrap promotion so concurrent first signups cannot
           // accidentally create multiple administrators.
           await prisma.$transaction(async (transaction) => {
-            await transaction.$queryRaw`SELECT pg_advisory_xact_lock(714221903)`;
+            // Prisma cannot deserialize PostgreSQL's `void` return value. Make
+            // the result a boolean while keeping the transaction-scoped lock.
+            await transaction.$queryRaw`SELECT pg_advisory_xact_lock(714221903) IS NULL AS locked`;
             const adminCount = await transaction.user.count({ where: { role: "admin" } });
             if (adminCount > 0) return;
 
