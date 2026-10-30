@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import { categories, media, type Category, type MediaItem } from "@/data";
+import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 
 type Decision = "keep" | "pass";
@@ -48,9 +48,10 @@ interface DiscoveryClientProps {
   userName: string;
   isAdmin: boolean;
   adultSectionEnabled: boolean;
+  mediaItems: MediaItem[];
 }
 
-export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems }: DiscoveryClientProps) {
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -66,7 +67,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const mediaCard = useRef<HTMLElement|null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveVersion = useRef(0);
-  const catalogue = media.filter(item => adultSectionEnabled || item.category !== "Adult");
+  const catalogue = mediaItems.filter(item => adultSectionEnabled || item.category !== "Adult");
   const items = catalogue.filter(item => item.category === session.category);
   const item = items.find(candidate => !session.decisions[candidate.id]);
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));

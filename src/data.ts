@@ -4,17 +4,19 @@ export type Category = (typeof categories)[number];
 export interface MediaItem {
   id: string;
   title: string;
-  year: number;
+  year?: number;
   type: string;
   runtime: string;
   rating: string;
   genre: string[];
   synopsis: string;
+  artworkUrl?: string;
   palette: [string, string, string];
   art: string;
   label: string;
   category: Category;
   age?: number;
+  contentFlags?: string[];
 }
 
 export const media: MediaItem[] = [

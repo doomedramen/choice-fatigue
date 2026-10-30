@@ -31,10 +31,18 @@ export async function GET() {
     if (!account) return NextResponse.json({ error: "Account not found." }, { status: 404 });
 
     const discoveryState = discoveryRow?.state ?? null;
-    const catalogueEntries = referencedTitleIds(discoveryState)
-      .map(id => media.find(item => item.id === id))
-      .filter((item): item is (typeof media)[number] => Boolean(item))
-      .map(({ id, title, year, type, category, genre, runtime }) => ({ id, title, year, type, category, genres: genre, runtime }));
+    const referencedIds = referencedTitleIds(discoveryState);
+    const storedCatalogue = referencedIds.length ? await prisma.catalogueEntry.findMany({
+      where: { id: { in: referencedIds } },
+      select: { id: true, title: true, year: true, type: true, category: true, genres: true, runtime: true },
+    }) : [];
+    const storedEntriesById = new Map(storedCatalogue.map(item => [item.id, item]));
+    const catalogueEntries = referencedIds.map(id => {
+      const stored = storedEntriesById.get(id);
+      if (stored) return stored;
+      const fixture = media.find(item => item.id === id);
+      return fixture ? { id, title: fixture.title, year: fixture.year ?? null, type: fixture.type, category: fixture.category, genres: fixture.genre, runtime: fixture.runtime } : null;
+    }).filter(item => item !== null);
 
     const date = new Date().toISOString().slice(0, 10);
     return NextResponse.json({

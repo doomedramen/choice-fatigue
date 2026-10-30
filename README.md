@@ -1,6 +1,6 @@
 # Choice Fatigue
 
-A responsive media discovery app built with Next.js and TypeScript. The server foundation includes invite-only accounts, email verification, password recovery, per-account discovery sessions, account data export and deletion, protected admin pages, and shared global settings. The media catalogue is still mocked locally; metadata APIs and recommendation logic are not connected.
+A responsive media discovery app built with Next.js and TypeScript. The server foundation includes invite-only accounts, email verification, password recovery, per-account discovery sessions, account data export and deletion, protected admin pages, and shared global settings. The catalogue uses local fixture entries served through a normalized PostgreSQL model; metadata APIs and recommendation logic are not connected.
 
 ## Run locally
 
@@ -19,6 +19,7 @@ Start the local database and prepare its schema:
 ```sh
 docker compose up -d postgres
 npm run db:setup
+npm run db:seed
 npm run dev
 ```
 
@@ -38,6 +39,7 @@ For a code check, run `npm run typecheck`. Before `npm run build`, set a non-emp
 - Discovery state is saved to PostgreSQL per account. Existing browser prototype data is imported once when the account has no saved server session.
 - `/account` downloads a JSON copy of the profile and discovery state. Permanent deletion requires the current password and typed confirmation.
 - `/admin` is restricted to administrators. Global app defaults are saved in PostgreSQL; admins can list accounts and disable or restore access.
+- The catalogue is stored in a normalized PostgreSQL table. `npm run db:seed` loads the local fixtures; the app falls back to fixtures if the catalogue table has no entries.
 - Sign-up is invite-only and requires email verification. Sign-in and password recovery use the configured email delivery mode.
 - Adult is disabled by default and remains unavailable until both the server flag and admin setting enable it. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 

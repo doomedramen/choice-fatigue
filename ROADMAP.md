@@ -6,7 +6,7 @@
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts, required email verification, password recovery, a PostgreSQL/Prisma schema, per-account discovery persistence, first-use migration from the old browser session, account export and deletion, and admin-only settings and account controls. The catalogue remains local mock data; no metadata provider or recommendation service is connected. The initial migration is checked in but has not yet been applied to a running database. Adult remains off by default and its age prompt is self-attested.
+The app now has invite-only Better Auth accounts, required email verification, password recovery, a PostgreSQL/Prisma schema, per-account discovery persistence, first-use migration from the old browser session, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. No metadata provider or recommendation service is connected. The migrations are checked in but have not yet been applied to a running database. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 
@@ -37,6 +37,8 @@ The app now has invite-only Better Auth accounts, required email verification, p
 - Start with a small Movies/TV catalogue and fixture-backed adapter tests, then connect a permitted provider and add attribution in the app’s About/Credits area.
 - Add caching, request limits, timeouts, retries, provider health status, and a way to fall back to cached or seeded catalogue data.
 - Evaluate Anime coverage against a representative list before adding a dedicated anime provider.
+
+**Progress:** the normalized catalogue model, fixture seeder, server loader, and empty-table fallback are implemented. Provider adapters, live metadata, attribution, caching, and provider-health handling remain open.
 
 **Provider notes:**
 
@@ -80,6 +82,6 @@ Use beta feedback to choose among collaborative sessions, shareable shortlists, 
 ## Immediate next steps
 
 1. Start PostgreSQL, apply the migration, and exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence.
-2. Move the mocked catalogue behind a normalized server-side catalogue boundary and keep fixture data as the local fallback.
-3. Confirm provider terms and the Adult-content boundary before connecting TMDB, TPDb, or StashDB; keep Adult disabled meanwhile.
+2. Confirm provider terms and the Adult-content boundary before connecting TMDB, TPDb, or StashDB; keep Adult disabled meanwhile.
+3. Add one permitted provider adapter with attribution and cache behavior.
 4. Choose hosting and rehearse database backup restoration before inviting anyone outside local development.

@@ -37,6 +37,10 @@ The frontend includes `/forgot-password` and `/reset-password` screens. The rese
 
 Both methods require a verified Better Auth session. The account ID always comes from the session cookie; request bodies cannot choose another user's row. Requests are limited to 256 KiB. Writes require a matching same-origin `Origin` header.
 
+## Catalogue boundary
+
+`CatalogueEntry` is the normalized server-side catalogue table. It stores a stable local ID, source and source ID, category, display fields, genres, artwork reference, age restriction, content flags, visibility, and display order. `npm run db:seed` idempotently loads the current local fixtures. The discovery page reads active entries from PostgreSQL and falls back to the bundled fixtures if the table is empty or unavailable. No provider adapter or external media request is connected yet. Adult rows are filtered before they reach the browser unless both Adult gates are enabled.
+
 `GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton global settings. Adult can only be enabled when both the server flag and database setting allow it. `GET /api/admin/users` returns a limited account list; same-origin `PATCH /api/admin/users` disables or restores an account, revokes sessions when disabling, and protects the current and last active administrator.
 
 ## Server helpers
