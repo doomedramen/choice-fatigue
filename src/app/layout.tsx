@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Elsewhere — Find your next watch",
-  description: "A thoughtful way to find what to watch next.",
+  title: "Choice Fatigue — Find your next watch",
+  description: "Shortlist, review and save your next watch.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

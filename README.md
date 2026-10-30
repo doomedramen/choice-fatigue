@@ -1,25 +1,49 @@
-# Elsewhere
+# Choice Fatigue
 
-A responsive Next.js and TypeScript prototype for discovering films and series. It uses a small local catalogue and browser `localStorage`; there is no recommendation algorithm, server data store, or media API.
+A responsive media discovery app built with Next.js and TypeScript. The first working server foundation includes invite-only accounts, email verification, password recovery, per-account discovery sessions, protected admin pages, and shared global settings. The media catalogue is still mocked locally; metadata APIs and recommendation logic are not connected.
 
-## Run it
+## Run locally
+
+Requirements: Node.js 20.9+ and Docker Compose.
 
 ```sh
 npm install
+cp .env.example .env
+cp .env.example .env.local
+```
+
+Set the same non-empty `BETA_INVITE_CODE` in `.env` and `.env.local` (for example, `local-demo-invite`). The example config uses console email delivery in development, so verification and password reset links appear in the terminal running the app.
+
+Start the local database and prepare its schema:
+
+```sh
+docker compose up -d postgres
+npm run db:setup
 npm run dev
 ```
 
-Open [http://localhost:4173](http://localhost:4173). The development server uses port `4173` to keep the prototype URL consistent. Stop it with `Ctrl+C`.
+Open [http://localhost:4173](http://localhost:4173), create an account with the invite code, then open the verification link printed in the server terminal. Once verified, sign in and try the discovery flow. The admin page is available after promoting a verified account:
 
-## Try the prototype
+```sh
+npm run admin:promote -- your-verified-email@example.com
+```
 
-1. Choose Movies, TV, or Anime and pass or shortlist a few titles. Drag a card, use the buttons, or press `←` and `→`.
-2. Open a title’s details, then close the overlay or add it to your shortlist.
-3. Use Undo to reverse the latest discovery choice. Refresh the page to see the session persist.
-4. Open **Review & compare**, prune a pick, then restore it from **Removed for now**. Keep browsing or save the remaining shortlist.
-5. Saved titles appear under **Saved** and stay separate from the temporary shortlist.
-6. Open **Adult** to see the age gate. Its confirmation is a local prototype interaction; it does not verify identity or age.
+For a code check, run `npm run typecheck`. Before `npm run build`, set a non-empty `BETTER_AUTH_SECRET` in the environment.
 
-The example catalogue is in `src/data.ts`, the Next.js page is in `src/app/page.tsx`, and the global styles are in `src/app/globals.css`. Example artwork is drawn with local CSS gradients and shapes. Google Fonts are loaded from their stylesheet, with system fallbacks available.
+## What works
 
-Run `npm run typecheck` for a TypeScript check and `npm run build` to verify a production build. Clear the `elsewhere-discovery-v1` localStorage key in the browser’s site storage controls to reset the local session and saved list.
+- Mouse, touch, and keyboard swipes with pass, shortlist, and undo.
+- Details overlays, a review-and-prune flow, restore, keep browsing, and final save.
+- Temporary shortlists stay separate from permanently saved titles.
+- Discovery state is saved to PostgreSQL per account. Existing browser prototype data is imported once when the account has no saved server session.
+- `/admin` is restricted to administrators. Global app defaults are saved in PostgreSQL; admins can list accounts and disable or restore access.
+- Sign-up is invite-only and requires email verification. Sign-in and password recovery use the configured email delivery mode.
+- Adult is disabled by default and remains unavailable until both the server flag and admin setting enable it. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
+
+Metadata source cards are planning placeholders. No provider API calls or real API credentials are used. The example catalogue and artwork are local.
+
+## Configuration for a shared deployment
+
+Set `DATABASE_URL`, a unique `BETTER_AUTH_SECRET`, the public `BETTER_AUTH_URL`, and a private `BETA_INVITE_CODE`. Configure `AUTH_EMAIL_MODE=smtp`, `SMTP_URL`, and `SMTP_FROM` for verification and recovery emails. Apply the checked-in database migration with `npm run db:deploy`. Keep `ADULT_SECTION_ENABLED=false` unless the section has been reviewed and intentionally enabled.
+
+See [docs/server-foundation.md](docs/server-foundation.md) for auth routes, environment settings, data ownership, and administrator setup. See [ROADMAP.md](ROADMAP.md) for the staged path to a shareable product.

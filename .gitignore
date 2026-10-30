@@ -1,7 +1,11 @@
 node_modules/
 .next/
+src/generated/prisma/
 out/
 dist/
 npm-debug.log*
 *.tsbuildinfo
 .DS_Store
+
+.env*
+!.env.example
