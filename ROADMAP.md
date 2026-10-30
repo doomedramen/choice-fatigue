@@ -1,12 +1,12 @@
 # Choice Fatigue: product roadmap
 
 **Status:** implementation in progress
-**Checkpoint:** server foundation, account data controls, fixture catalogue, protected provider readiness, and opt-in TMDB catalogue import are implemented; database-backed runtime validation is still pending.
+**Checkpoint:** server foundation, account data controls, fixture catalogue, protected provider readiness, opt-in TMDB import, and text-only Adult metadata imports are implemented. The local OrbStack PostgreSQL database is migrated and seeded; account-flow validation remains.
 **Planning assumption:** begin with a small invite beta; expand after the core discovery loop and provider terms are settled.
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts, required email verification, password recovery, a PostgreSQL/Prisma schema, per-account discovery persistence, first-use migration from the old browser session, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. No metadata provider or recommendation service is connected. The migrations are checked in but have not yet been applied to a running database. Adult remains off by default and its age prompt is self-attested.
+The app now has invite-only Better Auth accounts, required email verification, password recovery, a PostgreSQL/Prisma schema, per-account discovery persistence, first-use migration from the old browser session, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. The local OrbStack PostgreSQL database has both checked-in migrations applied and 12 fixture entries; no provider credentials are configured, so the opt-in external integrations are inactive. Recommendation logic is not connected. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 
@@ -26,7 +26,7 @@ The app now has invite-only Better Auth accounts, required email verification, p
 - Move session persistence from browser-only storage to the authenticated account so it works across devices. Keep a local migration path for prototype data only if it is useful to beta testers.
 - Provide account data export and password-confirmed deletion; define retention, backups, and restore behavior before inviting users.
 
-**Progress:** the auth, account-scoped state, protected admin, export, and deletion paths are implemented. The database migration and end-to-end account flow still need to run against PostgreSQL before this phase can be marked complete.
+**Progress:** the auth, account-scoped state, protected admin, export, and deletion paths are implemented. The local PostgreSQL migration and catalogue seed have run successfully. Sign-up, email verification, export/deletion, and cross-session persistence still need end-to-end validation before this phase can be marked complete.
 
 **Exit condition:** an invited user can register, sign in, export or delete their account, and resume their discovery session on another device; an unauthenticated user cannot read or change account data.
 
@@ -38,12 +38,12 @@ The app now has invite-only Better Auth accounts, required email verification, p
 - Add caching, request limits, timeouts, retries, provider health status, and a way to fall back to cached or seeded catalogue data.
 - Evaluate Anime coverage against a representative list before adding a dedicated anime provider.
 
-**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, protected status reporting, and opt-in TMDB search/import for Movies/TV/Anime are implemented. TMDB attribution is available at `/credits`. Automatic refresh, caching/retention policy, provider health, and ThePornDB/StashDB adapters remain open.
+**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, protected status reporting, opt-in TMDB search/import for Movies/TV/Anime, and gated text-only ThePornDB/StashDB search/import for Adult are implemented. TMDB attribution is available at `/credits`. Automatic refresh, caching/retention policy, provider health, and full database-backed account-flow validation remain open.
 
 **Provider notes:**
 
 - **TMDB:** its FAQ says the developer API is free for non-commercial use with attribution, and commercial use requires contacting TMDB. It also says its data and images may not be used in connection with pornographic content. This creates an unresolved conflict with a single Choice Fatigue product that includes an Adult section. Get written guidance from TMDB or keep the TMDB-powered experience and Adult experience separate before launch. [TMDB API FAQ](https://developer.themoviedb.org/docs/faq)
-- **ThePornDB and StashDB:** Stash's docs list both as supported Stash-Box metadata sources, and ThePornDB publishes API documentation for scenes and movies. Choice Fatigue will use them for Adult metadata, with credentials kept on the server and no explicit artwork in the first integration. The Stash guide describes a local Stash installation, so request-volume and cache behavior still need to be confirmed for the hosted beta. [Stash guide](https://docs.stashapp.cc/beginner-guides/guide-to-scraping/), [Stash-Box instances](https://docs.stashapp.cc/metadata-sources/stash-box-instances/), [ThePornDB API docs](https://api.theporndb.net/docs), [StashDB access guide](https://guidelines.stashdb.org/docs/faq_getting-started/stashdb/accessing-stashdb/)
+- **ThePornDB and StashDB:** Stash's docs list both as supported Stash-Box metadata sources, and ThePornDB publishes API documentation for scenes and movies. Choice Fatigue uses them for Adult metadata, with credentials kept on the server and no explicit artwork in the first integration. The Stash guide describes a local Stash installation, so request-volume and cache behavior still need to be confirmed for the hosted beta. [Stash guide](https://docs.stashapp.cc/beginner-guides/guide-to-scraping/), [Stash-Box instances](https://docs.stashapp.cc/metadata-sources/stash-box-instances/), [ThePornDB API docs](https://api.theporndb.net/docs), [StashDB access guide](https://guidelines.stashdb.org/docs/faq_getting-started/stashdb/accessing-stashdb/)
 
 **Exit condition:** the app can serve a reliable, attributed catalogue through one provider adapter without putting credentials in the client, and provider failures do not break discovery.
 
@@ -80,7 +80,7 @@ Use beta feedback to choose among collaborative sessions, shareable shortlists, 
 
 ## Immediate next steps
 
-1. Start PostgreSQL, apply the migration, and exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence.
+1. Exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence against the local OrbStack database.
 2. Confirm TMDB's cache/retention terms and the Adult-content boundary; confirm ThePornDB/StashDB request-volume and cache guidance for hosted use.
-3. Add ThePornDB/StashDB adapters for Adult, keeping source data separate and credentials server-only.
+3. Validate the TMDB and Adult provider flows against configured credentials, respecting each source boundary and keeping credentials server-only.
 4. Choose hosting and rehearse database backup restoration before inviting anyone outside local development.

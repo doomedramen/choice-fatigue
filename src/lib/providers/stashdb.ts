@@ -1,0 +1,178 @@
+import "server-only";
+import { prisma } from "@/lib/prisma";
+import { getGlobalSettings } from "@/lib/global-settings";
+import { serverConfig } from "@/lib/server-config";
+
+const ENDPOINT = "https://stashdb.org/graphql";
+const RESULT_LIMIT = 12;
+
+type StashTag = { name?: unknown };
+type StashStudio = { name?: unknown } | null;
+type StashScene = {
+  id?: unknown;
+  title?: unknown;
+  details?: unknown;
+  release_date?: unknown;
+  duration?: unknown;
+  tags?: StashTag[];
+  studio?: StashStudio;
+};
+
+type GraphqlResponse<T> = { data?: T; errors?: Array<{ message?: unknown }> };
+type SceneSearchResponse = { searchScenes?: { count?: number; scenes?: StashScene[] } };
+type FindSceneResponse = { findScene?: StashScene | null };
+
+export class StashDbNotEnabledError extends Error {}
+export class StashDbRequestError extends Error {}
+export class StashDbMissingSceneError extends Error {}
+
+async function getApiKey() {
+  const apiKey = process.env.STASHDB_API_KEY;
+  if (!apiKey || process.env.STASHDB_METADATA_ENABLED !== "true" || !serverConfig.adultSectionEnabled) {
+    throw new StashDbNotEnabledError();
+  }
+
+  const settings = await getGlobalSettings();
+  if (!settings.adultSectionEnabled) throw new StashDbNotEnabledError();
+  return apiKey;
+}
+
+async function graphql<T>(query: string, variables: Record<string, unknown>, apiKey: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { ApiKey: apiKey, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) throw new StashDbRequestError();
+    const result = await response.json() as GraphqlResponse<T>;
+    if (result.errors?.length || !result.data) throw new StashDbRequestError();
+    return result.data;
+  } catch (error) {
+    if (error instanceof StashDbRequestError) throw error;
+    throw new StashDbRequestError();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function yearFrom(value: unknown) {
+  const match = typeof value === "string" ? /^(\d{4})/.exec(value) : null;
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  return Number.isInteger(year) && year >= 1880 && year <= 2200 ? year : undefined;
+}
+
+function runtimeFrom(secondsValue: unknown) {
+  if (typeof secondsValue !== "number" || !Number.isFinite(secondsValue) || secondsValue <= 0) return undefined;
+  const minutes = Math.round(secondsValue / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours ? `${hours}h${remainingMinutes ? ` ${remainingMinutes}m` : ""}` : `${minutes}m`;
+}
+
+function normalizeScene(scene: StashScene) {
+  const sourceId = stringValue(scene.id);
+  const title = stringValue(scene.title);
+  if (!sourceId || !title || sourceId.length > 160) return null;
+  const genres = Array.isArray(scene.tags)
+    ? scene.tags.map(tag => stringValue(tag?.name)).filter(Boolean).slice(0, 20)
+    : [];
+  return {
+    sourceId,
+    title,
+    ...(yearFrom(scene.release_date) ? { year: yearFrom(scene.release_date) } : {}),
+    synopsis: stringValue(scene.details).slice(0, 3000),
+    ...(runtimeFrom(scene.duration) ? { runtime: runtimeFrom(scene.duration) } : {}),
+    genres,
+  };
+}
+
+const searchQuery = `query SearchScenes($term: String!, $limit: Int) {
+  searchScenes(term: $term, limit: $limit) {
+    count
+    scenes {
+      id
+      title
+      details
+      release_date
+      duration
+      tags { name }
+      studio { name }
+    }
+  }
+}`;
+
+const findQuery = `query FindSceneById($id: ID!) {
+  findScene(id: $id) {
+    id
+    title
+    details
+    release_date
+    duration
+    tags { name }
+    studio { name }
+  }
+}`;
+
+export async function searchStashDbScenes(term: string) {
+  const apiKey = await getApiKey();
+  const response = await graphql<SceneSearchResponse>(searchQuery, { term, limit: RESULT_LIMIT }, apiKey);
+  return (Array.isArray(response.searchScenes?.scenes) ? response.searchScenes.scenes : [])
+    .map(normalizeScene)
+    .filter((scene): scene is NonNullable<typeof scene> => scene !== null)
+    .slice(0, RESULT_LIMIT);
+}
+
+export async function importStashDbScene(sourceId: string) {
+  const apiKey = await getApiKey();
+  const response = await graphql<FindSceneResponse>(findQuery, { id: sourceId }, apiKey);
+  const scene = response.findScene;
+  if (!scene) throw new StashDbMissingSceneError();
+  const normalized = normalizeScene(scene);
+  if (!normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
+
+  const category = "Adult";
+  const lastInCategory = await prisma.catalogueEntry.findFirst({
+    where: { category },
+    orderBy: { displayOrder: "desc" },
+    select: { displayOrder: true },
+  });
+  const fields = {
+    title: normalized.title,
+    category,
+    year: normalized.year ?? null,
+    type: "Scene",
+    runtime: normalized.runtime ?? "—",
+    rating: null,
+    genres: normalized.genres,
+    synopsis: normalized.synopsis,
+    palette: ["#3d2d38", "#2a202b", "#181620"],
+    art: "noir",
+    label: normalized.title,
+    artworkUrl: null,
+    ageRestriction: 18,
+    contentFlags: ["adult"],
+    active: true,
+  };
+
+  return prisma.catalogueEntry.upsert({
+    where: { source_sourceId: { source: "stashdb", sourceId } },
+    create: {
+      id: `stashdb-${sourceId}`,
+      source: "stashdb",
+      sourceId,
+      displayOrder: (lastInCategory?.displayOrder ?? -1) + 1,
+      ...fields,
+    },
+    update: fields,
+  });
+}
