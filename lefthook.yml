@@ -1,0 +1,14 @@
+min_version: 2.1.0
+
+pre-commit:
+  parallel: false
+  commands:
+    checks:
+      run: git diff --cached --check && pnpm test && pnpm typecheck
+      fail_text: "Commit blocked: fix the whitespace, unit test, or typecheck failures above."
+
+pre-push:
+  commands:
+    release-checks:
+      run: pnpm test:ci
+      fail_text: "Push blocked: fix the release check failures above."

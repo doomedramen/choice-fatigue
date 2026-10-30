@@ -1,6 +1,36 @@
 import { expect, test } from "@playwright/test";
+import { Client } from "pg";
 
 const password = "ChoiceFatigue-test-password-2026";
+
+async function resetE2eDatabase() {
+  const connectionString = process.env.E2E_DATABASE_URL;
+  if (!connectionString) throw new Error("E2E_DATABASE_URL must point to the disposable Playwright database.");
+  const databaseName = decodeURIComponent(new URL(connectionString).pathname.slice(1));
+  if (!databaseName.endsWith("_e2e")) throw new Error("Refusing to reset a database that is not explicitly named *_e2e.");
+
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query(`
+      DO $$
+      DECLARE table_names text;
+      BEGIN
+        SELECT string_agg(format('%I.%I', schemaname, tablename), ', ')
+          INTO table_names
+          FROM pg_tables
+         WHERE schemaname = 'public' AND tablename <> '_prisma_migrations';
+        IF table_names IS NOT NULL THEN
+          EXECUTE 'TRUNCATE TABLE ' || table_names || ' RESTART IDENTITY CASCADE';
+        END IF;
+      END $$;
+    `);
+  } finally {
+    await client.end();
+  }
+}
+
+test.beforeEach(async () => resetE2eDatabase());
 
 async function waitForPersistedState(page: import("@playwright/test").Page, expected: { shortlistCount: number; decisionCount: number }) {
   await expect.poll(async () => page.evaluate(async () => {
@@ -171,9 +201,10 @@ test("first run, account access, provider discovery, saved state and account con
   expect(concurrentWrite.firstStatus).toBe(200);
   expect(concurrentWrite.staleStatus).toBe(409);
   await page.locator('button[title="Start a fresh session"]').click();
-  await expect.poll(async () => page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()))).toMatchObject({ saved: expect.arrayContaining(["tmdb-movie-998"]) });
+  await expect.poll(async () => page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()).then(state => state.sessionId)), { timeout: 15_000 }).not.toBe(concurrentWrite.baseSessionId);
   const rebased = await page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()));
   expect(rebased.sessionId).not.toBe(concurrentWrite.baseSessionId);
+  expect(rebased.saved).toContain("tmdb-movie-998");
   expect(rebased.shortlisted).not.toContain("tmdb-movie-999");
 
   await memberPage.goto("/account");

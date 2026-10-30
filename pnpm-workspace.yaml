@@ -1,6 +1,7 @@
 allowBuilds:
   '@prisma/engines': true
   esbuild: true
+  lefthook: true
   prisma: true
 minimumReleaseAgeExclude:
   - nodemailer@10.3.1
