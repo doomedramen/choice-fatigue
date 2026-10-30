@@ -18,7 +18,7 @@ public_url=${1:-}
 if [[ -z "$public_url" ]]; then
   read -r -p "Public Choice Fatigue URL (include https://): " public_url
 fi
-if [[ ! "$public_url" =~ ^https?://[^[:space:]"]+$ ]]; then
+if [[ ! "$public_url" =~ ^https?://[^[:space:]]+$ ]]; then
   echo "Enter a valid http:// or https:// URL without spaces or quotes." >&2
   exit 1
 fi

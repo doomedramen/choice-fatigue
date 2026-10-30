@@ -133,34 +133,6 @@ model AdminServiceIntegration {
   @@index([service, createdAt])
 }
 
-model CatalogueEntry {
-  id             String   @id @default(cuid())
-  source         String   @default("local")
-  sourceId       String
-  title          String
-  category       String
-  year           Int?
-  type           String?
-  runtime        String?
-  rating         Float?
-  genres         String[] @default([])
-  synopsis       String?
-  palette        String[] @default([])
-  art            String?
-  label          String?
-  artworkUrl     String?
-  backdropUrl    String?
-  ageRestriction Int?
-  contentFlags   String[] @default([])
-  active         Boolean  @default(true)
-  displayOrder   Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@unique([source, sourceId])
-  @@index([category, active, displayOrder])
-}
-
 model UserIntegration {
   id                   String   @id @default(cuid())
   userId               String

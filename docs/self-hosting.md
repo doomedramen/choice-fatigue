@@ -65,6 +65,6 @@ Configure metadata providers and shared media services in Admin settings. Servic
 
 ## Upgrades and recovery
 
-For Compose, pull or check out the desired release and rerun the Compose command above. For LXC, back up PostgreSQL and `.env`, update the checkout to the desired release, then run `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm build`, and `pnpm db:deploy` as the `choicefatigue` user; restart with `systemctl restart choice-fatigue`.
+For Compose, back up PostgreSQL and the deployment secrets before pulling or checking out the desired release, then rerun the Compose command above. For LXC, back up PostgreSQL and `.env`, update the checkout to the desired release, then run `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm build`, and `pnpm db:deploy` as the `choicefatigue` user; restart with `systemctl restart choice-fatigue`. The v1 cleanup migration drops the unused `CatalogueEntry` table and deletes the obsolete TVDB credential row. It does not affect account choices, saved provider IDs, or integrations; retain a database backup before upgrading.
 
 To recover first-admin access, use the documented `pnpm admin:promote -- account-email@example.com` command from a trusted shell in the app environment. Do not recreate the database or regenerate the encryption key as an account-recovery step.

@@ -1,11 +1,10 @@
 import "server-only";
-import { prisma } from "@/lib/prisma";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
 
-const ENDPOINT = "https://stashdb.org/graphql";
+const ENDPOINT = process.env.NODE_ENV !== "production" ? process.env.STASHDB_API_BASE_URL || "https://stashdb.org/graphql" : "https://stashdb.org/graphql";
 const RESULT_LIMIT = 12;
 
 type StashTag = { name?: unknown };
@@ -21,7 +20,6 @@ type StashScene = {
 };
 
 type GraphqlResponse<T> = { data?: T; errors?: Array<{ message?: unknown }> };
-type SceneSearchResponse = { searchScenes?: { count?: number; scenes?: StashScene[] } };
 type SceneBrowseResponse = { queryScenes?: { count?: number; scenes?: StashScene[] } };
 type FindSceneResponse = { findScene?: StashScene | null };
 
@@ -98,21 +96,6 @@ function normalizeScene(scene: StashScene) {
   };
 }
 
-const searchQuery = `query SearchScenes($term: String!, $limit: Int) {
-  searchScenes(term: $term, limit: $limit) {
-    count
-    scenes {
-      id
-      title
-      details
-      release_date
-      duration
-      tags { name }
-      studio { name }
-    }
-  }
-}`;
-
 const findQuery = `query FindSceneById($id: ID!) {
   findScene(id: $id) {
     id
@@ -139,15 +122,6 @@ const popularQuery = `query PopularScenes($input: SceneQueryInput!) {
     }
   }
 }`;
-
-export async function searchStashDbScenes(term: string) {
-  const apiKey = await getApiKey();
-  const response = await graphql<SceneSearchResponse>(searchQuery, { term, limit: RESULT_LIMIT }, apiKey);
-  return (Array.isArray(response.searchScenes?.scenes) ? response.searchScenes.scenes : [])
-    .map(normalizeScene)
-    .filter((scene): scene is NonNullable<typeof scene> => scene !== null)
-    .slice(0, RESULT_LIMIT);
-}
 
 /** Browse a provider-ranked adult scene pool without importing it into the local catalogue. */
 export async function getPopularStashDbCatalogue(): Promise<MediaItem[]> {
@@ -183,49 +157,4 @@ export async function getStashDbRecommendationFeatures(sourceId: string) {
   const normalized = normalizeScene(scene);
   if (!normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
   return recommendationFeatureKeys({ genres: normalized.genres, year: normalized.year, type: "Scene" });
-}
-
-export async function importStashDbScene(sourceId: string) {
-  const apiKey = await getApiKey();
-  const response = await graphql<FindSceneResponse>(findQuery, { id: sourceId }, apiKey);
-  const scene = response.findScene;
-  if (!scene) throw new StashDbMissingSceneError();
-  const normalized = normalizeScene(scene);
-  if (!normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
-
-  const category = "Adult";
-  const lastInCategory = await prisma.catalogueEntry.findFirst({
-    where: { category },
-    orderBy: { displayOrder: "desc" },
-    select: { displayOrder: true },
-  });
-  const fields = {
-    title: normalized.title,
-    category,
-    year: normalized.year ?? null,
-    type: "Scene",
-    runtime: normalized.runtime ?? "—",
-    rating: null,
-    genres: normalized.genres,
-    synopsis: normalized.synopsis,
-    palette: ["#3d2d38", "#2a202b", "#181620"],
-    art: "noir",
-    label: normalized.title,
-    artworkUrl: null,
-    ageRestriction: 18,
-    contentFlags: ["adult"],
-    active: true,
-  };
-
-  return prisma.catalogueEntry.upsert({
-    where: { source_sourceId: { source: "stashdb", sourceId } },
-    create: {
-      id: `stashdb-${sourceId}`,
-      source: "stashdb",
-      sourceId,
-      displayOrder: (lastInCategory?.displayOrder ?? -1) + 1,
-      ...fields,
-    },
-    update: fields,
-  });
 }

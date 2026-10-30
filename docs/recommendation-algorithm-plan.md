@@ -46,6 +46,10 @@ Discovery requests provider-ranked feeds directly when the page opens; no backgr
 
 Historical profile reads now resolve features for a bounded set of prior provider IDs that are absent from the current feed. Those lookups are direct, transient, and uncached; only the resulting compact feature keys live in the response and client memory. The profile API still omits event timestamps, so recency weighting cannot be computed.
 
+### Historical replay (descriptive)
+
+Run `pnpm eval:replay -- account-export.json` on a user-authorized account export. The script reads only recommendation event IDs, categories, timestamps, decisions, and ordered candidate-ID traces; it never resolves provider metadata. It reports sessions, candidate sets, impressions, shortlist-to-save counts, median cards to first save, and the provider-order versus observed-display rank of the first saved item when both traces are available. Compare category by category and include sample sizes. Historical choices reflect the ranker and UI that generated them, plus self-selection and incomplete traces; these summaries are descriptive and do not establish causal lift or justify changing weights. Do not pool accounts without an appropriate consent and privacy process.
+
 The baseline represents confidence as well as preference. A few passes are shrunk toward neutral. Profiles are rebuilt from event history after corrections, while current-session decisions are applied separately from durable cross-session taste.
 
 ### 3. Score for two outcomes

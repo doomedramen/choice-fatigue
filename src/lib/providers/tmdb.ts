@@ -1,5 +1,4 @@
 import "server-only";
-import { prisma } from "@/lib/prisma";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
@@ -37,7 +36,8 @@ async function requestTmdb<T>(path: string, token: string): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`https://api.themoviedb.org/3${path}`, {
+    const baseUrl = process.env.NODE_ENV !== "production" ? process.env.TMDB_API_BASE_URL || "https://api.themoviedb.org/3" : "https://api.themoviedb.org/3";
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
       headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
       signal: controller.signal,
       cache: "no-store",
@@ -79,37 +79,6 @@ function mediaTypeFor(record: TmdbRecord, category: TmdbCategory): TmdbMediaType
 
 function titleFor(record: TmdbRecord, mediaType: TmdbMediaType) {
   return text(mediaType === "movie" ? record.title : record.name);
-}
-
-export async function searchTmdb(query: string, category: TmdbCategory) {
-  const token = await getEnabledTmdbToken();
-  const encoded = encodeURIComponent(query);
-  const endpoint = category === "Movies"
-    ? `/search/movie?query=${encoded}&include_adult=false&language=en-US&page=1`
-    : `/search/tv?query=${encoded}&include_adult=false&language=en-US&page=1`;
-  const payload = await requestTmdb<TmdbSearchPayload>(endpoint, token);
-  return (Array.isArray(payload.results) ? payload.results : [])
-    .filter(record => record && record.adult !== true)
-    .map(record => {
-      const mediaType = mediaTypeFor(record, category);
-      if (!mediaType || typeof record.id !== "number" || record.id < 1) return null;
-      const title = titleFor(record, mediaType);
-      if (!title) return null;
-      const year = yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date);
-      const artwork = posterUrl(record.poster_path);
-      const backdrop = backdropUrl(record.backdrop_path);
-      return {
-        tmdbId: record.id,
-        mediaType,
-        title,
-        ...(year ? { year } : {}),
-        synopsis: text(record.overview),
-        ...(artwork ? { posterUrl: artwork } : {}),
-        ...(backdrop ? { backdropUrl: backdrop } : {}),
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null)
-    .slice(0, 12);
 }
 
 export async function getTmdbTitleDetails(mediaType: TmdbMediaType, tmdbId: number) {
@@ -229,66 +198,4 @@ function formatRuntime(record: TmdbRecord & { runtime?: unknown; episode_run_tim
   const episodeRuntime = Array.isArray(record.episode_run_time) ? record.episode_run_time.find(value => typeof value === "number") : undefined;
   const seasons = typeof record.number_of_seasons === "number" && record.number_of_seasons > 0 ? `${record.number_of_seasons} ${record.number_of_seasons === 1 ? "season" : "seasons"}` : "Series";
   return episodeRuntime ? `${seasons} · ${formatMinutes(episodeRuntime)} episodes` : seasons;
-}
-
-export async function importTmdbEntry(input: { tmdbId: number; mediaType: TmdbMediaType; category: TmdbCategory }) {
-  const token = await getEnabledTmdbToken();
-  const { tmdbId, mediaType, category } = input;
-  if ((category === "Movies" && mediaType !== "movie") || (category === "Shows" && mediaType !== "tv")) {
-    throw new TypeError("The selected category does not match the TMDB item type.");
-  }
-
-  const record = await requestTmdb<TmdbRecord & {
-    genres?: Array<{ name?: unknown }>;
-    runtime?: unknown;
-    episode_run_time?: unknown;
-    number_of_seasons?: unknown;
-    tagline?: unknown;
-  }>(`/${mediaType}/${tmdbId}?language=en-US`, token);
-  if (record.adult === true) throw new TmdbAdultResultError();
-  const title = titleFor(record, mediaType);
-  if (!title || typeof record.id !== "number" || record.id !== tmdbId) throw new TmdbRequestError();
-
-  const year = yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date);
-  const genres = Array.isArray(record.genres)
-    ? record.genres.map(genre => text(genre?.name)).filter(Boolean).slice(0, 20)
-    : [];
-  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average)
-    ? Math.min(10, Math.max(0, record.vote_average))
-    : null;
-  const artwork = posterUrl(record.poster_path);
-  const backdrop = backdropUrl(record.backdrop_path);
-  const sourceId = `${mediaType}:${tmdbId}`;
-  const existing = await prisma.catalogueEntry.findUnique({ where: { source_sourceId: { source: "tmdb", sourceId } } });
-  const lastInCategory = await prisma.catalogueEntry.findFirst({ where: { category }, orderBy: { displayOrder: "desc" }, select: { displayOrder: true } });
-  const fields = {
-    title,
-    category,
-    year: year ?? null,
-    type: mediaType === "movie" ? "Movie" : "Series",
-    runtime: formatRuntime(record, mediaType),
-    rating,
-    genres,
-    synopsis: text(record.overview),
-    palette: ["#344255", "#263244", "#151d2c"],
-    art: "mist",
-    label: text(record.tagline) || title,
-    artworkUrl: artwork ?? null,
-    backdropUrl: backdrop ?? null,
-    ageRestriction: null,
-    contentFlags: [],
-    active: true,
-  };
-
-  return prisma.catalogueEntry.upsert({
-    where: { source_sourceId: { source: "tmdb", sourceId } },
-    create: {
-      id: `tmdb-${sourceId.replace(":", "-")}`,
-      source: "tmdb",
-      sourceId,
-      displayOrder: (lastInCategory?.displayOrder ?? -1) + 1,
-      ...fields,
-    },
-    update: fields,
-  });
 }

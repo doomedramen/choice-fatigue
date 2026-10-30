@@ -30,8 +30,5 @@ CREATE INDEX "UserIntegration_userId_service_idx" ON "UserIntegration"("userId",
 -- CreateIndex
 CREATE INDEX "IntegrationAuditLog_userId_createdAt_idx" ON "IntegrationAuditLog"("userId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "UserIntegration" ADD CONSTRAINT "UserIntegration_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "IntegrationAuditLog" ADD CONSTRAINT "IntegrationAuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- User is created by the following init migration. Foreign keys are added
+-- after that migration in 20261030205000_account_integration_foreign_keys.

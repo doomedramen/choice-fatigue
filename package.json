@@ -1,7 +1,10 @@
 {
   "name": "choice-fatigue",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <27"
+  },
   "packageManager": "pnpm@12.16.1",
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 4173",
@@ -11,11 +14,13 @@
     "start": "next start --hostname 0.0.0.0 --port 4173",
     "typecheck": "prisma generate && tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "eval:replay": "tsx scripts/evaluate-recommendation-replay.ts",
+    "test:ci": "pnpm test && pnpm typecheck && pnpm exec prisma validate && pnpm build && pnpm db:deploy && pnpm test:e2e",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:setup": "pnpm db:generate && pnpm db:migrate",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "pnpm db:generate && tsx scripts/seed-catalogue.ts",
     "db:studio": "prisma studio",
     "integrations:rotate-key": "pnpm db:generate && tsx scripts/rotate-integration-key.ts",
     "admin:promote": "tsx scripts/promote-admin.ts",
@@ -32,6 +37,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",

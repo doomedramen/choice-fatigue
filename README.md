@@ -6,10 +6,10 @@ For self-hosting, see [Docker Compose and Proxmox LXC setup](docs/self-hosting.m
 
 ## Run locally
 
-Requirements: Node.js 20.9+, pnpm 12.16.1, and Docker Compose. If you use Volta, install the project tool versions with:
+Requirements: Node.js 22 or newer, pnpm 12.16.1, and Docker Compose. If you use Volta, install the project tool versions with:
 
 ```sh
-volta install node@26.13.0
+volta install node@22
 volta install pnpm@12.16.1
 ```
 
@@ -27,7 +27,6 @@ Start the local database and prepare the schema:
 ```sh
 docker compose up -d postgres
 volta run pnpm db:setup
-volta run pnpm db:seed
 volta run pnpm dev
 ```
 
@@ -39,7 +38,9 @@ To recover admin access for an existing deployment, promote an account from a tr
 volta run pnpm admin:promote -- account-email@example.com
 ```
 
-For a TypeScript check, run `volta run pnpm typecheck`. Run the pure recommendation and access-policy tests with `volta run pnpm test`. For the live development experience, keep the app running with `volta run pnpm dev`; it reloads application changes as you edit.
+For checks, run `volta run pnpm test`, `volta run pnpm typecheck`, and `volta run pnpm exec prisma validate`. Playwright uses disposable PostgreSQL and local mocked metadata providers; set `E2E_DATABASE_URL` to an empty test database, apply migrations with `volta run pnpm db:deploy`, install Chromium with `volta run pnpm exec playwright install chromium`, then run `volta run pnpm test:e2e`. GitHub Actions runs these checks and a production build. Never point the browser suite at a real account database.
+
+To evaluate an authorized account export without fetching or storing provider metadata, run `volta run pnpm eval:replay -- account-export.json`. The report is descriptive and does not estimate causal ranking lift; see [the replay method](docs/recommendation-algorithm-plan.md#historical-replay-descriptive).
 
 ## What works
 
@@ -51,8 +52,8 @@ For a TypeScript check, run `volta run pnpm typecheck`. Run the pure recommendat
 - `/admin` is restricted to administrators. Global app defaults, the Adult master switch, invitation code, optional SMTP delivery, and private-network access are stored in PostgreSQL. Admins can manage accounts, grant Adult access per account, configure metadata providers, and manage shared service connections.
 - TMDB, ThePornDB, and StashDB credentials are encrypted in PostgreSQL. TMDB supplies Movies and Shows, including anime series under Shows and anime films under Movies. Adult-flagged TMDB results are rejected. ThePornDB and StashDB supply text-only Adult metadata; source artwork is not displayed.
 - Seerr, Plex, Radarr, Sonarr, Whisparr v2/v3, Stash, Jellyfin, and Emby connections are configured once in Admin settings and shared by the instance. Their server addresses and credentials are encrypted at rest. Admins can test supported connections; users can check TMDB-linked saved titles against Seerr and Plex and request eligible titles through Seerr.
-- Discovery loads current provider-ranked titles directly from the provider APIs when the site opens; nobody has to search for or preload titles. TMDB supplies popularity-sorted Movies and Shows. Enabled ThePornDB and StashDB sources supply Adult scenes and movies, ranked by the provider's relevance/popularity ordering. Provider responses are not cached or copied into the local catalogue. Only stable media IDs are saved with discovery state and swipe history. `volta run pnpm db:seed` loads development fixtures, which are not shown as discovery titles.
-- Discovery uses explicit choices and seen-title ratings to rank by genre, release decade, and title type, with a bounded source-rating prior. Preference history persists across sessions; Adult signals remain isolated from Movies and Shows. See [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md).
+- Discovery loads currently popular titles directly from provider APIs when the site opens; nobody has to search for or preload titles. TMDB supplies Movies and Shows. Enabled ThePornDB and StashDB sources supply Adult scenes and movies. Provider responses are not cached or written to a local media catalogue. Only provider IDs, candidate ID traces, and user actions are persisted.
+- Discovery ranks using explicit choices and seen-title ratings across genre, release decade, and media type. Sparse evidence shrinks toward neutral, saved choices add retention evidence, and removals only compare within their review. Provider ratings do not affect rank, and Adult signals remain isolated from Movies and Shows. See [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md).
 - The first account can sign up without an invite and becomes administrator. Later sign-ups require the invite code saved by an administrator. Signup and sign-in do not send or require email verification.
 - Adult is disabled by default. An administrator must enable the instance master switch and grant access separately to each account. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 

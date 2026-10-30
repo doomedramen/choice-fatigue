@@ -1,5 +1,4 @@
 import "server-only";
-import { prisma } from "@/lib/prisma";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
@@ -43,7 +42,8 @@ async function requestThePornDB<T>(path: string, token: string): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`https://api.theporndb.net/${path}`, {
+    const baseUrl = process.env.NODE_ENV !== "production" ? process.env.THEPORNDB_API_BASE_URL || "https://api.theporndb.net" : "https://api.theporndb.net";
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/${path}`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
@@ -157,16 +157,6 @@ function apiPath(kind: ThePornDBKind, id?: string) {
   return id ? `${collection}/${encodeURIComponent(id)}` : collection;
 }
 
-export async function searchThePornDB(query: string, kind: ThePornDBKind) {
-  const token = await accessToken();
-  const params = new URLSearchParams({ parse: query, limit: "25" });
-  const payload = await requestThePornDB<ThePornDBPayload>(`${apiPath(kind)}?${params.toString()}`, token);
-  return recordsFrom(payload)
-    .map(record => toSearchResult(record, kind))
-    .filter((result): result is NonNullable<typeof result> => result !== null)
-    .slice(0, 12);
-}
-
 export async function getThePornDBRecommendationFeatures(kind: ThePornDBKind, sourceId: string) {
   if (!idPattern.test(sourceId)) throw new ThePornDBInvalidRecordError();
   const token = await accessToken();
@@ -174,58 +164,4 @@ export async function getThePornDBRecommendationFeatures(kind: ThePornDBKind, so
   const record = recordsFrom(payload)[0];
   if (!record || recordId(record) !== sourceId) throw new ThePornDBInvalidRecordError();
   return recommendationFeatureKeys({ genres: genresFrom(record.tags), year: yearFrom(record), type: kind === "movie" ? "Movie" : "Scene" });
-}
-
-export async function importThePornDBEntry(input: { sourceId: string; kind: ThePornDBKind }) {
-  const token = await accessToken();
-  if (!idPattern.test(input.sourceId)) throw new ThePornDBInvalidRecordError();
-
-  const payload = await requestThePornDB<ThePornDBPayload>(apiPath(input.kind, input.sourceId), token);
-  const record = recordsFrom(payload)[0];
-  if (!record || (recordId(record) && recordId(record) !== input.sourceId)) throw new ThePornDBInvalidRecordError();
-  const result = toSearchResult(record, input.kind);
-  if (!result) throw new ThePornDBInvalidRecordError();
-
-  const sourceId = `${input.kind}:${input.sourceId}`;
-  const category = "Adult";
-  const lastInCategory = await prisma.catalogueEntry.findFirst({ where: { category }, orderBy: { displayOrder: "desc" }, select: { displayOrder: true } });
-
-  return prisma.catalogueEntry.upsert({
-    where: { source_sourceId: { source: "theporndb", sourceId } },
-    create: {
-      id: `theporndb-${input.kind}-${input.sourceId}`,
-      source: "theporndb",
-      sourceId,
-      displayOrder: (lastInCategory?.displayOrder ?? -1) + 1,
-      title: result.title,
-      category,
-      year: result.year ?? null,
-      type: input.kind === "movie" ? "Movie" : "Scene",
-      runtime: result.runtime ?? "—",
-      rating: typeof record.rating === "number" && Number.isFinite(record.rating) ? Math.min(10, Math.max(0, record.rating)) : null,
-      genres: result.genres,
-      synopsis: result.synopsis,
-      palette: ["#58352e", "#362b30", "#211c28"],
-      art: "noir",
-      label: result.title,
-      artworkUrl: null,
-      ageRestriction: 18,
-      contentFlags: ["adult"],
-      active: true,
-    },
-    update: {
-      title: result.title,
-      year: result.year ?? null,
-      type: input.kind === "movie" ? "Movie" : "Scene",
-      runtime: result.runtime ?? "—",
-      rating: typeof record.rating === "number" && Number.isFinite(record.rating) ? Math.min(10, Math.max(0, record.rating)) : null,
-      genres: result.genres,
-      synopsis: result.synopsis,
-      label: result.title,
-      artworkUrl: null,
-      ageRestriction: 18,
-      contentFlags: ["adult"],
-      active: true,
-    },
-  });
 }

@@ -4,7 +4,7 @@ Choice Fatigue stores account discovery state, app settings, metadata-provider c
 
 ## Local setup
 
-Requirements: Node.js 20.9+, pnpm 12.16.1, and Docker Compose. The project declares pnpm 12.16.1 in `package.json`; with Volta, install it using `volta install pnpm@12.16.1` and run project commands with `volta run pnpm`.
+Requirements: Node.js 22 or newer, pnpm 12.16.1, and Docker Compose. The project declares Node.js and pnpm requirements in `package.json`; with Volta, install Node.js 22 and pnpm 12.16.1, then run project commands with `volta run pnpm`.
 
 Copy `.env.example` to `.env` for Prisma and `.env.local` for Next.js. The supported environment settings are:
 
@@ -19,7 +19,6 @@ Start PostgreSQL and prepare the database:
 ```sh
 docker compose up -d postgres
 volta run pnpm db:setup
-volta run pnpm db:seed
 volta run pnpm dev
 ```
 
@@ -55,7 +54,7 @@ volta run pnpm admin:promote -- exact-account-email@example.com
 
 ## Metadata sources
 
-Metadata provider keys and enablement are saved through Admin → Metadata sources. The keys and optional TVDB PIN are encrypted before storage. The API reports only configured and enabled status; secrets are never returned to the browser.
+Metadata provider keys and enablement are saved through Admin → Metadata sources. The keys are encrypted before storage. The API reports only configured and enabled status; secrets are never returned to the browser.
 
 - TMDB supplies popular Movies and Shows on demand. Anime series are included in Shows; anime films are included in Movies. The adapter uses TMDB's TV endpoints for Shows, sets `include_adult=false`, and rejects adult-flagged results. `/credits` contains TMDB attribution.
 - ThePornDB supplies Adult scenes and movies; StashDB supplies popularity-ranked Adult scenes. Adult metadata is text-only and source artwork is not displayed.
@@ -77,11 +76,11 @@ Connection checks, availability checks, and requests run server-side, pin DNS re
 
 To rotate the encryption key, stop the app, set the temporary `INTEGRATION_CREDENTIALS_OLD_KEY` to the current key and `INTEGRATION_CREDENTIALS_KEY` to a new key, then run `volta run pnpm integrations:rotate-key`. Remove the old key and restart the app after the rotation succeeds.
 
-## Catalogue and recommendation boundary
+## Discovery and recommendation boundary
 
-Discovery does not read or write provider metadata in `CatalogueEntry`. On each page request, the server gets current provider-ranked feeds directly. There is no scheduled sync or provider-response cache. Account discovery state and recommendation events retain provider item IDs only; media details are returned transiently to render the current feed. `CatalogueEntry` and local fixture rows remain for backwards compatibility but are not shown as discovery titles. Adult feeds are requested and returned only when both the instance switch and the account grant are enabled.
+On each page request, the server gets current popular feeds directly. There is no catalogue table, scheduled sync, search/import flow, or provider-response cache. Account discovery state and recommendation events retain provider item IDs and user actions; media details are returned transiently to render the current feed. TMDB supplies Movies and Shows only. ThePornDB and StashDB supply Adult only, and Adult feeds are requested and returned only when both the instance switch and the account grant are enabled. The `20261031030000_remove_cached_catalogue_tvdb` migration permanently drops cached media rows and deletes the obsolete TVDB credential; back up PostgreSQL before upgrading.
 
-The ranker combines current choices with account-owned `RecommendationEvent` history from earlier sessions. Same-origin `POST /api/recommendation-events` accepts event batches for the signed-in account; `GET /api/recommendation-events?category=Movies&excludeSessionId=...` returns category-scoped profile signals. Undo and pre-review shortlist withdrawal retract the targeted decision signal. Review and save actions remain distinct history events and are not collapsed into swipe decisions. See [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md).
+The ranker combines current choices with account-owned `RecommendationEvent` history from earlier sessions. Same-origin `POST /api/recommendation-events` accepts event batches for the signed-in account; `GET /api/recommendation-events?category=Movies&excludeSessionId=...` returns category-scoped profile signals. Events may contain provider item IDs and ordered ID-only candidate traces, never title metadata. Undo retracts its targeted decision; shortlist withdrawal and review removal preserve the original consideration signal. Review and save actions remain distinct events. See [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md).
 
 `GET /api/health` performs a database readiness check without returning connection details. See [self-hosting.md](self-hosting.md) for Docker Compose and Proxmox LXC deployment instructions.
 

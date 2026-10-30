@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, AuthenticationError, AuthorizationError } from "@/lib/auth-session";
 import { getGlobalSettings } from "@/lib/global-settings";
-import { getTvdbProviderStatus } from "@/lib/providers/tvdb-config";
 import { getTmdbProviderStatus } from "@/lib/providers/tmdb-config";
 import { getAdultMetadataProviderStatus } from "@/lib/providers/adult-metadata-config";
 
@@ -15,10 +14,9 @@ function errorResponse(error: unknown) {
 export async function GET() {
   try {
     await requireAdmin();
-    const [settings, tmdb, tvdb, theporndb, stashdb] = await Promise.all([
+    const [settings, tmdb, theporndb, stashdb] = await Promise.all([
       getGlobalSettings(),
       getTmdbProviderStatus(),
-      getTvdbProviderStatus(),
       getAdultMetadataProviderStatus("theporndb"),
       getAdultMetadataProviderStatus("stashdb"),
     ]);
@@ -26,7 +24,6 @@ export async function GET() {
       adultSectionEnabled: settings.adultSectionEnabled,
       providers: {
         tmdb: { ...tmdb, integration: "configured" },
-        tvdb: { ...tvdb, integration: "configured" },
         theporndb: { ...theporndb, integration: "configured" },
         stashdb: { ...stashdb, integration: "configured" },
       },
