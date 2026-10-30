@@ -8,6 +8,7 @@ import { rankSessionRecommendations } from "@/lib/recommendations";
 type Decision = "keep" | "pass";
 interface SessionState {
   category: Category;
+  lockedItemId: string | null;
   decisions: Record<string, Decision>;
   shortlisted: string[];
   saved: string[];
@@ -16,7 +17,7 @@ interface SessionState {
   view: "discover" | "review";
   ageVerified: boolean;
 }
-const initialState = (): SessionState => ({ category:"Movies", decisions:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
+const initialState = (): SessionState => ({ category:"Movies", lockedItemId:null, decisions:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
 const seerrAvailabilityLabels: Record<string, string> = {
   "not-listed": "No matching result in Seerr",
   "not-requested": "Not requested",
@@ -118,8 +119,8 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const recommendations = rankSessionRecommendations(categoryItems, session.decisions);
   const items = recommendations.items;
   const remainingItems = items.filter(candidate => !session.decisions[candidate.id]);
-  const item = remainingItems[0];
-  const nextItem = remainingItems[1];
+  const item = remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0];
+  const nextItem = remainingItems.find(candidate => candidate.id !== item?.id);
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
@@ -154,6 +155,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
         next.reviewRemoved = next.reviewRemoved.filter(id => typeof id === "string" && availableIds.has(id));
         next.history = next.history.filter(entry => entry && typeof entry.id === "string" && availableIds.has(entry.id) && (entry.decision === "keep" || entry.decision === "pass"));
         next.decisions = Object.fromEntries(Object.entries(next.decisions).filter(([id, decision]) => availableIds.has(id) && (decision === "keep" || decision === "pass")));
+        if (next.lockedItemId && (!availableIds.has(next.lockedItemId) || next.decisions[next.lockedItemId] || !catalogue.some(candidate => candidate.id === next.lockedItemId && candidate.category === next.category))) next.lockedItemId = null;
         setSession(next);
         if (hasLegacyState) { try { localStorage.setItem("choice-fatigue-legacy-pending", "1"); } catch { /* Continue without browser-local migration bookkeeping. */ } }
         setReady(true);
@@ -269,11 +271,14 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   }
   function decide(decision:Decision) {
     if (!item) return;
+    const currentItem = item;
+    const nextItemId = nextItem?.id ?? null;
     setSession(current => ({
       ...current,
-      decisions:{...current.decisions, [item.id]:decision},
-      shortlisted:decision === "keep" ? [...current.shortlisted.filter(id => id !== item.id), item.id] : current.shortlisted,
-      history:[...current.history, {id:item.id, decision}],
+      lockedItemId:nextItemId && !current.decisions[nextItemId] && catalogue.some(candidate => candidate.id === nextItemId && candidate.category === current.category) ? nextItemId : null,
+      decisions:{...current.decisions, [currentItem.id]:decision},
+      shortlisted:decision === "keep" ? [...current.shortlisted.filter(id => id !== currentItem.id), currentItem.id] : current.shortlisted,
+      history:[...current.history, {id:currentItem.id, decision}],
     }));
   }
   function transitionDecision(decision:Decision, source:"drag"|"control"="control") {
@@ -300,12 +305,12 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
       if (!last) return current;
       const decisions={...current.decisions}; delete decisions[last.id];
       const restoredCategory=catalogue.find(candidate=>candidate.id===last.id)?.category ?? current.category;
-      return {...current, category:restoredCategory, view:"discover", decisions, shortlisted:current.shortlisted.filter(id=>id!==last.id), history:current.history.slice(0,-1)};
+      return {...current, category:restoredCategory, lockedItemId:last.id, view:"discover", decisions, shortlisted:current.shortlisted.filter(id=>id!==last.id), history:current.history.slice(0,-1)};
     });
   }
   function changeCategory(category:Category) {
     if (category === "Adult" && !session.ageVerified) { setAgeOpen(true); return; }
-    setSession(current=>({...current, category, view:"discover"})); setDetails(null);
+    setSession(current=>({...current, category, lockedItemId:category === current.category ? current.lockedItemId : null, view:"discover"})); setDetails(null);
   }
   function removePick(id:string) {
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions}; });
@@ -329,7 +334,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
   }
   function startFresh() {
-    setSession(current=>({...current, decisions:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
+    setSession(current=>({...current, lockedItemId:null, decisions:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
     showNotice("Fresh session started");
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
@@ -436,8 +441,8 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
         <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in the maybe pile</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
       </aside>}
     </main>
-    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(!session.shortlisted.includes(details.id)){setSession(current=>({...current,decisions:{...current.decisions,[details.id]:"keep"},shortlisted:[...current.shortlisted,details.id],history:[...current.history,{id:details.id,decision:"keep"}]}));}setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
-    {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes. Artwork in this prototype is non-explicit.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult"}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
+    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(item?.id===details.id&&!session.shortlisted.includes(details.id))decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
+    {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes. Artwork in this prototype is non-explicit.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
     {savedOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
       <section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title">
         <button className="modal-close" onClick={() => setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close" /></button>

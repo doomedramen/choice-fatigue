@@ -12,6 +12,7 @@ type Category = "Movies" | "TV" | "Adult";
 type Decision = "keep" | "pass";
 interface SessionState {
   category: Category;
+  lockedItemId: string | null;
   decisions: Record<string, Decision>;
   shortlisted: string[];
   saved: string[];
@@ -20,9 +21,11 @@ interface SessionState {
   view: "discover" | "review";
   ageVerified: boolean;
 }
+type PersistedSessionState = Omit<SessionState, "lockedItemId"> & { lockedItemId?: string | null };
 
 const defaultState: SessionState = {
   category: "Movies",
+  lockedItemId: null,
   decisions: {},
   shortlisted: [],
   saved: [],
@@ -44,10 +47,15 @@ function isIdList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= MAX_COLLECTION_ITEMS && value.every(isId);
 }
 
-function isSessionState(value: unknown): value is SessionState {
+function isSessionState(value: unknown): value is PersistedSessionState {
   if (!isObject(value)) return false;
-  const keys = ["category", "decisions", "shortlisted", "saved", "history", "reviewRemoved", "view", "ageVerified"];
-  if (Object.keys(value).length !== keys.length || keys.some(key => !(key in value))) return false;
+  const keys = ["category", "lockedItemId", "decisions", "shortlisted", "saved", "history", "reviewRemoved", "view", "ageVerified"];
+  const legacyKeys = keys.filter(key => key !== "lockedItemId");
+  const valueKeys = Object.keys(value);
+  const hasCurrentShape = valueKeys.length === keys.length && keys.every(key => key in value);
+  const hasLegacyShape = valueKeys.length === legacyKeys.length && legacyKeys.every(key => key in value);
+  if (!hasCurrentShape && !hasLegacyShape) return false;
+  if (value.lockedItemId !== undefined && value.lockedItemId !== null && !isId(value.lockedItemId)) return false;
   if (value.category !== "Movies" && value.category !== "TV" && value.category !== "Adult") return false;
   if (value.view !== "discover" && value.view !== "review") return false;
   if (typeof value.ageVerified !== "boolean") return false;
@@ -78,7 +86,7 @@ export async function GET() {
     if (state.category === "Adult" && !settings.adultSectionEnabled) {
       return NextResponse.json({ ...defaultState, category: settings.defaultCategory as Category, decisions: state.decisions, shortlisted: state.shortlisted, saved: state.saved, history: state.history, reviewRemoved: state.reviewRemoved });
     }
-    return NextResponse.json(state, { headers: { "x-discovery-state-exists": "true" } });
+    return NextResponse.json({ ...state, lockedItemId: state.lockedItemId ?? null }, { headers: { "x-discovery-state-exists": "true" } });
   } catch (error) {
     console.error("Unable to read discovery state.", error);
     return jsonError("Saved discovery data could not be read.", 500);
@@ -121,8 +129,9 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
-    await saveDiscoveryState(JSON.parse(JSON.stringify(value)));
-    return NextResponse.json(value);
+    const normalizedState = { ...value, lockedItemId: value.lockedItemId ?? null };
+    await saveDiscoveryState(JSON.parse(JSON.stringify(normalizedState)));
+    return NextResponse.json(normalizedState);
   } catch (error) {
     console.error("Unable to save discovery state.", error);
     return jsonError("Discovery data could not be saved.", 500);
