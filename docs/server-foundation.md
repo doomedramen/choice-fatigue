@@ -24,6 +24,12 @@ Better Auth is mounted at `/api/auth/*`:
 
 The frontend includes `/forgot-password` and `/reset-password` screens. The reset email callback redirects back with a short-lived token, and the reset form submits the new password through Better Auth.
 
+## Account data and deletion
+
+- `GET /api/account/export` downloads the signed-in account's profile and discovery state as JSON, with catalogue labels for referenced local titles. It excludes password hashes, sessions, verification tokens, and provider credentials.
+- `/account` provides the export link and account deletion flow. Deletion requires the current password in both the UI and the Better Auth server hook. The deletion hook protects the last active administrator; account-owned discovery state is deleted with its user row, Better Auth removes accounts and sessions, and the post-delete hook removes remaining verification records for that user.
+- Account deletion is permanent. The user should download their export before confirming deletion if they want a copy.
+
 ## Discovery API
 
 - `GET /api/discovery-state` returns the authenticated user's saved discovery state, or the default state on first use.

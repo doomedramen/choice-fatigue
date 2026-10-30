@@ -1,12 +1,12 @@
 # Choice Fatigue: product roadmap
 
-**Status:** planning draft
-**Starting point:** the current Next.js prototype
+**Status:** implementation in progress
+**Checkpoint:** server foundation and account data controls are implemented; database-backed runtime validation is still pending.
 **Planning assumption:** begin with a small invite beta; expand after the core discovery loop and provider terms are settled.
 
 ## Where the project is today
 
-The app is a client-side prototype. Its sample catalogue lives in `src/data.ts`; discovery sessions, saved titles, and the admin demo use browser storage. There is no account system, application API, database, provider connection, or protected admin role. The current admin page is a visual prototype and must not be used to store real user or provider credentials.
+The app now has invite-only Better Auth accounts, required email verification, password recovery, a PostgreSQL/Prisma schema, per-account discovery persistence, first-use migration from the old browser session, account export and deletion, and admin-only settings and account controls. The catalogue remains local mock data; no metadata provider or recommendation service is connected. The initial migration is checked in but has not yet been applied to a running database. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 
@@ -22,11 +22,13 @@ The app is a client-side prototype. Its sample catalogue lives in `src/data.ts`;
 
 - Choose the initial hosting, authentication, and PostgreSQL providers after checking their policies against the intended content, especially the Adult section.
 - Add server-side authentication, session handling, role checks, database migrations, and a staging environment.
-- Model accounts, discovery sessions, decisions, temporary shortlists, removed picks, and permanently saved titles separately.
+- Store account and session records in PostgreSQL; keep each user's discovery decisions, temporary shortlist, removed picks, saved titles, and undo history in their own state row while the catalogue model is still being designed.
 - Move session persistence from browser-only storage to the authenticated account so it works across devices. Keep a local migration path for prototype data only if it is useful to beta testers.
-- Define account deletion, data export, retention, backup, and recovery behavior before inviting users.
+- Provide account data export and password-confirmed deletion; define retention, backups, and restore behavior before inviting users.
 
-**Exit condition:** an invited user can register, sign in, and resume their discovery session on another device; an unauthenticated user cannot read or change account data.
+**Progress:** the auth, account-scoped state, protected admin, export, and deletion paths are implemented. The database migration and end-to-end account flow still need to run against PostgreSQL before this phase can be marked complete.
+
+**Exit condition:** an invited user can register, sign in, export or delete their account, and resume their discovery session on another device; an unauthenticated user cannot read or change account data.
 
 ### 2. Build one complete metadata path
 
@@ -77,8 +79,7 @@ Use beta feedback to choose among collaborative sessions, shareable shortlists, 
 
 ## Immediate next steps
 
-1. Resolve the Adult-section boundary with TMDB and identify hosting providers that allow the planned content.
-2. Confirm whether the first hosted beta is individual-only and invite-only.
-3. Select the database/auth/hosting combination after the content boundary is known.
-4. Write the initial data model and implement one end-to-end server-backed Movies flow using a provider whose terms fit the product.
-5. Convert the admin prototype into a protected settings page only after authentication and server-side storage exist.
+1. Start PostgreSQL, apply the migration, and exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence.
+2. Move the mocked catalogue behind a normalized server-side catalogue boundary and keep fixture data as the local fallback.
+3. Confirm provider terms and the Adult-content boundary before connecting TMDB, TPDb, or StashDB; keep Adult disabled meanwhile.
+4. Choose hosting and rehearse database backup restoration before inviting anyone outside local development.

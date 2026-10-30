@@ -44,6 +44,23 @@ export const auth = betterAuth({
     },
   },
   user: {
+    deleteUser: {
+      enabled: true,
+      beforeDelete: async (user) => {
+        const account = await prisma.user.findUnique({ where: { id: user.id }, select: { role: true, disabled: true } });
+        if (account?.role !== "admin" || account.disabled) return;
+
+        const activeAdmins = await prisma.user.count({ where: { role: "admin", disabled: false } });
+        if (activeAdmins <= 1) {
+          throw new APIError("FORBIDDEN", {
+            message: "This is the last active administrator. Promote another verified account before deleting it.",
+          });
+        }
+      },
+      afterDelete: async (user) => {
+        await prisma.verification.deleteMany({ where: { OR: [{ value: user.id }, { identifier: { contains: user.email } }] } });
+      },
+    },
     additionalFields: {
       role: {
         type: "string",
@@ -62,6 +79,14 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/delete-user") {
+        const password = (ctx.body as { password?: unknown } | undefined)?.password;
+        if (typeof password !== "string" || password.length === 0) {
+          throw new APIError("BAD_REQUEST", { message: "Enter your password to confirm account deletion." });
+        }
+        return;
+      }
+
       if (ctx.path === "/sign-in/email") {
         const suppliedEmail = (ctx.body as { email?: unknown } | undefined)?.email;
         if (typeof suppliedEmail === "string") {
