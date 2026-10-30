@@ -47,10 +47,10 @@ function Icon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function Poster({ item, className="" }: { item: MediaItem; className?: string }) {
+function Poster({ item, className="", loading="lazy" }: { item: MediaItem; className?: string; loading?: "eager" | "lazy" }) {
   const style = { "--p1":item.palette[0], "--p2":item.palette[1], "--p3":item.palette[2] } as CSSProperties;
   return <div className={`poster art-${item.art} ${item.artworkUrl?"has-artwork":""} ${className}`} style={style}>
-    {item.artworkUrl&&<img className="poster-artwork" src={item.artworkUrl} alt="" loading="lazy" draggable={false} referrerPolicy="no-referrer"/>}<div className="poster-grain"/><div className="poster-mark" aria-hidden="true"/>
+    {item.artworkUrl&&<img className="poster-artwork" src={item.artworkUrl} alt="" loading={loading} draggable={false} referrerPolicy="no-referrer"/>}<div className="poster-grain"/><div className="poster-mark" aria-hidden="true"/>
     <div className="poster-copy"><span className="poster-kicker">{item.category === "Adult" ? "AFTER DARK · 18+" : item.type.toUpperCase()}</span><strong>{item.title}</strong><small>{item.label}</small></div>
     <span className="poster-year">{item.year}</span>
   </div>;
@@ -109,6 +109,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const [plexAvailabilityResults, setPlexAvailabilityResults] = useState<Record<string, { inLibrary: boolean; message: string }>>({});
   const [notice, setNotice] = useState("");
   const [cardExiting, setCardExiting] = useState(false);
+  const [promotingItemId, setPromotingItemId] = useState<string | null>(null);
   const drag = useRef<{ x:number }|null>(null);
   const swipeExit = useRef(false);
   const mediaCard = useRef<HTMLElement|null>(null);
@@ -286,6 +287,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     const element=mediaCard.current;
     if (!element) { decide(decision); return; }
     swipeExit.current=true;
+    setPromotingItemId(nextItem?.id ?? null);
     setCardExiting(true);
     element.style.transform=`translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
     element.style.opacity="0";
@@ -295,6 +297,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     const handoffDelay=window.matchMedia("(prefers-reduced-motion: reduce)").matches?0:source==="control"?230:150;
     window.setTimeout(()=>{
       swipeExit.current=false;
+      setPromotingItemId(null);
       setCardExiting(false);
       decide(decision);
     },handoffDelay);
@@ -371,6 +374,42 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     card.classList.remove("drag-keep","drag-pass");
   }
 
+  function renderMediaCard(candidate: MediaItem, active: boolean) {
+    const className = active
+      ? "media-card card-active"
+      : `media-card card-under${promotingItemId === candidate.id ? " card-promoting" : ""}`;
+    return <article
+      key={candidate.id}
+      ref={active ? mediaCard : null}
+      className={className}
+      tabIndex={active ? 0 : -1}
+      aria-hidden={active ? undefined : true}
+      aria-label={active ? `${candidate.title}, ${candidate.year}. Use left and right arrow keys to pass or shortlist.` : undefined}
+      onPointerDown={active ? onCardPointerDown : undefined}
+      onPointerMove={active ? onCardPointerMove : undefined}
+      onPointerUp={active ? onCardPointerUp : undefined}
+      onPointerCancel={active ? onCardPointerCancel : undefined}
+    >
+      <Poster item={candidate} className="card-poster" loading="eager"/>
+      {active ? <div className="card-content">
+          <div className="card-overline"><span>{candidate.type} · {candidate.year}</span><span><Icon name="spark"/> {candidate.rating}</span></div>
+          <h2>{candidate.title}</h2>
+          <div className="card-footer">
+            <div className="tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{candidate.runtime}</span></div>
+            <button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`More about ${candidate.title}`}><Icon name="info"/><span>Details</span></button>
+          </div>
+        </div> : <div className="card-content card-under-content">
+          <Poster item={candidate} className="card-under-poster" loading="eager"/>
+          <div className="card-under-copy">
+            <div className="card-overline"><span>{candidate.type} · {candidate.year}</span><span>★ {candidate.rating}</span></div>
+            <h2>{candidate.title}</h2>
+            <div className="tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{candidate.runtime}</span></div>
+          </div>
+        </div>}
+      {active && <><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div></>}
+    </article>;
+  }
+
   useEffect(() => {
     function onKeyDown(event:KeyboardEvent) {
       if (event.key === "Escape") { if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
@@ -423,11 +462,9 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
           <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Your choices shape what comes next through genre, era, and format; source ratings help with close calls.":"Pass or shortlist each title. Your choices shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
-            <div className={`card-stack ${nextItem ? "has-next-card" : ""}`} aria-label="Media discovery card" onPointerDown={onCardPointerDown} onPointerMove={onCardPointerMove} onPointerUp={onCardPointerUp} onPointerCancel={onCardPointerCancel}>
-              {nextItem && <div key={nextItem.id} className="next-card-peek" aria-hidden="true"><Poster item={nextItem} className="next-preview-poster"/><div className="next-card-copy"><span className="next-card-label">UP NEXT</span><strong>{nextItem.title}</strong><small>{nextItem.year ?? "Year unknown"} · {nextItem.type}</small><span className="next-card-genres">{nextItem.genre.slice(0, 2).join(" · ") || "Discover next"}</span></div><span className="next-card-rating">★ {nextItem.rating}</span></div>}
-              <article key={item.id} ref={mediaCard} className="media-card" tabIndex={0} aria-label={`${item.title}, ${item.year}. Use left and right arrow keys to pass or shortlist.`}>
-                <Poster item={item} className="card-poster"/><div className="card-content"><div className="card-overline"><span>{item.type} · {item.year}</span><span><Icon name="spark"/> {item.rating}</span></div><h2>{item.title}</h2><div className="card-footer"><div className="tag-row">{item.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{item.runtime}</span></div><button className="card-details-button" type="button" onClick={()=>setDetails(item)} aria-label={`More about ${item.title}`}><Icon name="info"/><span>Details</span></button></div></div><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div>
-              </article>
+            <div className={`card-stack ${nextItem ? "has-next-card" : ""}`} aria-label="Media discovery card">
+              {nextItem && renderMediaCard(nextItem, false)}
+              {renderMediaCard(item, true)}
             </div>
             <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Pass, left arrow key"><span><Icon name="close"/></span><small>PASS <kbd>←</kbd></small></button><button className="undo-inline" onClick={undo} disabled={!session.history.length} aria-label="Undo last choice"><Icon name="rewind"/></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Shortlist, right arrow key"><span><Icon name="check"/></span><small>SHORTLIST <kbd>→</kbd></small></button></div>
             <p className="gesture-hint">Drag the card, or use <kbd>←</kbd> pass and <kbd>→</kbd> shortlist</p><div className="progress-track"><span style={{width:`${Math.min(100,seenCount/items.length*100)}%`}}/></div>
