@@ -41,10 +41,13 @@
 .connectionTitle h3 { overflow:hidden; margin:0; color:#fff; font-size:15px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
 .connectionTitle p { margin:4px 0 0; color:#b7c1d2; font-size:12px; }
 .url { margin:11px 0 0; overflow-wrap:anywhere; color:#9fabc0; font-size:12px; }
-.connectionActions { display:flex; gap:8px; }
+.connectionActions { display:flex; flex-wrap:wrap; gap:8px; }
 .connectionActions button { min-height:38px; padding:0 11px; border:1px solid #46536a; border-radius:7px; background:#242f44; color:#edf0f6; font-size:12px; font-weight:800; }
 .connectionActions button:last-child { border-color:#75464c; background:#3b242b; color:#ffd1ca; }
 .connectionActions button:disabled { opacity:.45; }
+.checkSuccess,.checkError { margin:8px 0 0; font-size:12px; line-height:1.45; }
+.checkSuccess { color:#a9ebbe; }
+.checkError { color:#ffbdb4; }
 .status { min-height:20px; margin:12px 2px 0; color:#bce9c9; font-size:13px; }
 .nextStep { margin:0; padding:14px 2px 0; border-top:1px solid #2d374b; color:#8d9ab0; font-size:12px; line-height:1.5; }
 .futurePanel { margin-top:15px; padding:17px 20px; border:1px dashed #46536a; border-radius:12px; background:#121a29; }

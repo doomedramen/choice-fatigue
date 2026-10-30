@@ -31,6 +31,8 @@ export default function IntegrationsClient({ adultSectionEnabled }: { adultSecti
   const [form, setForm] = useState<FormFields>(blankForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [connectionChecks, setConnectionChecks] = useState<Record<string, { message: string; ok: boolean }>>({});
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -85,6 +87,7 @@ export default function IntegrationsClient({ adultSectionEnabled }: { adultSecti
       if (response.status === 401) { window.location.replace("/sign-in"); return; }
       const data = await response.json() as { integration?: Integration; error?: string };
       if (!response.ok || !data.integration) throw new Error(data.error || "Connection could not be saved.");
+      setConnectionChecks({});
       setNotice(editingId ? "Connection settings updated. The service has not been checked yet." : "Connection saved securely. The service has not been checked yet.");
       setForm(blankForm);
       setEditingId(null);
@@ -116,6 +119,23 @@ export default function IntegrationsClient({ adultSectionEnabled }: { adultSecti
     }
   }
 
+  async function checkConnection(connection: Integration) {
+    if (checkingId || pending) return;
+    setCheckingId(connection.id);
+    setConnectionChecks(current => ({ ...current, [connection.id]: { message: "Checking…", ok: false } }));
+    try {
+      const response = await fetch(`/api/integrations/${connection.id}/test`, { method: "POST" });
+      if (response.status === 401) { window.location.replace("/sign-in"); return; }
+      const data = await response.json() as { connected?: boolean; error?: string };
+      if (!response.ok || data.connected !== true) throw new Error(data.error || "Connection could not be checked.");
+      setConnectionChecks(current => ({ ...current, [connection.id]: { message: "Connected", ok: true } }));
+    } catch (cause) {
+      setConnectionChecks(current => ({ ...current, [connection.id]: { message: cause instanceof Error ? cause.message : "Connection could not be checked.", ok: false } }));
+    } finally {
+      setCheckingId(null);
+    }
+  }
+
   return <div className={styles.page}>
     <header className={styles.header}><Link href="/" className={styles.brand}><span aria-hidden="true">✳</span> Choice Fatigue</Link><Link href="/account" className={styles.back}>← Account settings</Link></header>
     <main className={styles.main}>
@@ -134,7 +154,7 @@ export default function IntegrationsClient({ adultSectionEnabled }: { adultSecti
         <form className={styles.form} onSubmit={saveConnection}>
           <label className={styles.field} htmlFor="connection-service"><span>Service</span><select id="connection-service" value={form.service} disabled={pending || Boolean(editingId)} onChange={event => setForm({ ...form, service: event.target.value as IntegrationService })}>{integrationServices.map(service => <option key={service.id} value={service.id} disabled={service.adultOnly && !adultSectionEnabled}>{service.name}{service.adultOnly && !adultSectionEnabled ? " · Adult section off" : ""}</option>)}</select></label>
           <label className={styles.field} htmlFor="connection-name"><span>Connection name</span><input id="connection-name" value={form.name} maxLength={60} autoComplete="off" placeholder={selectedService?.name ?? "My server"} required disabled={pending} onChange={event => setForm({ ...form, name: event.target.value })}/><small>Use a label such as “Living room” or “Anime library”.</small></label>
-          <label className={styles.field} htmlFor="connection-url"><span>Server address</span><input id="connection-url" type="url" inputMode="url" value={form.baseUrl} maxLength={2048} autoComplete="url" placeholder="https://media.example.com" required disabled={pending} onChange={event => setForm({ ...form, baseUrl: event.target.value })}/><small>Enter the address this app can reach, including any URL path or port. Do not include a username or password.</small></label>
+          <label className={styles.field} htmlFor="connection-url"><span>Server address</span><input id="connection-url" type="url" inputMode="url" value={form.baseUrl} maxLength={2048} autoComplete="url" placeholder="https://media.example.com" required disabled={pending} onChange={event => setForm({ ...form, baseUrl: event.target.value })}/><small>Enter the address this app can reach, including any URL path or port. Do not include a username or password. Shared servers use public HTTPS addresses; self-hosted admins can opt in to private-network access.</small></label>
           <label className={styles.field} htmlFor="connection-key"><span>{selectedService?.credentialLabel ?? "API key"}</span><input id="connection-key" type="password" value={form.apiKey} maxLength={4096} autoComplete="new-password" placeholder={editingId ? "Leave blank to keep the saved credential" : "Enter credential"} required={!editingId} disabled={pending} onChange={event => setForm({ ...form, apiKey: event.target.value })}/><small>{editingId ? "Leave this blank to keep the current credential, or enter a replacement." : "Only this connection’s owner can replace or remove this credential."}</small></label>
           {adultUnavailable && <p className={styles.formNote}>Whisparr and Stash connections are available after the Adult section is enabled for this instance.</p>}
           {error && <p className={styles.error} role="alert">{error}</p>}
@@ -147,15 +167,15 @@ export default function IntegrationsClient({ adultSectionEnabled }: { adultSecti
         {connections === null && !loadError && <p className={styles.empty}>Loading your connections…</p>}
         {connections?.length === 0 && <p className={styles.empty}>No services connected yet. Saved connections will appear here.</p>}
         {connections && connections.length > 0 && <ul className={styles.list}>{connections.map(connection => <li key={connection.id} className={styles.connection}>
-          <div className={styles.connectionBody}><div className={styles.connectionTitle}><span className={styles.serviceMark} aria-hidden="true">{serviceName(connection.service).slice(0, 1)}</span><div><h3>{connection.name}</h3><p>{serviceName(connection.service)} · Credential saved · Not checked</p></div></div><p className={styles.url}>{connection.baseUrl ?? "Server address hidden until secure storage is configured"}</p></div>
-          <div className={styles.connectionActions}><button type="button" onClick={() => beginEdit(connection)} disabled={pending || !encryptionConfigured}>Edit</button><button type="button" onClick={() => void removeConnection(connection)} disabled={pending}>Remove</button></div>
+          <div className={styles.connectionBody}><div className={styles.connectionTitle}><span className={styles.serviceMark} aria-hidden="true">{serviceName(connection.service).slice(0, 1)}</span><div><h3>{connection.name}</h3><p>{serviceName(connection.service)} · Credential saved · {connectionChecks[connection.id]?.message ?? "Not checked"}</p></div></div><p className={styles.url}>{connection.baseUrl ?? "Server address hidden until secure storage is configured"}</p>{connectionChecks[connection.id] && <p className={connectionChecks[connection.id].ok ? styles.checkSuccess : styles.checkError} role="status">{connectionChecks[connection.id].message}</p>}</div>
+          <div className={styles.connectionActions}>{connection.service === "seerr" && <button type="button" onClick={() => void checkConnection(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>{checkingId === connection.id ? "Checking…" : "Test"}</button>}<button type="button" onClick={() => beginEdit(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>Edit</button><button type="button" onClick={() => void removeConnection(connection)} disabled={pending || checkingId !== null}>Remove</button></div>
         </li>)}</ul>}
       </section>
 
       <section className={styles.futurePanel} aria-labelledby="trakt-title"><p className={styles.eyebrow}>COMING NEXT</p><h2 id="trakt-title">Trakt watch history</h2><p>Trakt uses a user-authorized sign-in flow, so it will connect separately from the server-key services above. Your watch history will stay private to your account.</p></section>
 
       <p className={styles.status} role="status" aria-live="polite">{notice}</p>
-      <p className={styles.nextStep}>Service checks, library lookups, and request actions will be added after this secure account-owned setup layer.</p>
+      <p className={styles.nextStep}>Seerr connections can be checked here. TMDB-linked movies and shows in your Saved list can be sent to Seerr. Library lookups and the other service actions are coming later.</p>
     </main>
   </div>;
 }

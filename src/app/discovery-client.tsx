@@ -49,9 +49,10 @@ interface DiscoveryClientProps {
   isAdmin: boolean;
   adultSectionEnabled: boolean;
   mediaItems: MediaItem[];
+  seerrConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems, seerrConnections }: DiscoveryClientProps) {
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -60,6 +61,9 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const [details, setDetails] = useState<MediaItem|null>(null);
   const [ageOpen, setAgeOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
+  const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
+  const [requestingKey, setRequestingKey] = useState("");
+  const [requestMessages, setRequestMessages] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [cardExiting, setCardExiting] = useState(false);
   const drag = useRef<{ x:number }|null>(null);
@@ -144,6 +148,27 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   function showNotice(message:string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2100);
+  }
+  async function requestSavedTitle(pick: MediaItem) {
+    if (!selectedSeerrId || !pick.requestable || requestingKey) return;
+    const key = `${selectedSeerrId}:${pick.id}`;
+    setRequestingKey(key);
+    setRequestMessages(current => ({ ...current, [key]: "" }));
+    try {
+      const response = await fetch(`/api/integrations/${selectedSeerrId}/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ catalogueEntryId: pick.id }),
+      });
+      if (response.status === 401) { window.location.replace("/sign-in"); return; }
+      const data = await response.json() as { requested?: boolean; error?: string };
+      if (!response.ok || data.requested !== true) throw new Error(data.error || "Seerr could not accept this title.");
+      setRequestMessages(current => ({ ...current, [key]: "Request sent to Seerr." }));
+    } catch (cause) {
+      setRequestMessages(current => ({ ...current, [key]: cause instanceof Error ? cause.message : "Seerr could not accept this title." }));
+    } finally {
+      setRequestingKey("");
+    }
   }
   function decide(decision:Decision) {
     if (!item) return;
@@ -309,7 +334,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     </main>
     {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><Poster item={details} className="modal-poster"/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(!session.shortlisted.includes(details.id)){setSession(current=>({...current,decisions:{...current.decisions,[details.id]:"keep"},shortlisted:[...current.shortlisted,details.id],history:[...current.history,{id:details.id,decision:"keep"}]}));}setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
     {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes. Artwork in this prototype is non-explicit.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult"}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
-    {savedOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setSavedOpen(false);}}><section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title"><button className="modal-close" onClick={()=>setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close"/></button><div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div><h2 id="saved-title">Saved for later</h2><p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>{saved.length?<div className="saved-grid">{saved.map(pick=><div className="saved-item" key={pick.id}><Poster item={pick} className="saved-poster"/><div><strong>{pick.title}</strong><small>{pick.year} · {pick.category}</small></div></div>)}</div>:<div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}<button className="button button-dark saved-done" onClick={()=>setSavedOpen(false)}>Done</button></section></div>}
+    {savedOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setSavedOpen(false);}}><section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title"><button className="modal-close" onClick={()=>setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close"/></button><div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div><h2 id="saved-title">Saved for later</h2><p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>{saved.length>0&&seerrConnections.length>0&&<label className="saved-connection-select">Send requests to<select value={selectedSeerrId} onChange={event=>setSelectedSeerrId(event.target.value)}>{seerrConnections.map(connection=><option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>}{saved.length>0&&seerrConnections.length===0&&<p className="saved-connect-prompt">Connect a Seerr server to request eligible titles. <a href="/integrations">Manage connections →</a></p>}{saved.length?<div className="saved-grid">{saved.map(pick=>{const key=`${selectedSeerrId}:${pick.id}`;const status=requestMessages[key];return <div className="saved-item" key={pick.id}><Poster item={pick} className="saved-poster"/><div className="saved-item-copy"><strong>{pick.title}</strong><small>{pick.year} · {pick.category}</small>{status&&<small className={status.startsWith("Request sent")?"request-success":"request-feedback"} role="status">{status}</small>}</div>{pick.requestable&&seerrConnections.length>0?<button className="saved-request-button" type="button" onClick={()=>void requestSavedTitle(pick)} disabled={!selectedSeerrId||requestingKey!==""||saveStatus==="saving"||status?.startsWith("Request sent")===true}>{saveStatus==="saving"?"Syncing…":requestingKey===key?"Sending…":status?.startsWith("Request sent")?"Requested":"Request"}</button>:<span className="saved-request-note">{pick.requestable?"Connect Seerr":"TMDB link needed"}</span>}</div>;})}</div>:<div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}<button className="button button-dark saved-done" onClick={()=>setSavedOpen(false)}>Done</button></section></div>}
     <div className={`toast ${notice?"show":""}`} role="status" aria-live="polite">{notice}</div>
   </div>;
 }

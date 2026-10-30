@@ -13,6 +13,9 @@ function fromDatabase(entry: Awaited<ReturnType<typeof prisma.catalogueEntry.fin
     ? [entry.palette[0], entry.palette[1], entry.palette[2]] as [string, string, string]
     : fixture?.palette ?? defaultPalette;
 
+  const tmdbMatch = entry.source === "tmdb" ? /^(movie|tv):(\d{1,10})$/.exec(entry.sourceId) : null;
+  const tmdbId = tmdbMatch ? Number(tmdbMatch[2]) : NaN;
+
   return {
     id: entry.id,
     title: entry.title,
@@ -29,6 +32,9 @@ function fromDatabase(entry: Awaited<ReturnType<typeof prisma.catalogueEntry.fin
     category,
     ...(entry.ageRestriction === null ? {} : { age: entry.ageRestriction }),
     contentFlags: entry.contentFlags,
+    ...(tmdbMatch && Number.isSafeInteger(tmdbId) && tmdbId > 0
+      ? { requestable: { provider: "tmdb" as const, mediaType: tmdbMatch[1] as "movie" | "tv", id: tmdbId } }
+      : {}),
   };
 }
 

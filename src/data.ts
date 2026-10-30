@@ -17,6 +17,7 @@ export interface MediaItem {
   category: Category;
   age?: number;
   contentFlags?: string[];
+  requestable?: { provider: "tmdb"; mediaType: "movie" | "tv"; id: number };
 }
 
 export const media: MediaItem[] = [
