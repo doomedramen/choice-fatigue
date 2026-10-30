@@ -1,6 +1,6 @@
 # Choice Fatigue
 
-A responsive media discovery app built with Next.js and TypeScript. It includes invite-only accounts after first-run setup, password recovery, per-account discovery sessions, account export and deletion, protected admin settings, shared media service connections, and database-backed metadata provider settings. The catalogue supports local fixtures and administrator-managed metadata imports; recommendation logic is not connected.
+A responsive media discovery app built with Next.js and TypeScript. It includes invite-only accounts after first-run setup, password recovery, per-account discovery sessions, account export and deletion, protected admin settings, shared media service connections, and database-backed metadata provider settings. The catalogue supports local fixtures and administrator-managed metadata imports, with session-scoped recommendations based on explicit choices.
 
 ## Run locally
 
@@ -50,7 +50,7 @@ For a TypeScript check, run `volta run pnpm typecheck`. For the live development
 - TMDB, TheTVDB, ThePornDB, and StashDB credentials are encrypted in PostgreSQL. TMDB search/import supports Movies and TV; anime series are found under TV and anime films under Movies. Adult-flagged TMDB results are rejected. ThePornDB and StashDB support text-only Adult metadata; source artwork is not imported or displayed.
 - Seerr, Plex, Radarr, Sonarr, Whisparr v2/v3, Stash, Jellyfin, and Emby connections are configured once in Admin settings and shared by the instance. Their server addresses and credentials are encrypted at rest. Admins can test supported connections; users can check TMDB-linked saved titles against Seerr and Plex and request eligible titles through Seerr.
 - The catalogue is stored in a normalized PostgreSQL table. `volta run pnpm db:seed` loads the local fixtures; the app falls back to fixtures if the catalogue table has no entries.
-- The proposed personalization approach is documented in [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md). It is not implemented; the current discovery order remains catalogue-driven.
+- Discovery uses a session-scoped genre ranker: shortlist is weighted `+1`, pass `−0.5`, and choices only affect titles in the current category. Persistent learning across sessions is not implemented; see [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md).
 - The first account can sign up without an invite and becomes administrator. Later sign-ups require the invite code saved by an administrator. Signup and sign-in do not send or require email verification.
 - Adult is disabled by default and is controlled by the admin setting. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 

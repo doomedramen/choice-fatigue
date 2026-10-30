@@ -1,6 +1,6 @@
 # Choice Fatigue recommendation plan
 
-**Status:** Proposed; no recommendation algorithm is implemented yet  
+**Status:** A transparent, session-scoped genre ranker is implemented; persistent preference learning and richer catalogue features remain planned
 **Date:** 30 October 2026
 
 ## Product goal
@@ -15,20 +15,20 @@ Keep the kinds of feedback separate. The first version should use only deliberat
 
 | User action | Initial interpretation | How to use it |
 | --- | --- | --- |
-| Pass | Mild negative signal; a quick choice can be noisy | Reduce similar candidates modestly, with low confidence |
-| Shortlist during discovery | Tentative positive signal | Increase the weight of the item's features a little |
-| Remove before review | The initial interest was withdrawn | Keep distinct from a pass; treat as weak or uncertain evidence |
-| Remove during review | The title was promising, but lost out after seeing alternatives | Keep it as a weak positive and compare it against titles retained in the same review |
-| Keep through review | The title remained attractive after comparison | Stronger positive signal than the initial shortlist action |
+| Pass | Explicit negative signal, but weaker than a positive choice | Start at **−0.5**; reduce the weight of matching genres |
+| Shortlist during discovery | Explicit positive choice | Start at **+1**; raise the weight of matching genres |
+| Remove before review | The initial interest was withdrawn | Remove that title's positive contribution; do not count it as a pass |
+| Remove during review | The title was promising, but lost out after seeing alternatives | Do not count it as a pass; relative comparison can be added when review events are retained |
+| Keep through review | The title remained attractive after comparison | Potentially stronger than an initial shortlist; the current ranker does not yet distinguish the two |
 | Restore during review | The user changed their mind and kept the title | Use the final review outcome; do not count the temporary removal as a negative |
-| Save permanently | The user chose to keep the title for later | Strongest individual positive signal in the first version |
+| Save permanently | The user chose to keep the title for later | Positive evidence; later versions can distinguish this from a tentative shortlist |
 | Undo | The previous action was accidental or reconsidered | Reverse that action so it does not train the profile |
 
 In particular, a review removal must not be treated like a swipe left. When a review has both retained and removed titles, the retained titles provide a useful within-session comparison set. The algorithm can learn that one set was more compelling *for this user in this session* without turning the removed titles into dislikes.
 
 ## First algorithm: understandable and content-based
 
-Start with a deterministic content-based ranker. It needs no recommendation API, model training, or cross-user data, and it can work with the catalogue and explicit actions already planned for the product.
+The first implementation is a deterministic, content-based ranker. It needs no recommendation API, model training, or cross-user data, and it can work with the catalogue and explicit actions already planned for the product. The initial signal weights are **shortlist = +1** and **pass = −0.5**: a pass lowers similar candidates, but less than a shortlist raises them.
 
 ### 1. Build an eligible candidate set
 
@@ -39,36 +39,38 @@ Start with a deterministic content-based ranker. It needs no recommendation API,
 
 ### 2. Represent user and title interests
 
-Use known catalogue features such as genre, release era, language, runtime, and carefully normalized themes or keywords. Build a separate, small profile for each category. Update it from the event meanings above, with stronger actions contributing more and older evidence gradually contributing less.
+The current ranker uses genre tags because they are available consistently in the local catalogue. For each genre, it averages the +1 and −0.5 signals from the user's current-session decisions. A candidate receives the mean score of its genres; genres with no evidence contribute zero. Unseen candidates are sorted by score, with the existing catalogue order breaking ties. Only decisions from the selected category are considered, so Adult choices cannot affect Movies or TV.
+
+This is a within-session first pass, not a lasting taste profile. Starting a fresh session clears the signals used by the ranker. Persisting preferences across sessions requires the per-account event history described below. Later versions can add well-supported features such as release era, language, runtime, and carefully normalized themes or keywords, and can decay older evidence.
 
 Keep a confidence value alongside each preference. A few passes should not make the profile certain that a user dislikes an entire genre. After an undo, restoration, or preference reset, rebuild the profile from the surviving event history rather than trying to patch a stale score.
 
 ### 3. Score for two outcomes
 
-Track two distinct estimates:
+The longer-term design should track two distinct estimates:
 
 1. **Initial interest:** likelihood that this title is worth shortlisting.
 2. **Second-look retention:** likelihood it remains appealing after comparison and is ultimately saved.
 
-The first release can calculate both with simple weighted feature scores. It should give more weight to confirmed review and save actions for second-look retention. Review keep/remove pairs from the same review can add relative evidence. Do not collapse both estimates into a single “like” score.
+The current ranker only estimates initial genre fit from current-session swipes. It does not yet predict second-look retention. Once review outcomes are recorded as durable events, estimate that separately and give confirmed review and save actions more weight. Review keep/remove pairs from the same review can add relative evidence. Do not collapse both estimates into a single “like” score.
 
 ### 4. Reorder with variety and exploration
 
-Mix preference-fit candidates with a broad, exploratory set. Limit runs of very similar genres, years, franchises, or themes so the user can discover adjacent interests instead of seeing a narrow loop. **Starting experiment:** use exploration for about one in five shown titles, and compare that with lower and higher shares during the opt-in trial. This is a tuning hypothesis, not a product rule. Keep the share configurable rather than burying an arbitrary constant in code.
+The session ranker currently sorts by genre fit and keeps the catalogue's original order for ties. The next reranking step should mix preference-fit candidates with a broad, exploratory set and limit runs of very similar genres, years, franchises, or themes. **Starting experiment:** use exploration for about one in five shown titles, and compare that with lower and higher shares during the opt-in trial. This is a tuning hypothesis, not a product rule. Keep the share configurable rather than burying an arbitrary constant in code.
 
 At today's catalogue size, rank the eligible catalogue directly. If it grows, add candidate retrieval first (for example, titles related to items the user kept or saved), then rerank that smaller set for expected interest, second-look retention, quality, diversity, and exploration. This staged approach is common in published recommender designs; it avoids making early complexity a prerequisite for a useful first release. [Meta's Instagram Explore write-up](https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/) describes retrieval followed by ranking stages and using selected interaction-history items as similarity seeds.
 
-TikTok's public explanation also supports distinguishing stronger expressed preferences from weaker context signals, and using both positive and negative actions. For Choice Fatigue, explicit decisions should remain the main source of personalization; device or account context should not be used to guess taste. [TikTok's For You explanation](https://newsroom.tiktok.com/how-tiktok-recommends-videos-for-you?lang=en) describes that relative weighting principle.
+TikTok's public explanation supports using both expressed positive and negative actions, while giving less weight to passive context. Instagram describes a retrieval-and-ranking pipeline with diversity-aware reranking. YouTube describes combining multiple signals to predict whether a recommendation will satisfy the viewer, rather than relying on clicks alone. These are design inspirations, not implementation details to copy: Choice Fatigue should use explicit choices, optimize for titles people still want after comparison, and avoid maximizing time spent. [TikTok's For You explanation](https://newsroom.tiktok.com/how-tiktok-recommends-videos-for-you?lang=en), [Instagram Explore ranking](https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/), [YouTube's recommendation system](https://blog.youtube/inside-youtube/on-youtubes-recommendation-system/).
 
-## Data needed before personalization
+## Data needed before persistent personalization
 
-The current discovery record is a mutable session snapshot. It is enough to resume the UI, but it does not retain every review change after a save. Before learning preferences, add a per-account event history that can distinguish:
+The current discovery record is a mutable session snapshot. It is enough to resume the UI and reorder titles within that session, but it does not retain every review change after a save or keep a learned profile after a fresh session. Before persisting preferences across sessions, add a per-account event history that can distinguish:
 
 - session and review identifiers;
 - the item and category shown;
 - the deliberate action and its order in the session;
 - whether an action was undone or later restored;
-- the algorithm version that selected the item, once ranking is enabled.
+- the algorithm version that ordered the item.
 
 Keep the current saved/shortlist snapshot for fast UI restore. Treat the event history as the source for preference learning. Store only the fields needed to explain and reproduce those preferences, and make it possible to delete or reset that history for an account.
 
@@ -78,7 +80,7 @@ Keep the Adult profile, signals, candidates, and retrieval isolated from general
 
 ## Evaluation and rollout
 
-1. **Instrument first:** record the event types above while keeping the current catalogue order. Confirm that undo, restore, prune, and save are represented correctly.
+1. **Instrument persistent history:** record the event types above and confirm that undo, restore, prune, and save are represented correctly before carrying preference signals across sessions.
 2. **Replay offline:** evaluate recommendations using earlier sessions only to predict later actions. Do not let future choices leak into the profile used for a past recommendation.
 3. **Run a small opt-in trial:** compare the ranker with a balanced, non-personalized catalogue order. Keep a control group and expose a way to reset or turn off personalization.
 4. **Tune using several measures:** shortlist rate, share of shortlisted titles kept after review, permanent saves per session, title diversity, repeat rate, and a simple user satisfaction prompt. Check calibration too: if the system says an item is likely to survive review, that should happen at a similar rate over time.
@@ -93,7 +95,7 @@ Do not optimize one action in isolation. A ranker that increases shortlists but 
 - Add privacy-preserving collaborative filtering only after scale, consent, and Adult-section boundaries are settled.
 - Add user-facing controls for “show me more like this”, “less like this”, “why this title”, and clearing a category profile.
 
-## Decisions to validate before implementation
+## Decisions to validate as ranking matures
 
 - Whether saved titles should be excluded from future discovery by default.
 - Whether an exploration share near 20% improves satisfaction and review retention compared with lower or higher shares.

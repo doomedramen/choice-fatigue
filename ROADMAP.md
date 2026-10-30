@@ -6,7 +6,7 @@
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. Users can save multiple encrypted service connection records on their own accounts. The local OrbStack PostgreSQL database has its migrations applied and 12 fixture entries; no provider credentials or service connections are configured. Service health checks and request/library actions remain open. Recommendation logic is not connected. Adult remains off by default and its age prompt is self-attested.
+The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. Users can save multiple encrypted service connection records on their own accounts. The local OrbStack PostgreSQL database has its migrations applied and 12 fixture entries; no provider credentials or service connections are configured. Service health checks and request/library actions remain open. A session-scoped genre ranker uses shortlist `+1` and pass `−0.5`; persistent preference learning remains open. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 
@@ -76,7 +76,7 @@ The app now has invite-only Better Auth accounts after first-run setup, no email
 
 ### 6. Decide what to build after beta
 
-Use beta feedback to choose among collaborative sessions, shareable shortlists, recommendation/ranking logic, more catalogue sources, and paid plans. Keep these out of the initial launch unless testing shows they are required for the core product.
+Use beta feedback to choose among collaborative sessions, shareable shortlists, persistent recommendation profiles, more catalogue sources, and paid plans. Keep these out of the initial launch unless testing shows they are required for the core product.
 
 ## Immediate next steps
 

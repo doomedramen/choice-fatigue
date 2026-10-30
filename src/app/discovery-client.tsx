@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
+import { rankSessionRecommendations } from "@/lib/recommendations";
 
 type Decision = "keep" | "pass";
 interface SessionState {
@@ -89,12 +90,14 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveVersion = useRef(0);
   const catalogue = mediaItems.filter(item => adultSectionEnabled || item.category !== "Adult");
-  const items = catalogue.filter(item => item.category === session.category);
+  const categoryItems = catalogue.filter(item => item.category === session.category);
+  const recommendations = rankSessionRecommendations(categoryItems, session.decisions);
+  const items = recommendations.items;
   const item = items.find(candidate => !session.decisions[candidate.id]);
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
-  const seenCount = items.length - items.filter(candidate => !session.decisions[candidate.id]).length;
+  const seenCount = categoryItems.length - categoryItems.filter(candidate => !session.decisions[candidate.id]).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -381,7 +384,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           </> : <div className="review-empty"><div className="empty-orbit"><Icon name="spark"/></div><h2>No picks in the maybe pile.</h2><p>Keep browsing and shortlist anything that catches your eye.</p><button className="button button-dark" onClick={leaveReview}>Keep browsing <Icon name="arrow"/></button></div>}
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
-          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":"Pass or shortlist each title. Review your picks when you’re ready."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
+          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Your shortlist moves similar genres up. Passing moves them down more gently.":"Pass or shortlist each title. Your choices shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className="card-stack" aria-label="Media discovery card"><div className="stack-card stack-back stack-back-2"/><div className="stack-card stack-back stack-back-1"/>
               <article key={item.id} ref={mediaCard} className="media-card" tabIndex={0} aria-label={`${item.title}, ${item.year}. Use left and right arrow keys to pass or shortlist.`} onPointerDown={onCardPointerDown} onPointerMove={onCardPointerMove} onPointerUp={onCardPointerUp} onPointerCancel={onCardPointerCancel}>
