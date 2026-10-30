@@ -1,6 +1,6 @@
 # Choice Fatigue recommendation plan
 
-**Status:** The first research-informed content baseline supports confidence shrinkage, transient historical feature lookup, saved-title retention, and same-review comparisons. It remains unvalidated; timestamps, offline evaluation, diversity, and measurement are still open. See the [primary-source research and code audit](recommendation-algorithm-research.md).
+**Status:** The first research-informed content baseline supports confidence shrinkage, transient historical feature lookup, saved-title retention, and same-review comparisons. The offline comparison tool is implemented but remains unvalidated until representative traces are available; timestamps, diversity, and outcome measurement are still open. See the [primary-source research and code audit](recommendation-algorithm-research.md).
 **Date:** 30 October 2026
 
 ## Product goal
@@ -46,9 +46,11 @@ Discovery requests provider-ranked feeds directly when the page opens; no backgr
 
 Historical profile reads now resolve features for a bounded set of prior provider IDs that are absent from the current feed. Those lookups are direct, transient, and uncached; only the resulting compact feature keys live in the response and client memory. The profile API still omits event timestamps, so recency weighting cannot be computed.
 
-### Historical replay (descriptive)
+### Historical replay
 
-Run `pnpm eval:replay -- account-export.json` on a user-authorized account export. The script reads only recommendation event IDs, categories, timestamps, decisions, and ordered candidate-ID traces; it never resolves provider metadata. It reports sessions, candidate sets, impressions, shortlist-to-save counts, median cards to first save, and the provider-order versus observed-display rank of the first saved item when both traces are available. Compare category by category and include sample sizes. Historical choices reflect the ranker and UI that generated them, plus self-selection and incomplete traces; these summaries are descriptive and do not establish causal lift or justify changing weights. Do not pool accounts without an appropriate consent and privacy process.
+Run `pnpm eval:replay -- account-export.json` on a user-authorized account export while the app's `DATABASE_URL` and `INTEGRATION_CREDENTIALS_KEY` are available in `.env`. The evaluator reads only provider IDs, categories, timestamps, decisions, and ordered candidate-ID traces from the export. It resolves current source features transiently from enabled providers, with at most 500 lookups and four concurrent requests, and never writes title metadata to disk or the database. Adult metadata is resolved only when both the exported account grant and instance Adult switch are enabled.
+
+For each traced session, the evaluator compares provider order with the current ranker using historical preference evidence available before that session. It reports shortlist and save mean reciprocal rank and recall at 5 and 10, plus descriptive observed impressions and cards to first save. The report gives eligible, requested, resolved, and limit-omitted metadata counts overall, plus candidate metadata coverage by category, so the 500-lookup cap cannot make overall coverage appear higher. Results are limited to candidate IDs whose current metadata can be resolved. Provider metadata may have changed since the session, and users' later choices were observed under the product's displayed policy. These are offline descriptive comparisons, not causal estimates of a different policy's behavior. Do not tune weights or pool accounts based on low-coverage or insufficiently representative traces; do not pool accounts without an appropriate consent and privacy process.
 
 The baseline represents confidence as well as preference. A few passes are shrunk toward neutral. Profiles are rebuilt from event history after corrections, while current-session decisions are applied separately from durable cross-session taste.
 

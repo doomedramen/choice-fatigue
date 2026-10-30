@@ -26,6 +26,7 @@ export default async function HomePage() {
     adultSectionEnabled={canAccessAdult}
     mediaItems={catalogue.items.filter(item => canAccessAdult || item.category !== "Adult")}
     catalogueNotice={catalogue.notice}
+    categoryOutcomes={catalogue.categoryOutcomes}
     seerrConnections={seerrConnections}
     plexConnections={plexConnections}
   />;

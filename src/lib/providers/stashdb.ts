@@ -130,22 +130,38 @@ export async function getPopularStashDbCatalogue(): Promise<MediaItem[]> {
   return (Array.isArray(response.queryScenes?.scenes) ? response.queryScenes.scenes : [])
     .map(normalizeScene)
     .filter((scene): scene is NonNullable<typeof scene> => scene !== null)
-    .map(scene => ({
-      id: `stashdb-${scene.sourceId}`,
-      title: scene.title,
-      ...(scene.year ? { year: scene.year } : {}),
-      type: "Scene",
-      runtime: scene.runtime ?? "—",
-      rating: "—",
-      genre: scene.genres,
-      synopsis: scene.synopsis,
-      palette: ["#3d2d38", "#2a202b", "#181620"],
-      art: "noir",
-      label: scene.title,
-      category: "Adult" as const,
-      age: 18,
-      contentFlags: ["adult"],
-    }));
+    .map(stashDbMediaItem);
+}
+
+function stashDbMediaItem(scene: NonNullable<ReturnType<typeof normalizeScene>>): MediaItem {
+  return {
+    id: `stashdb-${scene.sourceId}`,
+    title: scene.title,
+    ...(scene.year ? { year: scene.year } : {}),
+    type: "Scene",
+    runtime: scene.runtime ?? "—",
+    rating: "—",
+    genre: scene.genres,
+    synopsis: scene.synopsis,
+    palette: ["#3d2d38", "#2a202b", "#181620"],
+    art: "noir",
+    label: scene.title,
+    category: "Adult",
+    age: 18,
+    contentFlags: ["adult"],
+  };
+}
+
+/** Resolve one saved StashDB ID on demand without retaining its metadata. */
+export async function getStashDbMediaItem(sourceId: string): Promise<MediaItem> {
+  if (!sourceId || sourceId.length > 160 || !/^[A-Za-z0-9_-]+$/.test(sourceId)) throw new StashDbMissingSceneError();
+  const apiKey = await getApiKey();
+  const response = await graphql<FindSceneResponse>(findQuery, { id: sourceId }, apiKey);
+  const scene = response.findScene;
+  if (!scene) throw new StashDbMissingSceneError();
+  const normalized = normalizeScene(scene);
+  if (!normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
+  return stashDbMediaItem(normalized);
 }
 
 export async function getStashDbRecommendationFeatures(sourceId: string) {

@@ -1,0 +1,2 @@
+ALTER TABLE "DiscoveryState"
+ADD COLUMN "revision" INTEGER NOT NULL DEFAULT 0;

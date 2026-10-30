@@ -40,7 +40,7 @@ volta run pnpm admin:promote -- account-email@example.com
 
 For checks, run `volta run pnpm test`, `volta run pnpm typecheck`, and `volta run pnpm exec prisma validate`. Playwright uses disposable PostgreSQL and local mocked metadata providers; set `E2E_DATABASE_URL` to an empty test database, apply migrations with `volta run pnpm db:deploy`, install Chromium with `volta run pnpm exec playwright install chromium`, then run `volta run pnpm test:e2e`. GitHub Actions runs these checks and a production build. Never point the browser suite at a real account database.
 
-To evaluate an authorized account export without fetching or storing provider metadata, run `volta run pnpm eval:replay -- account-export.json`. The report is descriptive and does not estimate causal ranking lift; see [the replay method](docs/recommendation-algorithm-plan.md#historical-replay-descriptive).
+To compare provider order with the current ranker on an authorized account export, run `volta run pnpm eval:replay -- account-export.json` with database and encryption settings available in `.env`. The evaluator resolves current provider features transiently, makes at most 500 detail lookups with four concurrent requests, and never writes metadata to disk or the database. Results use current provider metadata and historical choices, so they are offline descriptive comparisons rather than causal lift estimates. See [the replay method](docs/recommendation-algorithm-plan.md#historical-replay).
 
 ## What works
 

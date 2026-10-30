@@ -6,7 +6,7 @@
 
 ## Where the project is today
 
-The app has first-account administrator setup, manually shared invitation codes, password recovery, per-account discovery persistence, account export and deletion, and protected admin controls. Discovery fetches popular feeds directly with no background sync, response cache, search, import, or media catalogue table. Persisted discovery and recommendation data retain provider IDs and user actions only. TMDB supplies Movies and Shows; ThePornDB and StashDB supply Adult. The ranker includes confidence shrinkage, bounded transient provider lookups, saved-title retention, same-review comparisons, and ID-only candidate traces. Its weights remain unvalidated. See [the algorithm research and implementation order](docs/recommendation-algorithm-research.md). Mocked browser coverage exercises account flows, durable events, provider failures, and Adult grants. A descriptive replay tool is ready, but its real-world report awaits sufficient historical traces.
+The app has first-account administrator setup, manually shared invitation codes, password recovery, per-account discovery persistence, account export and deletion, and protected admin controls. Discovery fetches popular feeds directly with no background sync, response cache, search, import, or media catalogue table. Persisted discovery and recommendation data retain provider IDs and user actions only. TMDB supplies Movies and Shows; ThePornDB and StashDB supply Adult. The ranker includes confidence shrinkage, bounded transient provider lookups, saved-title retention, same-review comparisons, and ID-only candidate traces. Its weights remain unvalidated. See [the algorithm research and implementation order](docs/recommendation-algorithm-research.md). Mocked browser coverage exercises account flows, durable events, provider failures, and Adult grants. The replay tool now compares provider order and the current ranker against observed shortlist/save labels; representative real-world results await sufficient traces.
 
 ## Version 1 decisions
 
@@ -80,7 +80,7 @@ After 1.0, use self-hosted feedback to choose among collaborative sessions, shar
 ## Immediate next steps
 
 1. Confirm the pushed GitHub Actions run passes the browser suite on a clean PostgreSQL service.
-2. Evaluate chronological recommendation replay against enough ID-only traces; report descriptive metrics without causal claims or unsupported weight changes.
+2. Run the chronological provider-order/current-ranker comparison on enough ID-only traces; report coverage and descriptive metrics without causal claims or unsupported weight changes.
 3. Rehearse an app upgrade and HTTPS reverse-proxy setup. Run the LXC installer in a Debian 13 Proxmox environment.
 4. Complete provider-term and request-volume review, especially TMDB's unresolved Adult-section boundary, then perform live smoke checks with operator credentials.
 5. Tag and push `v1.0.0` only after automated checks and external release gates pass.

@@ -5,42 +5,47 @@ on:
   pull_request:
 
 jobs:
-  validate:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17
         env:
-          POSTGRES_DB: choice_fatigue
           POSTGRES_USER: choice_fatigue
-          POSTGRES_PASSWORD: choice_fatigue_ci
+          POSTGRES_PASSWORD: choice_fatigue_dev
+          POSTGRES_DB: choice_fatigue_e2e
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U choice_fatigue -d choice_fatigue"
+          --health-cmd "pg_isready -U choice_fatigue -d choice_fatigue_e2e"
           --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
+          --health-timeout 5s
+          --health-retries 10
     env:
-      DATABASE_URL: postgresql://choice_fatigue:choice_fatigue_ci@127.0.0.1:5432/choice_fatigue?schema=public
-      BETTER_AUTH_SECRET: choice-fatigue-ci-auth-secret-long-enough-for-tests
-      BETTER_AUTH_URL: http://127.0.0.1:4173
+      DATABASE_URL: postgresql://choice_fatigue:choice_fatigue_dev@127.0.0.1:5432/choice_fatigue_e2e?schema=public
+      E2E_DATABASE_URL: postgresql://choice_fatigue:choice_fatigue_dev@127.0.0.1:5432/choice_fatigue_e2e?schema=public
+      BETTER_AUTH_SECRET: ci-only-auth-secret-at-least-32-characters-long
+      BETTER_AUTH_URL: http://localhost:4173
       INTEGRATION_CREDENTIALS_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-      E2E_DATABASE_URL: postgresql://choice_fatigue:choice_fatigue_ci@127.0.0.1:5432/choice_fatigue?schema=public
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 12.16.1
+          run_install: false
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-      - run: pnpm typecheck
-      - run: pnpm exec prisma validate
-      - run: pnpm build
-      - run: pnpm db:deploy
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run release checks
+        run: pnpm test:ci

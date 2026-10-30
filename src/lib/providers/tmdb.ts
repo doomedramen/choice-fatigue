@@ -96,6 +96,36 @@ export async function getTmdbTitleDetails(mediaType: TmdbMediaType, tmdbId: numb
   };
 }
 
+/** Resolve one saved TMDB ID on demand. Provider metadata is returned to the caller and never stored. */
+export async function getTmdbMediaItem(mediaType: TmdbMediaType, tmdbId: number): Promise<MediaItem> {
+  if (!Number.isSafeInteger(tmdbId) || tmdbId < 1) throw new TmdbRequestError();
+  const token = await getEnabledTmdbToken();
+  const record = await requestTmdb<TmdbRecord & { runtime?: unknown; episode_run_time?: unknown; number_of_seasons?: unknown }>(`/${mediaType}/${tmdbId}?language=en-US`, token);
+  if (record.adult === true || record.id !== tmdbId) throw new TmdbAdultResultError();
+  const title = titleFor(record, mediaType);
+  if (!title) throw new TmdbRequestError();
+  const category: TmdbCategory = mediaType === "movie" ? "Movies" : "Shows";
+  const genres = Array.isArray(record.genres) ? record.genres.map(genre => text(genre.name)).filter(Boolean).slice(0, 8) : [];
+  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average) ? Math.min(10, Math.max(0, record.vote_average)).toFixed(1) : "—";
+  return {
+    id: `tmdb-${mediaType}-${tmdbId}`,
+    title,
+    ...(yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date) ? { year: yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date) } : {}),
+    type: mediaType === "movie" ? "Movie" : "Series",
+    runtime: formatRuntime(record, mediaType),
+    rating,
+    genre: genres,
+    synopsis: text(record.overview),
+    ...(posterUrl(record.poster_path) ? { artworkUrl: posterUrl(record.poster_path) } : {}),
+    ...(backdropUrl(record.backdrop_path) ? { backdropUrl: backdropUrl(record.backdrop_path) } : {}),
+    palette: ["#344255", "#263244", "#151d2c"],
+    art: "mist",
+    label: title,
+    category,
+    requestable: { provider: "tmdb", mediaType, id: tmdbId },
+  };
+}
+
 export async function getTmdbRecommendationFeatures(mediaType: TmdbMediaType, tmdbId: number) {
   const details = await getTmdbTitleDetails(mediaType, tmdbId);
   return recommendationFeatureKeys({ genres: details.genres, year: details.year, type: mediaType === "movie" ? "Movie" : "Series" });

@@ -6,6 +6,10 @@ import { getAdultMetadataProviderStatus } from "@/lib/providers/adult-metadata-c
 import { getPopularThePornDBCatalogue } from "@/lib/providers/theporndb";
 import { getPopularStashDbCatalogue } from "@/lib/providers/stashdb";
 
+export type FeedOutcome = "ready" | "unconfigured" | "unavailable" | "empty";
+export type CategoryFeedStatus = { outcome: FeedOutcome; enabledSources: number; successfulSources: number; hasTitles: boolean };
+type FeedSource = { name: string; categories: Array<"Movies" | "Shows" | "Adult">; enabled: boolean; load: () => Promise<MediaItem[]> };
+
 function deduplicateTitles(items: MediaItem[]) {
   const ids = new Set<string>();
   const titles = new Set<string>();
@@ -25,16 +29,27 @@ export async function getDiscoveryCatalogue(includeAdult = false) {
     includeAdult ? getAdultMetadataProviderStatus("theporndb") : null,
     includeAdult ? getAdultMetadataProviderStatus("stashdb") : null,
   ]);
-  const feeds: Promise<MediaItem[]>[] = [];
-  if (tmdbStatus.enabled) feeds.push(getPopularTmdbCatalogue());
-  if (thePornDbStatus?.enabled) feeds.push(getPopularThePornDBCatalogue());
-  if (stashDbStatus?.enabled) feeds.push(getPopularStashDbCatalogue());
-  const results = await Promise.allSettled(feeds);
+  const sources: FeedSource[] = [
+    { name: "tmdb", categories: ["Movies", "Shows"], enabled: tmdbStatus.enabled, load: getPopularTmdbCatalogue },
+    ...(includeAdult ? [{ name: "theporndb", categories: ["Adult"] as Array<"Adult">, enabled: thePornDbStatus?.enabled === true, load: getPopularThePornDBCatalogue }] : []),
+    ...(includeAdult ? [{ name: "stashdb", categories: ["Adult"] as Array<"Adult">, enabled: stashDbStatus?.enabled === true, load: getPopularStashDbCatalogue }] : []),
+  ];
+  const enabledSources = sources.filter(source => source.enabled);
+  const results = await Promise.allSettled(enabledSources.map(source => source.load()));
+  const sourceResults = enabledSources.map((source, index) => ({ source, result: results[index] }));
   const items = results.flatMap(result => result.status === "fulfilled" ? result.value : [])
     .filter(item => includeAdult || item.category !== "Adult");
+  const categoryOutcomes = Object.fromEntries(((["Movies", "Shows", "Adult"] as const).map(category => {
+    const eligible = sourceResults.filter(({ source }) => source.categories.includes(category));
+    const successful = eligible.filter(({ result }) => result.status === "fulfilled");
+    const hasTitles = items.some(item => item.category === category);
+    const outcome: FeedOutcome = !eligible.length ? "unconfigured" : !successful.length ? "unavailable" : hasTitles ? "ready" : "empty";
+    return [category, { outcome, enabledSources: eligible.length, successfulSources: successful.length, hasTitles } satisfies CategoryFeedStatus];
+  }))) as Record<"Movies" | "Shows" | "Adult", CategoryFeedStatus>;
   const providerFailed = results.some(result => result.status === "rejected");
   return {
     items: deduplicateTitles(items),
     notice: providerFailed ? "A metadata source is temporarily unavailable. Available titles are still shown." : "",
+    categoryOutcomes,
   };
 }

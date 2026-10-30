@@ -152,6 +152,17 @@ export async function getPopularThePornDBCatalogue(): Promise<MediaItem[]> {
   return [...scenes, ...movies];
 }
 
+/** Resolve one saved ThePornDB ID on demand without retaining its metadata. */
+export async function getThePornDBMediaItem(kind: ThePornDBKind, sourceId: string): Promise<MediaItem> {
+  if (!idPattern.test(sourceId)) throw new ThePornDBInvalidRecordError();
+  const token = await accessToken();
+  const payload = await requestThePornDB<ThePornDBPayload>(apiPath(kind, sourceId), token);
+  const record = recordsFrom(payload)[0];
+  const item = record ? popularItem(record, kind) : null;
+  if (!item || recordId(record!) !== sourceId) throw new ThePornDBInvalidRecordError();
+  return item;
+}
+
 function apiPath(kind: ThePornDBKind, id?: string) {
   const collection = kind === "scene" ? "scenes" : "movies";
   return id ? `${collection}/${encodeURIComponent(id)}` : collection;

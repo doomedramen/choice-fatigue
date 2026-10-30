@@ -11,13 +11,13 @@ export type RecommendationEventInput = {
 };
 
 function isStringId(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 128;
+  return typeof value === "string" && value.length > 0 && value.length <= 200;
 }
 
 export function recommendationProviderCategoryForId(id: string): RecommendationCategory | null {
   if (/^tmdb-movie-\d{1,10}$/.test(id)) return "Movies";
   if (/^tmdb-tv-\d{1,10}$/.test(id)) return "Shows";
-  if (/^theporndb-(?:scene|movie)-[A-Za-z0-9_-]{1,128}$/.test(id) || /^stashdb-[A-Za-z0-9_-]{1,160}$/.test(id)) return "Adult";
+  if (/^theporndb-(?:scene|movie)-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id) || /^stashdb-[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(id)) return "Adult";
   return null;
 }
 
