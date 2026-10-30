@@ -4,11 +4,11 @@ This is the server-side foundation for Choice Fatigue. Discovery data persists p
 
 ## Local setup
 
-Copy `.env.example` to `.env` for Prisma commands and `.env.local` for Next.js. The example explicitly enables development-only console email delivery, which prints verification and password-reset links to the server terminal. Start PostgreSQL with `docker compose up -d postgres`, then run `npm run db:setup`.
+Copy `.env.example` to `.env` for Prisma commands and `.env.local` for Next.js. The example explicitly enables development-only console email delivery for password-reset links. Signup and sign-in do not use email. Start PostgreSQL with `docker compose up -d postgres`, then run `npm run db:setup`.
 
-Set a unique `BETTER_AUTH_SECRET` and the canonical `BETTER_AUTH_URL` for shared deployments. Configure `BETA_INVITE_CODE` for later signups. When the database has no accounts, the first account can sign up without an invite and receives the administrator role. After that, signup requires `x-beta-invite-code`; it is checked by a server-side Better Auth hook and is never stored. Email delivery must still be configured before signup is allowed.
+Set a unique `BETTER_AUTH_SECRET` and the canonical `BETTER_AUTH_URL` for shared deployments. Configure `BETA_INVITE_CODE` for later signups. When the database has no accounts, the first account can sign up without an invite and receives the administrator role. After that, signup requires `x-beta-invite-code`; it is checked by a server-side Better Auth hook and is never stored. Signup and sign-in do not send or require email verification and do not require mail configuration.
 
-Shared deployments must set `AUTH_EMAIL_MODE=smtp`, `SMTP_URL` (a Nodemailer SMTP connection URL), and `SMTP_FROM` (the verified sender address). Signup is denied unless email delivery is configured. Development can explicitly use `AUTH_EMAIL_MODE=console`; this mode is rejected outside `NODE_ENV=development`. Unverified accounts cannot obtain sessions. Verification is sent at signup and sign-in; password resets revoke existing sessions.
+Email delivery is optional and only used for password recovery. If enabled in a shared deployment, set `AUTH_EMAIL_MODE=smtp`, `SMTP_URL` (a Nodemailer SMTP connection URL), and `SMTP_FROM` (the sender address). Development can explicitly use `AUTH_EMAIL_MODE=console` to print reset links to the server terminal; this mode is rejected outside `NODE_ENV=development`. Password resets revoke existing sessions.
 
 `ADULT_SECTION_ENABLED` defaults to `false`. Adult access is available only when this server setting and `GlobalSettings.adultSectionEnabled` in PostgreSQL are both true. The discovery-state endpoint rejects selecting Adult while disabled and avoids returning a saved Adult selection when the feature is off.
 
@@ -18,11 +18,10 @@ Per-user service connections require a separate `INTEGRATION_CREDENTIALS_KEY` co
 
 Better Auth is mounted at `/api/auth/*`:
 
-- `POST /api/auth/sign-up/email` creates an account. The first account in an empty database does not need `x-beta-invite-code` and becomes administrator. Later accounts must include the configured invite code. A verification email is required before any account can start a session.
-- `POST /api/auth/sign-in/email` signs in a verified account. An unverified account receives a verification email.
+- `POST /api/auth/sign-up/email` creates and signs in an account. The first account in an empty database does not need `x-beta-invite-code` and becomes administrator. Later accounts must include the configured invite code.
+- `POST /api/auth/sign-in/email` signs in an account without checking email ownership.
 - `POST /api/auth/request-password-reset` accepts an email and redirect URL; Better Auth emails the reset link.
 - `POST /api/auth/reset-password` accepts the reset token and new password and revokes existing sessions.
-- Email verification uses Better Auth's generated `/api/auth/verify-email` link.
 
 The frontend includes `/forgot-password` and `/reset-password` screens. The reset email callback redirects back with a short-lived token, and the reset form submits the new password through Better Auth.
 
@@ -37,7 +36,7 @@ The frontend includes `/forgot-password` and `/reset-password` screens. The rese
 - `GET /api/discovery-state` returns the authenticated user's saved discovery state, or the default state on first use.
 - `PUT /api/discovery-state` accepts the same JSON state shape, validates size and fields, and writes it for the authenticated user.
 
-Both methods require a verified Better Auth session. The account ID always comes from the session cookie; request bodies cannot choose another user's row. Requests are limited to 256 KiB. Writes require a matching same-origin `Origin` header.
+Both methods require a signed-in Better Auth session. The account ID always comes from the session cookie; request bodies cannot choose another user's row. Requests are limited to 256 KiB. Writes require a matching same-origin `Origin` header.
 
 ## Catalogue boundary
 
@@ -70,13 +69,13 @@ Import these only from server code:
 
 ## Database models and administrator bootstrap
 
-Better Auth owns the `User`, `Session`, `Account`, and `Verification` records. `User.role` defaults to `user`; on an empty installation, a serialized server-side database hook promotes the oldest account to administrator. For an existing installation that needs administrator recovery, promote a verified account from a trusted shell with:
+Better Auth owns the `User`, `Session`, `Account`, and `Verification` records. `User.role` defaults to `user`; on an empty installation, a serialized server-side database hook promotes the oldest account to administrator. For an existing installation that needs administrator recovery, promote an account from a trusted shell with:
 
 ```sh
-npm run admin:promote -- exact-verified-email@example.com
+npm run admin:promote -- exact-account-email@example.com
 ```
 
-The command requires an exact existing email and refuses unverified accounts. It does not accept email or role values from signup requests.
+The command requires an exact existing email. It does not accept email or role values from signup requests.
 
 `DiscoveryState` stores the UI state as one JSON row per user, keyed by `userId`; it keeps decisions, temporary shortlist, saved titles, undo history, and review state together while the data model is evolving. `GlobalSettings` is a singleton row for app name, default category, and the Adult feature flag.
 
@@ -85,4 +84,3 @@ The command requires an exact existing email and refuses unverified accounts. It
 - [Better Auth with Next.js](https://better-auth.com/docs/integrations/next)
 - [Better Auth Prisma adapter](https://better-auth.com/docs/adapters/prisma)
 - [Better Auth email and password](https://better-auth.com/docs/concepts/email)
-- [Better Auth email verification](https://better-auth.com/docs/concepts/email#email-verification)

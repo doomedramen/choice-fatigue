@@ -10,7 +10,7 @@ if (!databaseURL) {
 }
 
 if (!email || process.argv.length !== 3 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-  throw new Error("Usage: npm run admin:promote -- exact-verified-email@example.com");
+  throw new Error("Usage: npm run admin:promote -- exact-account-email@example.com");
 }
 
 async function promoteAdmin() {
@@ -19,12 +19,11 @@ async function promoteAdmin() {
   try {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) throw new Error(`No existing account has the exact email address: ${email}`);
-    if (!user.emailVerified) throw new Error(`Refusing to promote ${email}: the email address is not verified.`);
     if (user.role === "admin") {
       console.info(`${email} is already an administrator.`);
     } else {
       await prisma.user.update({ where: { id: user.id }, data: { role: "admin" } });
-      console.info(`Promoted verified account ${email} to administrator.`);
+      console.info(`Promoted account ${email} to administrator.`);
     }
   } finally {
     await prisma.$disconnect();

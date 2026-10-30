@@ -6,7 +6,7 @@
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts, required email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. Users can save multiple encrypted service connection records on their own accounts. The local OrbStack PostgreSQL database has its migrations applied and 12 fixture entries; no provider credentials or service connections are configured. Service health checks and request/library actions remain open. Recommendation logic is not connected. Adult remains off by default and its age prompt is self-attested.
+The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. Users can save multiple encrypted service connection records on their own accounts. The local OrbStack PostgreSQL database has its migrations applied and 12 fixture entries; no provider credentials or service connections are configured. Service health checks and request/library actions remain open. Recommendation logic is not connected. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 
@@ -26,7 +26,7 @@ The app now has invite-only Better Auth accounts, required email verification, p
 - Move session persistence from browser-only storage to the authenticated account so it works across devices. Keep a local migration path for prototype data only if it is useful to beta testers.
 - Provide account data export and password-confirmed deletion; define retention, backups, and restore behavior before inviting users.
 
-**Progress:** the auth, account-scoped state, protected admin, export, deletion, and encrypted per-account service settings are implemented. The local PostgreSQL migration and catalogue seed have run successfully. Sign-up, email verification, export/deletion, and cross-session persistence still need end-to-end validation before this phase can be marked complete.
+**Progress:** the auth, account-scoped state, protected admin, export, deletion, and encrypted per-account service settings are implemented. The local PostgreSQL migration and catalogue seed have run successfully. Sign-up, export/deletion, and cross-session persistence still need end-to-end validation before this phase can be marked complete.
 
 **Exit condition:** an invited user can register, sign in, export or delete their account, and resume their discovery session on another device; an unauthenticated user cannot read or change account data.
 
@@ -80,7 +80,7 @@ Use beta feedback to choose among collaborative sessions, shareable shortlists, 
 
 ## Immediate next steps
 
-1. Exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence against the local OrbStack database.
+1. Exercise sign-up, account export/deletion, and cross-session discovery persistence against the local OrbStack database.
 2. Implement connection health checks and library lookup through Seerr, then add direct Whisparr v2/v3 and Stash actions for Adult.
 3. Add Plex and Trakt OAuth, followed by direct Radarr/Sonarr fallbacks for users who do not use Seerr. Keep connections account-scoped and support multiple instances.
 4. Confirm TMDB's cache/retention terms and the Adult-content boundary; confirm ThePornDB/StashDB request-volume and cache guidance for hosted use.

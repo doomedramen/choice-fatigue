@@ -16,14 +16,12 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
     setPending(true);
     setError("");
-    setMessage("");
     try {
       const result = isSignUp
         ? await signUp.email({
@@ -36,7 +34,6 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
         : await signIn.email({ email: email.trim(), password, callbackURL: "/" });
 
       if (result.error) setError(result.error.message || "We couldn’t complete that request. Please try again.");
-      else if (isSignUp) setMessage(`Check ${email.trim()} for a verification link. You’ll be able to sign in after verifying your email.`);
       else window.location.replace("/");
     } catch {
       setError("We couldn’t reach Choice Fatigue. Check your connection and try again.");
@@ -58,7 +55,7 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
 
         {isSignUp && <p className="auth-invite-note">{firstAccount ? "This is the first account for this Choice Fatigue instance. It will become the administrator account." : "Choice Fatigue is currently invite only. Enter the invitation code you received to request an account. The code is checked with your request and isn’t saved to your profile."}</p>}
 
-        {message ? <div className="auth-success" role="status"><strong>Check your email</strong><p>{message}</p><Link href="/sign-in">Continue to sign in</Link></div> : <form className="auth-form" onSubmit={submit} aria-busy={pending}>
+        <form className="auth-form" onSubmit={submit} aria-busy={pending}>
           {isSignUp && <label className="auth-field">Name<input name="name" autoComplete="name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>}
           {isSignUp && !firstAccount && <label className="auth-field">Invitation code<input name="inviteCode" autoComplete="off" autoCapitalize="none" spellCheck={false} required maxLength={128} value={inviteCode} onChange={event => setInviteCode(event.target.value)} aria-describedby="invite-code-help" /><span className="auth-field-hint" id="invite-code-help">Your inviter can share this code with you.</span></label>}
           <label className="auth-field">Email address<input name="email" type="email" autoComplete="email" autoCapitalize="none" required maxLength={254} value={email} onChange={event => setEmail(event.target.value)} /></label>
@@ -68,9 +65,9 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
           </label>
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button className="auth-submit" type="submit" disabled={pending}>{pending ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}</button>
-        </form>}
+        </form>
 
-        {!message && <p className="auth-foot">{isSignUp ? <>Already have an account? <Link href="/sign-in">Sign in</Link></> : <><Link href="/forgot-password">Forgot your password?</Link><br/>New to Choice Fatigue? <Link href="/sign-up">{firstAccount ? "Set up the first account" : "Join with an invite"}</Link></>}</p>}
+        <p className="auth-foot">{isSignUp ? <>Already have an account? <Link href="/sign-in">Sign in</Link></> : <><Link href="/forgot-password">Forgot your password?</Link><br/>New to Choice Fatigue? <Link href="/sign-up">{firstAccount ? "Set up the first account" : "Join with an invite"}</Link></>}</p>
       </section>
     </main>
     <footer className="auth-footer">Your discovery choices stay private to your account.</footer>

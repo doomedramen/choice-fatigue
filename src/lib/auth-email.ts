@@ -7,11 +7,6 @@ function canUseConsoleDelivery() {
   return process.env.NODE_ENV === "development" && process.env.AUTH_EMAIL_MODE === "console";
 }
 
-export function isAuthEmailReady() {
-  if (canUseConsoleDelivery()) return true;
-  return process.env.AUTH_EMAIL_MODE === "smtp" && Boolean(process.env.SMTP_URL && process.env.SMTP_FROM);
-}
-
 let transporter: Transporter | undefined;
 
 export async function sendAuthEmail(message: AuthMessage) {

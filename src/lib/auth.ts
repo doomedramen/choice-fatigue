@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "@/lib/prisma";
-import { isAuthEmailReady, sendAuthEmail } from "@/lib/auth-email";
+import { sendAuthEmail } from "@/lib/auth-email";
 
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:4173";
 const secret = process.env.BETTER_AUTH_SECRET;
@@ -20,26 +20,14 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
-    autoSignIn: false,
-    requireEmailVerification: true,
+    autoSignIn: true,
+    requireEmailVerification: false,
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
       await sendAuthEmail({
         to: user.email,
         subject: "Reset your Choice Fatigue password",
         text: `A password reset was requested for your Choice Fatigue account.\n\nOpen this link to choose a new password:\n${url}\n\nIf you did not request this, you can ignore this email.`,
-      });
-    },
-  },
-  emailVerification: {
-    sendOnSignUp: true,
-    sendOnSignIn: true,
-    autoSignInAfterVerification: true,
-    sendVerificationEmail: async ({ user, url }) => {
-      await sendAuthEmail({
-        to: user.email,
-        subject: "Verify your Choice Fatigue email",
-        text: `Confirm your email address to finish creating your Choice Fatigue account:\n\n${url}\n\nIf you did not create this account, you can ignore this email.`,
       });
     },
   },
@@ -53,7 +41,7 @@ export const auth = betterAuth({
         const activeAdmins = await prisma.user.count({ where: { role: "admin", disabled: false } });
         if (activeAdmins <= 1) {
           throw new APIError("FORBIDDEN", {
-            message: "This is the last active administrator. Promote another verified account before deleting it.",
+            message: "This is the last active administrator. Promote another account before deleting it.",
           });
         }
       },
@@ -125,12 +113,6 @@ export const auth = betterAuth({
       }
 
       if (ctx.path !== "/sign-up/email") return;
-
-      if (!isAuthEmailReady()) {
-        throw new APIError("FORBIDDEN", {
-          message: "Signup is unavailable until authentication email delivery is configured.",
-        });
-      }
 
       const accountCount = await prisma.user.count();
       if (accountCount === 0) return;
