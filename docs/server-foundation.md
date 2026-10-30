@@ -12,6 +12,8 @@ Shared deployments must set `AUTH_EMAIL_MODE=smtp`, `SMTP_URL` (a Nodemailer SMT
 
 `ADULT_SECTION_ENABLED` defaults to `false`. Adult access is available only when this server setting and `GlobalSettings.adultSectionEnabled` in PostgreSQL are both true. The discovery-state endpoint rejects selecting Adult while disabled and avoids returning a saved Adult selection when the feature is off.
 
+Per-user service connections require a separate `INTEGRATION_CREDENTIALS_KEY` containing 32 random bytes encoded as base64. Generate one with `openssl rand -base64 32`; keep it in the deployment secret store, separate from the database, and keep a secure backup because losing it makes saved credentials unrecoverable. Connection addresses and API credentials are encrypted with AES-256-GCM before storage, bound to the owning user and connection ID, and never returned by the API. The connections page currently saves and audits settings; service health checks and request/library actions are a later slice.
+
 ## Authentication routes and recovery
 
 Better Auth is mounted at `/api/auth/*`:
@@ -26,7 +28,7 @@ The frontend includes `/forgot-password` and `/reset-password` screens. The rese
 
 ## Account data and deletion
 
-- `GET /api/account/export` downloads the signed-in account's profile and discovery state as JSON, with catalogue labels for referenced local titles. It excludes password hashes, sessions, verification tokens, and provider credentials.
+- `GET /api/account/export` downloads the signed-in account's profile and discovery state as JSON, with catalogue labels for referenced local titles and non-secret service connection labels. It excludes password hashes, sessions, verification tokens, server addresses, and provider credentials.
 - `/account` provides the export link and account deletion flow. Deletion requires the current password in both the UI and the Better Auth server hook. The deletion hook protects the last active administrator; account-owned discovery state is deleted with its user row, Better Auth removes accounts and sessions, and the post-delete hook removes remaining verification records for that user.
 - Account deletion is permanent. The user should download their export before confirming deletion if they want a copy.
 
@@ -48,6 +50,8 @@ ThePornDB and StashDB search/import require their server credential, their match
 `GET /api/admin/providers` requires an administrator session and returns only whether configured credentials exist plus provider feature-flag states. `GET /api/admin/providers/tmdb/search` searches TMDB; `POST /api/admin/providers/tmdb/import` imports one selected record and requires same-origin JSON.
 
 `GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton global settings. Adult can only be enabled when both the server flag and database setting allow it. `GET /api/admin/users` returns a limited account list; same-origin `PATCH /api/admin/users` disables or restores an account, revokes sessions when disabling, and protects the current and last active administrator.
+
+`/integrations` and `/api/integrations` are account-scoped. The API accepts same-origin create/update/delete requests, limits each account to 24 instances, encrypts configuration, and stores audit events with action, service, and connection name only. When the encryption key is available, `GET` returns service, name, and the owning account's server address, but never its credential. Adult connections require both Adult gates. `npm run integrations:rotate-key` rotates stored credentials atomically: stop the app, set `INTEGRATION_CREDENTIALS_OLD_KEY` to the old key and `INTEGRATION_CREDENTIALS_KEY` to a new key, run the command, then remove the old key and restart.
 
 ## Server helpers
 

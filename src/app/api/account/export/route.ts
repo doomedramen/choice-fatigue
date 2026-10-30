@@ -24,9 +24,10 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
 
   try {
-    const [account, discoveryRow] = await Promise.all([
+    const [account, discoveryRow, integrationRows] = await Promise.all([
       prisma.user.findUnique({ where: { id: session.user.id }, select: { id: true, name: true, email: true, emailVerified: true, createdAt: true } }),
       prisma.discoveryState.findUnique({ where: { userId: session.user.id }, select: { state: true, createdAt: true, updatedAt: true } }),
+      prisma.userIntegration.findMany({ where: { userId: session.user.id }, select: { id: true, service: true, name: true, createdAt: true, updatedAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
     if (!account) return NextResponse.json({ error: "Account not found." }, { status: 404 });
 
@@ -46,9 +47,10 @@ export async function GET() {
 
     const date = new Date().toISOString().slice(0, 10);
     return NextResponse.json({
-      format: "choice-fatigue-account-export-v1",
+      format: "choice-fatigue-account-export-v2",
       exportedAt: new Date().toISOString(),
       account,
+      integrations: integrationRows.map(({ id, service, name, createdAt, updatedAt }) => ({ id, service, name, createdAt, updatedAt, serverAddressIncluded: false, credentialIncluded: false })),
       discovery: {
         state: discoveryState,
         createdAt: discoveryRow?.createdAt ?? null,

@@ -20,6 +20,8 @@ model User {
   sessions      Session[]
   accounts      Account[]
   discoveryState DiscoveryState?
+  integrations  UserIntegration[]
+  integrationAuditLogs IntegrationAuditLog[]
 }
 
 model Session {
@@ -108,4 +110,30 @@ model CatalogueEntry {
 
   @@unique([source, sourceId])
   @@index([category, active, displayOrder])
+}
+
+model UserIntegration {
+  id                   String   @id @default(cuid())
+  userId               String
+  service              String
+  name                 String
+  encryptedConfig      String   @db.Text
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, service])
+}
+
+model IntegrationAuditLog {
+  id            String   @id @default(cuid())
+  userId        String
+  integrationId String?
+  service       String
+  action        String
+  name          String
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
