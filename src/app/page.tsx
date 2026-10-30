@@ -1,0 +1,192 @@
+"use client";
+
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { categories, media, type Category, type MediaItem } from "@/data";
+
+const STORE = "elsewhere-discovery-v1";
+type Decision = "keep" | "pass";
+interface SessionState {
+  category: Category;
+  decisions: Record<string, Decision>;
+  shortlisted: string[];
+  saved: string[];
+  history: Array<{ id: string; decision: Decision }>;
+  reviewRemoved: string[];
+  view: "discover" | "review";
+  ageVerified: boolean;
+}
+const initialState = (): SessionState => ({ category:"Movies", decisions:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
+
+type IconName = "spark"|"back"|"close"|"left"|"check"|"bookmark"|"arrow"|"info"|"rewind"|"lock";
+function Icon({ name }: { name: IconName }) {
+  const paths: Record<IconName, React.ReactNode> = {
+    spark:<><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/></>,
+    back:<><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></>,
+    close:<path d="m18 6-12 12M6 6l12 12"/>,
+    left:<path d="m15 18-6-6 6-6"/>,
+    check:<path d="m5 12 4 4L19 6"/>,
+    bookmark:<path d="M6 4.8A1.8 1.8 0 0 1 7.8 3h8.4A1.8 1.8 0 0 1 18 4.8V21l-6-3.6L6 21V4.8Z"/>,
+    arrow:<path d="M5 12h14M13 6l6 6-6 6"/>,
+    info:<><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></>,
+    rewind:<><path d="M3 7v5h5"/><path d="M4.5 16a8 8 0 1 0 .4-8.3L3 12"/></>,
+    lock:<><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></>,
+  };
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
+
+function Poster({ item, className="" }: { item: MediaItem; className?: string }) {
+  const style = { "--p1":item.palette[0], "--p2":item.palette[1], "--p3":item.palette[2] } as CSSProperties;
+  return <div className={`poster art-${item.art} ${className}`} style={style}>
+    <div className="poster-grain"/><div className="poster-mark" aria-hidden="true"/>
+    <div className="poster-copy"><span className="poster-kicker">{item.category === "Adult" ? "AFTER DARK · 18+" : item.type.toUpperCase()}</span><strong>{item.title}</strong><small>{item.label}</small></div>
+    <span className="poster-year">{item.year}</span>
+  </div>;
+}
+
+export default function HomePage() {
+  const [session, setSession] = useState<SessionState>(initialState);
+  const [ready, setReady] = useState(false);
+  const [details, setDetails] = useState<MediaItem|null>(null);
+  const [ageOpen, setAgeOpen] = useState(false);
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const drag = useRef<{ x:number }|null>(null);
+  const items = media.filter(item => item.category === session.category);
+  const item = items.find(candidate => !session.decisions[candidate.id]);
+  const picks = session.shortlisted.map(id => media.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
+  const removed = session.reviewRemoved.map(id => media.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
+  const saved = session.saved.map(id => media.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
+  const seenCount = items.length - items.filter(candidate => !session.decisions[candidate.id]).length;
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORE);
+      if (stored) setSession({ ...initialState(), ...JSON.parse(stored) as Partial<SessionState> });
+    } catch { /* Start with an empty local session if stored data is unavailable. */ }
+    setReady(true);
+  }, []);
+  useEffect(() => { if (ready) localStorage.setItem(STORE, JSON.stringify(session)); }, [ready, session]);
+
+  function showNotice(message:string) {
+    setNotice(message);
+    window.setTimeout(() => setNotice(""), 2100);
+  }
+  function decide(decision:Decision) {
+    if (!item) return;
+    setSession(current => ({
+      ...current,
+      decisions:{...current.decisions, [item.id]:decision},
+      shortlisted:decision === "keep" ? [...current.shortlisted.filter(id => id !== item.id), item.id] : current.shortlisted,
+      history:[...current.history, {id:item.id, decision}],
+    }));
+  }
+  function undo() {
+    setSession(current => {
+      const last=current.history.at(-1);
+      if (!last) return current;
+      const decisions={...current.decisions}; delete decisions[last.id];
+      const restoredCategory=media.find(candidate=>candidate.id===last.id)?.category ?? current.category;
+      return {...current, category:restoredCategory, view:"discover", decisions, shortlisted:current.shortlisted.filter(id=>id!==last.id), history:current.history.slice(0,-1)};
+    });
+  }
+  function changeCategory(category:Category) {
+    if (category === "Adult" && !session.ageVerified) { setAgeOpen(true); return; }
+    setSession(current=>({...current, category, view:"discover"})); setDetails(null);
+  }
+  function removePick(id:string) {
+    setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions}; });
+    showNotice("Back in discovery — your first impression still counts.");
+  }
+  function beginReview() { setSession(current=>({...current, reviewRemoved:[], view:"review"})); }
+  function leaveReview() { setSession(current=>({...current, reviewRemoved:[], view:"discover"})); }
+  function removeFromReview(id:string) {
+    setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions, reviewRemoved:[...new Set([...current.reviewRemoved,id])]}; });
+    showNotice("Removed for now — you can restore it below.");
+  }
+  function restorePick(id:string) {
+    setSession(current=>({...current, shortlisted:[...new Set([...current.shortlisted,id])], decisions:{...current.decisions,[id]:"keep"}, reviewRemoved:current.reviewRemoved.filter(value=>value!==id)}));
+    showNotice("Restored to your shortlist");
+  }
+  function savePicks() {
+    if (!picks.length) return;
+    const count=picks.length;
+    setSession(current=>({...current, saved:[...new Set([...current.saved,...current.shortlisted])], shortlisted:[], reviewRemoved:[], view:"discover"}));
+    setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
+  }
+  function startFresh() {
+    setSession(current=>({...current, decisions:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
+    showNotice("Fresh session started");
+  }
+  function onCardPointerDown(event:PointerEvent<HTMLElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+    drag.current={x:event.clientX}; event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function onCardPointerMove(event:PointerEvent<HTMLElement>) {
+    if (!drag.current) return;
+    const dx=event.clientX-drag.current.x;
+    event.currentTarget.style.transform=`translate(${dx}px,${Math.max(-16,Math.abs(dx)*-.025)}px) rotate(${dx*.035}deg)`;
+    event.currentTarget.classList.toggle("drag-keep",dx>20); event.currentTarget.classList.toggle("drag-pass",dx< -20);
+  }
+  function onCardPointerUp(event:PointerEvent<HTMLElement>) {
+    if (!drag.current) return;
+    const dx=event.clientX-drag.current.x; drag.current=null;
+    if (Math.abs(dx)>95) decide(dx>0?"keep":"pass");
+    else { event.currentTarget.style.transform=""; event.currentTarget.classList.remove("drag-keep","drag-pass"); }
+  }
+
+  useEffect(() => {
+    function onKeyDown(event:KeyboardEvent) {
+      if (event.key === "Escape") { if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
+      if (session.view !== "discover" || details || savedOpen || ageOpen) return;
+      if (event.key === "ArrowLeft") { event.preventDefault(); decide("pass"); }
+      if (event.key === "ArrowRight") { event.preventDefault(); decide("keep"); }
+    }
+    window.addEventListener("keydown",onKeyDown);
+    return ()=>window.removeEventListener("keydown",onKeyDown);
+  },[session,details,savedOpen,ageOpen]);
+
+  return <div className="shell">
+    <header className="topbar">
+      <a className="brand" href="/" aria-label="Elsewhere home"><span className="brand-symbol">e<span>✳</span></span><span>elsewhere</span></a>
+      <nav className="category-nav" aria-label="Media categories">{categories.map((category,index)=><button key={category} className={`nav-item ${session.category===category?"active":""} ${category==="Adult"?"adult-nav":""}`} onClick={()=>changeCategory(category)} aria-pressed={session.category===category}>{category==="Adult"?<><Icon name="lock"/><span>Adult</span></>:<><span className={`nav-dot dot-${index}`}/><span>{category}</span></>}</button>)}</nav>
+      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><button className="avatar" aria-label="Your profile">M</button></div>
+    </header>
+    <main className={`main ${session.view==="review"?"review-mode":""}`}>
+      <section className="content-area">
+        {session.view === "review" ? <div className="review-page">
+          <div className="review-head"><button className="back-button" onClick={leaveReview}><Icon name="left"/> Back to exploring</button><div className="eyebrow"><span className="live-dot"/> THE SECOND LOOK</div><h1>Now, what still<br/><em>feels like you?</em></h1><p>It’s easy to like something in the moment. Take another look at your picks, side by side, and keep only what still calls to you.</p></div>
+          {picks.length ? <>
+            <div className="review-bar"><span>{picks.length} {picks.length===1?"contender":"contenders"}</span><span>Compare your picks, then prune the maybe pile</span></div>
+            <div className="review-grid">{picks.map(pick=><article className="review-card" key={pick.id}><Poster item={pick} className="review-poster"/><div className="review-card-info"><div className="card-overline"><span>{pick.category.toUpperCase()} · {pick.year}</span><span><Icon name="spark"/> {pick.rating}</span></div><h3>{pick.title}</h3><div className="tag-row">{pick.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}</div><p>{pick.synopsis}</p><button className="remove-review" onClick={()=>removeFromReview(pick.id)}><Icon name="close"/> Remove from shortlist</button></div></article>)}</div>
+            {removed.length>0&&<div className="restored-list"><div><strong>Removed for now</strong><span>Changed your mind? Add any title back.</span></div>{removed.map(pick=><div className="restore-row" key={pick.id}><Poster item={pick} className="restore-poster"/><span>{pick.title}</span><button onClick={()=>restorePick(pick.id)}><Icon name="back"/> Restore</button></div>)}</div>}
+            <div className="review-actions"><button className="text-button" onClick={leaveReview}><Icon name="left"/> Keep browsing</button><button className="button button-accent" onClick={savePicks}>Save {picks.length} {picks.length===1?"pick":"picks"} <Icon name="arrow"/></button></div>
+          </> : removed.length ? <>
+            <div className="review-bar"><span>No picks left in your maybe pile</span><span>Your removals are reversible</span></div><div className="restored-list">{removed.map(pick=><div className="restore-row" key={pick.id}><Poster item={pick} className="restore-poster"/><span>{pick.title}</span><button onClick={()=>restorePick(pick.id)}><Icon name="back"/> Restore</button></div>)}</div><div className="review-actions"><button className="text-button" onClick={leaveReview}><Icon name="left"/> Keep browsing</button></div>
+          </> : <div className="review-empty"><div className="empty-orbit"><Icon name="spark"/></div><h2>No picks in the maybe pile.</h2><p>Keep browsing and shortlist anything that catches your eye.</p><button className="button button-dark" onClick={leaveReview}>Keep browsing <Icon name="arrow"/></button></div>}
+          <div className="review-footnote">Your first impressions got you here. You can still change your mind.</div>
+        </div> : <div className="discover-layout">
+          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Something good<br/><em>is out there.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":"Find your next favourite, one choice at a time."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
+          {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
+            <div className="card-stack" aria-label="Media discovery card"><div className="stack-card stack-back stack-back-2"/><div className="stack-card stack-back stack-back-1"/>
+              <article className="media-card" tabIndex={0} aria-label={`${item.title}, ${item.year}. Use left and right arrow keys to pass or shortlist.`} onPointerDown={onCardPointerDown} onPointerMove={onCardPointerMove} onPointerUp={onCardPointerUp} onPointerCancel={()=>{drag.current=null;}}>
+                <Poster item={item} className="card-poster"/><div className="card-content"><div className="card-overline"><span>{item.type}</span><span><Icon name="spark"/> {item.rating}</span></div><h2>{item.title} <span>{item.year}</span></h2><div className="tag-row">{item.genre.map(genre=><span key={genre}>{genre}</span>)}<span>{item.runtime}</span></div><p>{item.synopsis}</p><button className="text-button details-button" onClick={()=>setDetails(item)}><Icon name="info"/> More about this {item.category==="TV"?"series":"title"}</button></div><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div>
+              </article>
+            </div>
+            <div className="decision-row"><button className="decision-button pass" onClick={()=>decide("pass")} aria-label="Pass, left arrow key"><span><Icon name="close"/></span><small>PASS <kbd>←</kbd></small></button><button className="undo-inline" onClick={undo} disabled={!session.history.length} aria-label="Undo last choice"><Icon name="rewind"/></button><button className="decision-button keep" onClick={()=>decide("keep")} aria-label="Shortlist, right arrow key"><span><Icon name="check"/></span><small>SHORTLIST <kbd>→</kbd></small></button></div>
+            <p className="gesture-hint">Drag the card, or use <kbd>←</kbd> pass and <kbd>→</kbd> shortlist</p><div className="progress-track"><span style={{width:`${Math.min(100,seenCount/items.length*100)}%`}}/></div>
+          </div> : <div className="empty-state"><div className="empty-orbit"><Icon name="spark"/></div><h2>That’s everything for now.</h2><p>You’ve seen all the {session.category.toLowerCase()} in this little collection.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></div>}
+          <div className="bottom-note"><Icon name="spark"/><span>Good taste takes a little exploring.</span><button onClick={beginReview}>Review picks <b>{picks.length}</b> <Icon name="arrow"/></button></div>
+        </div>}
+      </section>
+      {session.view==="discover"&&<aside className="shortlist-panel"><div className="panel-heading"><div><div className="eyebrow">THE MAYBE PILE</div><h2>Your shortlist <span>{picks.length}</span></h2></div><button className="small-icon" onClick={undo} aria-label="Undo last choice" disabled={!session.history.length}><Icon name="rewind"/></button></div><p className="panel-copy">A few contenders. Nothing saved just yet.</p>
+        <div className="tray-list">{picks.length?picks.slice(-4).reverse().map(pick=><div className="tray-item" key={pick.id}><Poster item={pick} className="tray-poster"/><div><strong>{pick.title}</strong><small>{pick.year} · {pick.type}</small></div><button onClick={()=>removePick(pick.id)} aria-label={`Remove ${pick.title} from shortlist`}><Icon name="close"/></button></div>):<div className="tray-empty"><div className="tray-spark">✳</div><span>Your maybe pile<br/>will show up here.</span></div>}</div>
+        {picks.length>4&&<div className="more-picks">+ {picks.length-4} more in your shortlist</div>}
+        <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in the maybe pile</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Your session is saved on this device</div>
+      </aside>}
+    </main>
+    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><Poster item={details} className="modal-poster"/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(!session.shortlisted.includes(details.id)){setSession(current=>({...current,decisions:{...current.decisions,[details.id]:"keep"},shortlisted:[...current.shortlisted,details.id],history:[...current.history,{id:details.id,decision:"keep"}]}));}setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
+    {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes. Artwork in this prototype is non-explicit.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult"}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on this device.</small></section></div>}
+    {savedOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setSavedOpen(false);}}><section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title"><button className="modal-close" onClick={()=>setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close"/></button><div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div><h2 id="saved-title">Saved for later</h2><p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>{saved.length?<div className="saved-grid">{saved.map(pick=><div className="saved-item" key={pick.id}><Poster item={pick} className="saved-poster"/><div><strong>{pick.title}</strong><small>{pick.year} · {pick.category}</small></div></div>)}</div>:<div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}<button className="button button-dark saved-done" onClick={()=>setSavedOpen(false)}>Done</button></section></div>}
+    <div className={`toast ${notice?"show":""}`} role="status" aria-live="polite">{notice}</div>
+  </div>;
+}
