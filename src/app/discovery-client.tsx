@@ -94,7 +94,9 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const categoryItems = catalogue.filter(item => item.category === session.category);
   const recommendations = rankSessionRecommendations(categoryItems, session.decisions);
   const items = recommendations.items;
-  const item = items.find(candidate => !session.decisions[candidate.id]);
+  const remainingItems = items.filter(candidate => !session.decisions[candidate.id]);
+  const item = remainingItems[0];
+  const nextItem = remainingItems[1];
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id)).filter((candidate): candidate is MediaItem => Boolean(candidate));
@@ -309,31 +311,36 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button")) return;
+    if (!mediaCard.current) return;
     drag.current={x:event.clientX}; event.currentTarget.setPointerCapture(event.pointerId);
   }
   function onCardPointerMove(event:PointerEvent<HTMLElement>) {
-    if (!drag.current) return;
+    const card = mediaCard.current;
+    if (!drag.current || !card) return;
     const dx=event.clientX-drag.current.x;
-    event.currentTarget.style.transform=`translate(${dx}px,${Math.max(-16,Math.abs(dx)*-.025)}px) rotate(${dx*.035}deg)`;
-    event.currentTarget.classList.toggle("drag-keep",dx>20); event.currentTarget.classList.toggle("drag-pass",dx< -20);
+    card.style.transform=`translate(${dx}px,${Math.max(-16,Math.abs(dx)*-.025)}px) rotate(${dx*.035}deg)`;
+    card.classList.toggle("drag-keep",dx>20); card.classList.toggle("drag-pass",dx< -20);
   }
   function onCardPointerUp(event:PointerEvent<HTMLElement>) {
-    if (!drag.current) return;
+    const card = mediaCard.current;
+    if (!drag.current || !card) return;
     const dx=event.clientX-drag.current.x; drag.current=null;
-    const swipeThreshold=Math.max(80,event.currentTarget.clientWidth*.24);
+    const swipeThreshold=Math.max(80,card.clientWidth*.24);
     if (Math.abs(dx)>swipeThreshold) transitionDecision(dx>0?"keep":"pass","drag");
     else {
-      event.currentTarget.style.transform="";
-      event.currentTarget.style.opacity="";
-      event.currentTarget.classList.remove("drag-keep","drag-pass");
+      card.style.transform="";
+      card.style.opacity="";
+      card.classList.remove("drag-keep","drag-pass");
     }
   }
 
-  function onCardPointerCancel(event:PointerEvent<HTMLElement>) {
+  function onCardPointerCancel() {
+    const card = mediaCard.current;
     drag.current=null;
-    event.currentTarget.style.transform="";
-    event.currentTarget.style.opacity="";
-    event.currentTarget.classList.remove("drag-keep","drag-pass");
+    if (!card) return;
+    card.style.transform="";
+    card.style.opacity="";
+    card.classList.remove("drag-keep","drag-pass");
   }
 
   useEffect(() => {
@@ -388,8 +395,9 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
           <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Your choices shape what comes next through genre, era, and format; source ratings help with close calls.":"Pass or shortlist each title. Your choices shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
-            <div className="card-stack" aria-label="Media discovery card"><div className="stack-card stack-back stack-back-2"/><div className="stack-card stack-back stack-back-1"/>
-              <article key={item.id} ref={mediaCard} className="media-card" tabIndex={0} aria-label={`${item.title}, ${item.year}. Use left and right arrow keys to pass or shortlist.`} onPointerDown={onCardPointerDown} onPointerMove={onCardPointerMove} onPointerUp={onCardPointerUp} onPointerCancel={onCardPointerCancel}>
+            <div className={`card-stack ${nextItem ? "has-next-card" : ""}`} aria-label="Media discovery card" onPointerDown={onCardPointerDown} onPointerMove={onCardPointerMove} onPointerUp={onCardPointerUp} onPointerCancel={onCardPointerCancel}>
+              {nextItem && <div key={nextItem.id} className="next-card-peek" aria-hidden="true"><Poster item={nextItem} className="next-preview-poster"/><div className="next-card-copy"><span className="next-card-label">UP NEXT</span><strong>{nextItem.title}</strong><small>{nextItem.year ?? "Year unknown"} · {nextItem.type}</small><span className="next-card-genres">{nextItem.genre.slice(0, 2).join(" · ") || "Discover next"}</span></div><span className="next-card-rating">★ {nextItem.rating}</span></div>}
+              <article key={item.id} ref={mediaCard} className="media-card" tabIndex={0} aria-label={`${item.title}, ${item.year}. Use left and right arrow keys to pass or shortlist.`}>
                 <Poster item={item} className="card-poster"/><div className="card-content"><div className="card-overline"><span>{item.type} · {item.year}</span><span><Icon name="spark"/> {item.rating}</span></div><h2>{item.title}</h2><div className="card-footer"><div className="tag-row">{item.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{item.runtime}</span></div><button className="card-details-button" type="button" onClick={()=>setDetails(item)} aria-label={`More about ${item.title}`}><Icon name="info"/><span>Details</span></button></div></div><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div>
               </article>
             </div>

@@ -85,10 +85,16 @@ button:active:not(:disabled) { transform: scale(.98); }
 .deck-meta { display: flex; justify-content: space-between; margin: 0 2px 10px; color: #c0c9d8; font-size: 12px; font-weight: 800; letter-spacing: .7px; }
 .deck-meta i { padding: 0 4px; color: #75839c; font-style: normal; }
 .deck-meta small { color: #8794aa; font-size: 12px; }
-.card-stack { position: relative; display: grid; padding: 0 6px 8px; }
-.stack-card { position: absolute; inset: 5px 15px 0; border: 1px solid #313d54; border-radius: 16px; background: #182133; }
-.stack-back-1 { transform: rotate(1deg) translateY(6px); }
-.stack-back-2 { transform: rotate(-1.2deg) translateY(11px); opacity: .8; }
+.card-stack { position: relative; display: grid; padding: 0 6px 8px; touch-action: pan-y; }
+.card-stack.has-next-card { padding-bottom: 82px; }
+.next-card-peek { position: absolute; z-index: 0; top: calc(100% - 100px); right: 12px; left: 12px; display: grid; height: 100px; grid-template-columns: 48px minmax(0,1fr) auto; align-items: center; gap: 10px; overflow: hidden; padding: 18px 12px 8px; border: 1px solid #37435b; border-radius: 13px; background: #1a2333; box-shadow: 0 12px 28px #0004; pointer-events: none; }
+.next-preview-poster { width: 48px; aspect-ratio: 2 / 3; border: 1px solid #ffffff2b; border-radius: 6px; }
+.next-preview-poster .poster-copy, .next-preview-poster .poster-year { display: none; }
+.next-card-copy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.next-card-label { color: #b9a6ff; font-size: 9px; font-weight: 900; letter-spacing: 1px; }
+.next-card-copy strong { overflow: hidden; color: #fff; font-size: 13px; font-weight: 800; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.next-card-copy small, .next-card-genres { overflow: hidden; color: #b5bfd1; font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.next-card-rating { align-self: center; color: #e8d9a7; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .media-card { position: relative; z-index: 1; display: grid; grid-area: 1 / 1; grid-template-rows: minmax(0, 3fr) minmax(0, 1fr); aspect-ratio: 3 / 4; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
 .media-card.control-exit { transition: box-shadow 160ms ease-out, transform 230ms cubic-bezier(.23,1,.32,1), opacity 170ms ease-out; }
 .media-card.drag-keep { box-shadow: 0 18px 42px #7151e966; }
@@ -307,6 +313,12 @@ button:active:not(:disabled) { transform: scale(.98); }
   .discover-intro p, .review-head p { font-size: 16px; }
   .deck-wrap { margin-top: 4px; }
   .card-stack { padding: 0 11px 10px; }
+  .card-stack.has-next-card { padding-bottom: 94px; }
+  .next-card-peek { top: calc(100% - 112px); right: 16px; left: 16px; height: 112px; grid-template-columns: 54px minmax(0,1fr) auto; gap: 12px; padding: 18px 14px 8px; }
+  .next-preview-poster { width: 54px; }
+  .next-card-copy strong { font-size: 14px; }
+  .next-card-copy small, .next-card-genres { font-size: 11px; }
+  .next-card-rating { font-size: 12px; }
   .card-content { padding: clamp(10px, 1.6vw, 16px); }
   .card-content h2 { font-size: clamp(20px, 2.5vw, 26px); }
   .decision-row { gap: 25px; margin: 19px 0 8px; }
