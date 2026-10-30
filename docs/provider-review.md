@@ -2,14 +2,14 @@
 
 **Reviewed:** 2026-10-30
 
-This is an implementation planning record, not a legal determination. None of the provider APIs are connected in Choice Fatigue. The admin status endpoint only reports whether a server environment variable is present; it never returns credentials or makes a provider request.
+This is an implementation planning record, not a legal determination. TMDB search and import are implemented behind a server-only opt-in. ThePornDB and StashDB adapters are not connected. The admin status endpoint only reports whether server environment variables are present; it never returns credentials or validates a provider key.
 
 ## TMDB
 
 - TMDB publishes movie and TV APIs and accepts an API Read Access Token as a Bearer token.
 - Its FAQ says the API is free for non-commercial use with attribution. Commercial projects need a separate license. TMDB requires its approved logo and a notice in an About or Credits area.
 - Its legal notice prohibits using its data or images in connection with obscene or pornographic content. How this applies to the planned Adult section is not defined in the FAQ.
-- Keep TMDB out of an instance with Adult enabled until TMDB provides written guidance or the experiences are hosted separately. Confirm current API terms, especially cache and retention rules, before retaining provider responses.
+- The code only searches and imports Movies, TV, or Anime from TMDB and excludes adult-flagged results. Keep those records out of Adult. Confirm current API terms, especially the content boundary and cache/retention rules, before enabling the integration for a hosted instance.
 
 Sources: [TMDB FAQ](https://developer.themoviedb.org/docs/faq), [application authentication](https://developer.themoviedb.org/docs/authentication-application), [image basics](https://developer.themoviedb.org/docs/image-basics), [API Terms of Use](https://www.themoviedb.org/documentation/api/terms-of-use).
 

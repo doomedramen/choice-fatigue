@@ -1,6 +1,6 @@
 # Server foundation contract
 
-This is the first server-side foundation for Choice Fatigue. Discovery data now persists per account in PostgreSQL. Metadata providers and recommendation logic are still out of scope.
+This is the server-side foundation for Choice Fatigue. Discovery data persists per account in PostgreSQL. The admin can optionally search and import TMDB titles; automatic recommendations are not connected.
 
 ## Local setup
 
@@ -39,7 +39,11 @@ Both methods require a verified Better Auth session. The account ID always comes
 
 ## Catalogue boundary
 
-`CatalogueEntry` is the normalized server-side catalogue table. It stores a stable local ID, source and source ID, category, display fields, genres, artwork reference, age restriction, content flags, visibility, and display order. `npm run db:seed` idempotently loads the current local fixtures. The discovery page reads active entries from PostgreSQL and falls back to the bundled fixtures if the table is empty or unavailable. No provider adapter or external media request is connected yet. Adult rows are filtered before they reach the browser unless both Adult gates are enabled.
+`CatalogueEntry` is the normalized server-side catalogue table. It stores a stable local ID, source and source ID, category, display fields, genres, artwork reference, age restriction, content flags, visibility, and display order. `npm run db:seed` idempotently loads the current local fixtures. The discovery page reads active entries from PostgreSQL and falls back to the bundled fixtures if the table is empty or unavailable. Adult rows are filtered before they reach the browser unless both Adult gates are enabled.
+
+TMDB search and import are available only when `TMDB_API_READ_ACCESS_TOKEN` and `TMDB_METADATA_ENABLED=true` are set on the server. Requests require an administrator session, use `include_adult=false`, reject adult-flagged results, and are not cached by the app. Imports re-fetch selected details server-side and store them in `CatalogueEntry`; imported records are limited to Movies, TV, or Anime. Anime search is narrowed to Japanese-language/origin animation. `/credits` contains TMDB attribution. Check provider retention terms before enabling this path in a hosted environment. ThePornDB and StashDB are planned for Adult; their API adapters are not active yet.
+
+`GET /api/admin/providers` requires an administrator session and returns only whether configured credentials exist plus the TMDB feature flag state. `GET /api/admin/providers/tmdb/search` searches TMDB; `POST /api/admin/providers/tmdb/import` imports one selected record and requires same-origin JSON.
 
 `GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton global settings. Adult can only be enabled when both the server flag and database setting allow it. `GET /api/admin/users` returns a limited account list; same-origin `PATCH /api/admin/users` disables or restores an account, revokes sessions when disabling, and protects the current and last active administrator.
 

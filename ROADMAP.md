@@ -1,7 +1,7 @@
 # Choice Fatigue: product roadmap
 
 **Status:** implementation in progress
-**Checkpoint:** server foundation, account data controls, fixture catalogue, and protected provider-readiness status are implemented; database-backed runtime validation is still pending.
+**Checkpoint:** server foundation, account data controls, fixture catalogue, protected provider readiness, and opt-in TMDB catalogue import are implemented; database-backed runtime validation is still pending.
 **Planning assumption:** begin with a small invite beta; expand after the core discovery loop and provider terms are settled.
 
 ## Where the project is today
@@ -38,7 +38,7 @@ The app now has invite-only Better Auth accounts, required email verification, p
 - Add caching, request limits, timeouts, retries, provider health status, and a way to fall back to cached or seeded catalogue data.
 - Evaluate Anime coverage against a representative list before adding a dedicated anime provider.
 
-**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, and protected status reporting are implemented. No provider API calls are active. Live metadata, attribution, caching, and provider-health handling remain open.
+**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, protected status reporting, and opt-in TMDB search/import for Movies/TV/Anime are implemented. TMDB attribution is available at `/credits`. Automatic refresh, caching/retention policy, provider health, and ThePornDB/StashDB adapters remain open.
 
 **Provider notes:**
 
@@ -82,5 +82,5 @@ Use beta feedback to choose among collaborative sessions, shareable shortlists, 
 
 1. Start PostgreSQL, apply the migration, and exercise sign-up, email verification, account export/deletion, and cross-session discovery persistence.
 2. Confirm TMDB's cache/retention terms and the Adult-content boundary; confirm ThePornDB/StashDB request-volume and cache guidance for hosted use.
-3. Add provider adapters: TMDB for Movies/TV/Anime and ThePornDB/StashDB for Adult, keeping source data separate and credentials server-only.
+3. Add ThePornDB/StashDB adapters for Adult, keeping source data separate and credentials server-only.
 4. Choose hosting and rehearse database backup restoration before inviting anyone outside local development.

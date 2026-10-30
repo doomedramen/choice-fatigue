@@ -11,9 +11,10 @@ function errorResponse(error: unknown) {
 export async function GET() {
   try {
     await requireAdmin();
+    const tmdbCredentialConfigured = Boolean(process.env.TMDB_API_READ_ACCESS_TOKEN);
     return NextResponse.json({
       providers: {
-        tmdb: { credentialConfigured: Boolean(process.env.TMDB_API_READ_ACCESS_TOKEN), integration: "not-built" },
+        tmdb: { credentialConfigured: tmdbCredentialConfigured, enabled: tmdbCredentialConfigured && process.env.TMDB_METADATA_ENABLED === "true", integration: "configured" },
         theporndb: { credentialConfigured: Boolean(process.env.THEPORNDB_API_TOKEN), integration: "not-built" },
         stashdb: { credentialConfigured: Boolean(process.env.STASHDB_API_KEY), integration: "not-built" },
       },

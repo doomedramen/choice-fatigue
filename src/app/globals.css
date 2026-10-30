@@ -93,6 +93,9 @@ button:active:not(:disabled) { transform: scale(.98); }
 .media-card.drag-keep { box-shadow: 0 18px 42px #7151e966; }
 .media-card.drag-pass { box-shadow: 0 18px 42px #f06e5e66; }
 .poster { position: relative; isolation: isolate; overflow: hidden; background: linear-gradient(145deg, var(--p1), var(--p2) 54%, var(--p3)); color: #fff; }
+.poster-artwork { position:absolute; z-index:0; inset:0; width:100%; height:100%; object-fit:cover; }
+.poster.has-artwork::before { display:none; }
+.poster.has-artwork .poster-grain,.poster.has-artwork .poster-mark { display:none; }
 .poster::before, .poster::after { position: absolute; z-index: 0; pointer-events: none; content: ""; }
 .poster::before { top: 8%; right: -17%; width: 76%; aspect-ratio: 1; border: 1px solid #ffffff55; border-radius: 50%; box-shadow: 0 0 0 22px #ffffff10, 0 0 0 48px #ffffff0a, 0 0 0 76px #ffffff08; }
 .poster::after { bottom: 0; left: -10%; width: 125%; height: 48%; background: linear-gradient(0deg, #080b16c9, transparent); transform: rotate(-8deg); }

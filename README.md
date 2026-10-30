@@ -1,6 +1,6 @@
 # Choice Fatigue
 
-A responsive media discovery app built with Next.js and TypeScript. The server foundation includes invite-only accounts, email verification, password recovery, per-account discovery sessions, account data export and deletion, protected admin pages, and shared global settings. The catalogue uses local fixture entries served through a normalized PostgreSQL model; metadata APIs and recommendation logic are not connected.
+A responsive media discovery app built with Next.js and TypeScript. The server foundation includes invite-only accounts, email verification, password recovery, per-account discovery sessions, account data export and deletion, protected admin pages, and shared global settings. The catalogue uses local fixtures with opt-in TMDB search/import for administrators; recommendation logic is not connected.
 
 ## Run locally
 
@@ -40,13 +40,14 @@ For a code check, run `npm run typecheck`. Before `npm run build`, set a non-emp
 - `/account` downloads a JSON copy of the profile and discovery state. Permanent deletion requires the current password and typed confirmation.
 - `/admin` is restricted to administrators. Global app defaults are saved in PostgreSQL; admins can list accounts, disable or restore access, and see whether provider credentials exist on the server without exposing their values. `/provider-review` records provider scope and remaining implementation checks.
 - The catalogue is stored in a normalized PostgreSQL table. `npm run db:seed` loads the local fixtures; the app falls back to fixtures if the catalogue table has no entries.
+- Admins can search TMDB and import Movies, TV, or Anime into the catalogue when both `TMDB_API_READ_ACCESS_TOKEN` and `TMDB_METADATA_ENABLED=true` are configured. TMDB adult-flagged results are rejected; imported artwork is displayed from TMDB's image CDN. The integration makes no requests while the feature flag is off.
 - Sign-up is invite-only and requires email verification. Sign-in and password recovery use the configured email delivery mode.
 - Adult is disabled by default and remains unavailable until both the server flag and admin setting enable it. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 
-No provider API calls are active. Provider readiness only reports credential presence from protected server-side checks; it does not validate credentials or connect to the service. The example catalogue and artwork are local.
+The TMDB catalogue search is opt-in through server environment settings. ThePornDB and StashDB are listed as planned Adult sources; their API adapters are not connected yet. Provider readiness only reports configured state from protected server-side checks; it never returns secrets to the browser.
 
 ## Configuration for a shared deployment
 
-Set `DATABASE_URL`, a unique `BETTER_AUTH_SECRET`, the public `BETTER_AUTH_URL`, and a private `BETA_INVITE_CODE`. Configure `AUTH_EMAIL_MODE=smtp`, `SMTP_URL`, and `SMTP_FROM` for verification and recovery emails. Apply the checked-in database migration with `npm run db:deploy`. Keep `ADULT_SECTION_ENABLED=false` unless the section has been reviewed and intentionally enabled.
+Set `DATABASE_URL`, a unique `BETTER_AUTH_SECRET`, the public `BETTER_AUTH_URL`, and a private `BETA_INVITE_CODE`. Configure `AUTH_EMAIL_MODE=smtp`, `SMTP_URL`, and `SMTP_FROM` for verification and recovery emails. Apply the checked-in database migration with `npm run db:deploy`. Keep `ADULT_SECTION_ENABLED=false` unless the section has been reviewed and intentionally enabled. To enable TMDB catalogue search, set `TMDB_API_READ_ACCESS_TOKEN` and `TMDB_METADATA_ENABLED=true`; attribution is available at `/credits`.
 
 See [docs/server-foundation.md](docs/server-foundation.md) for auth routes, environment settings, data ownership, and administrator setup. See [ROADMAP.md](ROADMAP.md) for the staged path to a shareable product.
