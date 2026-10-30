@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth-session";
 import { getDiscoveryState, saveDiscoveryState } from "@/lib/discovery-state";
 import { getGlobalSettings } from "@/lib/global-settings";
+import { getAdultCatalogueIds, isAdultCatalogueId, userHasAdultGrant } from "@/lib/adult-access";
+import { adultAccessEnabled } from "@/lib/adult-access-policy";
 import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -37,6 +40,40 @@ const defaultState: SessionState = {
   ageVerified: false,
 };
 
+function hideAdultState(value: Record<string, unknown>, adultIds: Set<string>, fallbackCategory: string) {
+  const next = { ...value };
+  if (next.category === "Adult") next.category = fallbackCategory;
+  if (typeof next.lockedItemId === "string" && isAdultCatalogueId(next.lockedItemId, adultIds)) next.lockedItemId = null;
+  for (const key of ["shortlisted", "saved", "reviewRemoved"]) {
+    if (Array.isArray(next[key])) next[key] = (next[key] as unknown[]).filter(id => typeof id !== "string" || !isAdultCatalogueId(id, adultIds));
+  }
+  for (const key of ["decisions", "ratings"]) {
+    const map = next[key];
+    if (isObject(map)) next[key] = Object.fromEntries(Object.entries(map).filter(([id]) => !isAdultCatalogueId(id, adultIds)));
+  }
+  if (Array.isArray(next.history)) next.history = next.history.filter(entry => !isObject(entry) || typeof entry.id !== "string" || !isAdultCatalogueId(entry.id, adultIds));
+  return next;
+}
+
+function preserveHiddenAdultState(current: Record<string, unknown>, incoming: Record<string, unknown>, adultIds: Set<string>) {
+  const next = { ...incoming };
+  for (const key of ["shortlisted", "saved", "reviewRemoved"]) {
+    const incomingIds = Array.isArray(next[key]) ? (next[key] as unknown[]).filter(id => typeof id === "string" && !isAdultCatalogueId(id, adultIds)) : [];
+    const existingAdultIds = Array.isArray(current[key]) ? (current[key] as unknown[]).filter(id => typeof id === "string" && isAdultCatalogueId(id, adultIds)) : [];
+    next[key] = [...incomingIds, ...existingAdultIds];
+  }
+  for (const key of ["decisions", "ratings"]) {
+    const incomingMap = isObject(next[key]) ? next[key] as Record<string, unknown> : {};
+    const currentMap = isObject(current[key]) ? current[key] as Record<string, unknown> : {};
+    next[key] = { ...Object.fromEntries(Object.entries(incomingMap).filter(([id]) => !isAdultCatalogueId(id, adultIds))), ...Object.fromEntries(Object.entries(currentMap).filter(([id]) => isAdultCatalogueId(id, adultIds))) };
+  }
+  const incomingHistory = Array.isArray(next.history) ? next.history.filter(entry => !isObject(entry) || typeof entry.id !== "string" || !isAdultCatalogueId(entry.id, adultIds)) : [];
+  const currentAdultHistory = Array.isArray(current.history) ? current.history.filter(entry => isObject(entry) && typeof entry.id === "string" && isAdultCatalogueId(entry.id, adultIds)) : [];
+  next.history = [...incomingHistory, ...currentAdultHistory];
+  if (typeof current.lockedItemId === "string" && isAdultCatalogueId(current.lockedItemId, adultIds)) next.lockedItemId = current.lockedItemId;
+  return next;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -56,10 +93,13 @@ function isReviewRating(value: unknown): value is number {
 function isSessionState(value: unknown): value is PersistedSessionState {
   if (!isObject(value)) return false;
   const requiredKeys = ["category", "decisions", "shortlisted", "saved", "history", "reviewRemoved", "view", "ageVerified"];
-  const optionalKeys = ["lockedItemId", "ratings"];
+  const optionalKeys = ["lockedItemId", "ratings", "sessionId", "eventSequence", "reviewId"];
   const valueKeys = Object.keys(value);
   if (!requiredKeys.every(key => key in value) || valueKeys.some(key => !requiredKeys.includes(key) && !optionalKeys.includes(key))) return false;
   if (value.lockedItemId !== undefined && value.lockedItemId !== null && !isId(value.lockedItemId)) return false;
+  if (value.sessionId !== undefined && !isId(value.sessionId)) return false;
+  if (value.eventSequence !== undefined && (!Number.isSafeInteger(value.eventSequence) || Number(value.eventSequence) < 0)) return false;
+  if (value.reviewId !== undefined && value.reviewId !== null && !isId(value.reviewId)) return false;
   if (value.category !== "Movies" && value.category !== "Shows" && value.category !== "TV" && value.category !== "Adult") return false;
   if (value.view !== "discover" && value.view !== "review") return false;
   if (typeof value.ageVerified !== "boolean") return false;
@@ -74,8 +114,11 @@ function isSessionState(value: unknown): value is PersistedSessionState {
   if (!Array.isArray(value.history) || value.history.length > MAX_COLLECTION_ITEMS) return false;
   if (!value.history.every(entry => {
     if (!isObject(entry) || !isId(entry.id)) return false;
-    if (entry.decision === "seen") return Object.keys(entry).length === 3 && isReviewRating(entry.rating);
-    return Object.keys(entry).length === 2 && (entry.decision === "keep" || entry.decision === "pass");
+    const allowedKeys = entry.eventId === undefined ? ["id", "decision", ...(entry.decision === "seen" ? ["rating"] : [])] : ["id", "decision", "eventId", ...(entry.decision === "seen" ? ["rating"] : [])];
+    if (Object.keys(entry).length !== allowedKeys.length || Object.keys(entry).some(key => !allowedKeys.includes(key))) return false;
+    if (entry.eventId !== undefined && !isId(entry.eventId)) return false;
+    if (entry.decision === "seen") return isReviewRating(entry.rating);
+    return entry.decision === "keep" || entry.decision === "pass";
   })) return false;
   return true;
 }
@@ -90,15 +133,21 @@ export async function GET() {
 
   try {
     const state = await getDiscoveryState();
-    const settings = await getGlobalSettings();
+    const [settings, adultGrant, adultIds] = await Promise.all([getGlobalSettings(), userHasAdultGrant(session.user.id), getAdultCatalogueIds()]);
     if (state === null) return NextResponse.json({ ...defaultState, category: settings.defaultCategory as Category }, { headers: { "x-discovery-state-exists": "false" } });
     if (!isSessionState(state)) {
       console.error("Stored discovery state failed validation for the current account.");
       return jsonError("Saved discovery data could not be read.", 500);
     }
     const category: Category = state.category === "TV" ? "Shows" : state.category;
-    if (category === "Adult" && !settings.adultSectionEnabled) {
-      return NextResponse.json({ ...defaultState, category: settings.defaultCategory as Category, decisions: state.decisions, ratings: state.ratings ?? {}, shortlisted: state.shortlisted, saved: state.saved, history: state.history, reviewRemoved: state.reviewRemoved });
+    const canAccessAdult = adultAccessEnabled(settings.adultSectionEnabled, adultGrant);
+    if (category === "Adult" && !canAccessAdult) {
+      const hidden = hideAdultState(state as Record<string, unknown>, adultIds, settings.defaultCategory) as unknown as SessionState;
+      return NextResponse.json({ ...hidden, category: settings.defaultCategory as Category, lockedItemId: null }, { headers: { "x-discovery-state-exists": "true" } });
+    }
+    if (!canAccessAdult) {
+      const hidden = hideAdultState(state as Record<string, unknown>, adultIds, settings.defaultCategory);
+      return NextResponse.json({ ...hidden, category, lockedItemId: hidden.lockedItemId ?? null }, { headers: { "x-discovery-state-exists": "true" } });
     }
     return NextResponse.json({ ...state, category, lockedItemId: state.lockedItemId ?? null, ratings: state.ratings ?? {} }, { headers: { "x-discovery-state-exists": "true" } });
   } catch (error) {
@@ -138,14 +187,26 @@ export async function PUT(request: NextRequest) {
     return jsonError("Request body is not valid JSON.", 400);
   }
   if (!isSessionState(value)) return jsonError("Discovery state has an invalid shape or value.", 400);
-  if (value.category === "Adult" && !(await getGlobalSettings()).adultSectionEnabled) {
+  const [settings, adultGrant, adultIds] = await Promise.all([getGlobalSettings(), userHasAdultGrant(session.user.id), getAdultCatalogueIds()]);
+  const canAccessAdult = adultAccessEnabled(settings.adultSectionEnabled, adultGrant);
+  if (value.category === "Adult" && !canAccessAdult) {
     return jsonError("The Adult category is currently disabled.", 403);
   }
 
   try {
-    const normalizedState = { ...value, category: value.category === "TV" ? "Shows" : value.category, lockedItemId: value.lockedItemId ?? null };
+    let stateToSave: Record<string, unknown> = value as unknown as Record<string, unknown>;
+    if (!canAccessAdult) {
+      const existing = await prisma.discoveryState.findUnique({ where: { userId: session.user.id }, select: { state: true } });
+      if (existing && isObject(existing.state)) stateToSave = preserveHiddenAdultState(existing.state, stateToSave, adultIds);
+      if (stateToSave.category === "Adult") stateToSave.category = settings.defaultCategory;
+      if (typeof stateToSave.lockedItemId === "string" && isAdultCatalogueId(stateToSave.lockedItemId, adultIds)) stateToSave.lockedItemId = null;
+    }
+    const normalizedState = { ...stateToSave, category: stateToSave.category === "TV" ? "Shows" : stateToSave.category, lockedItemId: stateToSave.lockedItemId ?? null };
     await saveDiscoveryState(JSON.parse(JSON.stringify(normalizedState)));
-    return NextResponse.json(normalizedState);
+    const responseState = !canAccessAdult
+      ? hideAdultState(normalizedState, adultIds, settings.defaultCategory)
+      : normalizedState;
+    return NextResponse.json(responseState);
   } catch (error) {
     console.error("Unable to save discovery state.", error);
     return jsonError("Discovery data could not be saved.", 500);

@@ -9,3 +9,4 @@ npm-debug.log*
 
 .env*
 !.env.example
+deploy/env.compose

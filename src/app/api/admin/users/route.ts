@@ -8,11 +8,11 @@ export async function GET() {
   try {
     await requireAdmin();
     const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, disabled: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, disabled: true, adultAllowed: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: 200,
     });
-    return NextResponse.json({ users });
+    return NextResponse.json({ users }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof AuthenticationError) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
     if (error instanceof AuthorizationError) return NextResponse.json({ error: "Administrator access is required." }, { status: 403 });
@@ -62,7 +62,8 @@ export async function PATCH(request: NextRequest) {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return NextResponse.json({ error: "Request body has an invalid shape." }, { status: 400 });
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).length !== 2 || typeof input.userId !== "string" || input.userId.length < 1 || input.userId.length > 128 || typeof input.disabled !== "boolean") {
+  const changeKeys = ["disabled", "adultAllowed"].filter(key => key in input);
+  if (Object.keys(input).length !== 2 || typeof input.userId !== "string" || input.userId.length < 1 || input.userId.length > 128 || changeKeys.length !== 1 || typeof input[changeKeys[0]] !== "boolean") {
     return NextResponse.json({ error: "Request body has an invalid value." }, { status: 400 });
   }
 
@@ -70,21 +71,23 @@ export async function PATCH(request: NextRequest) {
     const user = await prisma.$transaction(async transaction => {
       const target = await transaction.user.findUnique({
         where: { id: input.userId as string },
-        select: { id: true, name: true, email: true, role: true, disabled: true, createdAt: true },
+        select: { id: true, name: true, email: true, role: true, disabled: true, adultAllowed: true, createdAt: true },
       });
       if (!target) throw new AccountUpdateError(404, "Account not found.");
-      if (input.disabled && target.id === admin.user.id) throw new AccountUpdateError(400, "You can’t disable your own account.");
-      if (target.disabled === input.disabled) return target;
+      const field = changeKeys[0] as "disabled" | "adultAllowed";
+      const nextValue = input[field] as boolean;
+      if (field === "disabled" && nextValue && target.id === admin.user.id) throw new AccountUpdateError(400, "You can’t disable your own account.");
+      if (target[field] === nextValue) return target;
 
-      if (input.disabled && target.role === "admin") {
+      if (field === "disabled" && nextValue && target.role === "admin") {
         const activeAdminCount = await transaction.user.count({ where: { role: "admin", disabled: false } });
         if (activeAdminCount <= 1) throw new AccountUpdateError(409, "The last active administrator can’t be disabled.");
       }
 
       const updated = await transaction.user.update({
         where: { id: target.id },
-        data: { disabled: input.disabled as boolean },
-        select: { id: true, name: true, email: true, role: true, disabled: true, createdAt: true },
+        data: field === "disabled" ? { disabled: nextValue } : { adultAllowed: nextValue },
+        select: { id: true, name: true, email: true, role: true, disabled: true, adultAllowed: true, createdAt: true },
       });
       if (updated.disabled) await transaction.session.deleteMany({ where: { userId: updated.id } });
       return updated;

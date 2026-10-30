@@ -1,6 +1,8 @@
 # Choice Fatigue
 
-A responsive media discovery app built with Next.js and TypeScript. It includes invite-only accounts after first-run setup, password recovery, per-account discovery sessions, account export and deletion, protected admin settings, shared media service connections, and database-backed metadata provider settings. The catalogue supports local fixtures and administrator-managed metadata imports, with session-scoped recommendations based on explicit choices.
+A responsive media discovery app built with Next.js and TypeScript. It includes manually shared invite codes, password recovery, per-account discovery sessions and persistent preference learning, account export and deletion, protected admin settings, shared media service connections, and database-backed metadata provider settings. Adult access is off by default and granted per account by an administrator.
+
+For self-hosting, see [Docker Compose and Proxmox LXC setup](docs/self-hosting.md).
 
 ## Run locally
 
@@ -37,7 +39,7 @@ To recover admin access for an existing deployment, promote an account from a tr
 volta run pnpm admin:promote -- account-email@example.com
 ```
 
-For a TypeScript check, run `volta run pnpm typecheck`. For the live development experience, keep the app running with `volta run pnpm dev`; it reloads application changes as you edit.
+For a TypeScript check, run `volta run pnpm typecheck`. Run the pure recommendation and access-policy tests with `volta run pnpm test`. For the live development experience, keep the app running with `volta run pnpm dev`; it reloads application changes as you edit.
 
 ## What works
 
@@ -46,13 +48,13 @@ For a TypeScript check, run `volta run pnpm typecheck`. For the live development
 - Temporary shortlists stay separate from permanently saved titles.
 - Discovery state is saved to PostgreSQL per account. Existing browser prototype data is imported once when the account has no saved server session.
 - `/account` downloads a JSON copy of the profile and discovery state. Permanent deletion requires the current password and typed confirmation.
-- `/admin` is restricted to administrators. Global app defaults, Adult access, invitation code, optional SMTP delivery, and private-network access are stored in PostgreSQL. Admins can manage accounts, metadata providers, and service connections.
-- TMDB, TheTVDB, ThePornDB, and StashDB credentials are encrypted in PostgreSQL. TMDB search/import supports Movies and Shows; anime series are found under Shows and anime films under Movies. Adult-flagged TMDB results are rejected. ThePornDB and StashDB support text-only Adult metadata; source artwork is not imported or displayed.
+- `/admin` is restricted to administrators. Global app defaults, the Adult master switch, invitation code, optional SMTP delivery, and private-network access are stored in PostgreSQL. Admins can manage accounts, grant Adult access per account, configure metadata providers, and manage shared service connections.
+- TMDB, ThePornDB, and StashDB credentials are encrypted in PostgreSQL. TMDB supplies Movies and Shows, including anime series under Shows and anime films under Movies. Adult-flagged TMDB results are rejected. ThePornDB and StashDB supply text-only Adult metadata; source artwork is not displayed.
 - Seerr, Plex, Radarr, Sonarr, Whisparr v2/v3, Stash, Jellyfin, and Emby connections are configured once in Admin settings and shared by the instance. Their server addresses and credentials are encrypted at rest. Admins can test supported connections; users can check TMDB-linked saved titles against Seerr and Plex and request eligible titles through Seerr.
-- The catalogue is stored in a normalized PostgreSQL table. `volta run pnpm db:seed` loads development fixtures, which are not shown as discovery titles. When TMDB is enabled, the app automatically stores its first two popularity-sorted Movies and Shows discovery pages; records imported from other metadata sources are included too. With no available provider titles, discovery shows its empty state.
-- Discovery uses a session-scoped content ranker: shortlist `+1`, pass `−0.5`, genre affinity, smaller release-decade and title-type signals, and a bounded rating prior. Choices only affect the current category. Persistent learning across fresh sessions is not implemented; see [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md).
+- Discovery loads current provider-ranked titles directly from the provider APIs when the site opens; nobody has to search for or preload titles. TMDB supplies popularity-sorted Movies and Shows. Enabled ThePornDB and StashDB sources supply Adult scenes and movies, ranked by the provider's relevance/popularity ordering. Provider responses are not cached or copied into the local catalogue. Only stable media IDs are saved with discovery state and swipe history. `volta run pnpm db:seed` loads development fixtures, which are not shown as discovery titles.
+- Discovery uses explicit choices and seen-title ratings to rank by genre, release decade, and title type, with a bounded source-rating prior. Preference history persists across sessions; Adult signals remain isolated from Movies and Shows. See [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md).
 - The first account can sign up without an invite and becomes administrator. Later sign-ups require the invite code saved by an administrator. Signup and sign-in do not send or require email verification.
-- Adult is disabled by default and is controlled by the admin setting. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
+- Adult is disabled by default. An administrator must enable the instance master switch and grant access separately to each account. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 
 All application configuration is managed through Admin settings. Environment variables are limited to database connectivity, authentication runtime settings, and the server encryption key.
 

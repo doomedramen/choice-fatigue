@@ -1,20 +1,20 @@
 # Choice Fatigue: product roadmap
 
 **Status:** implementation in progress
-**Checkpoint:** server foundation, account data controls, fixture catalogue, protected provider readiness, metadata imports, and encrypted per-account integration settings are implemented. The local OrbStack PostgreSQL database is migrated and seeded; account-flow validation and live service actions remain.
-**Planning assumption:** begin with a small invite beta; expand after the core discovery loop and provider terms are settled.
+**Checkpoint:** authentication, account data controls, live provider feeds, admin settings, and shared service configuration are implemented. Version 1 is being prepared as a self-hosted Docker Compose and Proxmox LXC release; per-account Adult grants, durable recommendation history, deployment packaging, and release validation are in progress.
+**Version 1 scope:** multi-account instances with a manually shared reusable invite code, instance-wide media services, per-account Adult grants behind an instance master switch, and persistent category-isolated recommendation profiles.
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue. Local fixtures support development but are not displayed in discovery. When TMDB is enabled, its popularity-sorted Movies and Shows pages are imported into the catalogue automatically alongside entries from other metadata providers. A session-scoped content ranker uses shortlist `+1`, pass `−0.5`, seen-title ratings from `−0.5` to `+1`, genres, release decade, title type, and source rating; persistent preference learning remains open. Adult remains off by default and its age prompt is self-attested.
+The app has first-account administrator setup, manually shared invitation codes, password recovery, per-account discovery persistence, account export and deletion, and protected admin controls. Discovery retrieves provider-ranked feeds directly, with no scheduled background sync, provider-response cache, or required title preloading. Persisted discovery and recommendation data retain provider item IDs and user actions, never provider title metadata. The ranking baseline now includes confidence shrinkage, bounded transient provider lookups, saved-title retention, same-review comparisons, and ID-only candidate/order traces for chronological evaluation. Its weights remain unvalidated. See [the algorithm research and implementation order](docs/recommendation-algorithm-research.md). Durable recommendation events and account-level Adult permissions are implemented and need release validation.
 
-## Product decisions to settle first
+## Version 1 decisions
 
-1. **Who is the first release for?** Start with individual discovery and shortlist review. Defer shared household or group sessions until individual use is working.
-2. **What does “shareable” mean for beta?** The plan assumes people can create accounts and use the app on their own devices through an invite link. Public discovery links and collaborative sessions can follow later.
-3. **Is Adult part of the first hosted release?** Keep it disabled in hosted environments until provider permissions, hosting rules, and age-access requirements are confirmed for the launch jurisdictions. A browser checkbox alone is not a production age control.
-4. **What is the business model?** Treat the first release as non-commercial while the project is unfunded, but re-check provider terms before adding ads, paid tiers, sponsorships, or other revenue.
-5. **Confirm the name.** Check domain, social handles, and trademark conflicts before investing in public branding.
+1. **Audience:** self-hosters running one private instance; shared household sessions and public discovery links are later work.
+2. **Install targets:** Docker Compose and a Proxmox LXC install path following community-scripts conventions.
+3. **Accounts and services:** reusable manually shared invite code, administrator-managed accounts, and instance-wide service connections.
+4. **Adult access:** off by default; both the instance switch and an explicit per-account administrator grant are required. The age prompt remains self-attested.
+5. **Recommendation learning:** persistent account-owned history with strict category isolation; no cross-user collaborative signals.
 
 ## Phased delivery
 
@@ -26,7 +26,7 @@ The app now has invite-only Better Auth accounts after first-run setup, no email
 - Move session persistence from browser-only storage to the authenticated account so it works across devices. Keep a local migration path for prototype data only if it is useful to beta testers.
 - Provide account data export and password-confirmed deletion; define retention, backups, and restore behavior before inviting users.
 
-**Progress:** the auth, account-scoped state, protected admin, export, deletion, and encrypted per-account service settings are implemented. The local PostgreSQL migration and catalogue seed have run successfully. Sign-up, export/deletion, and cross-session persistence still need end-to-end validation before this phase can be marked complete.
+**Progress:** authentication, account-scoped state, protected admin, export, deletion, and encrypted instance-wide service settings are implemented. Sign-up, export/deletion, and cross-device persistence still need end-to-end validation.
 
 **Exit condition:** an invited user can register, sign in, export or delete their account, and resume their discovery session on another device; an unauthenticated user cannot read or change account data.
 
@@ -35,15 +35,15 @@ The app now has invite-only Better Auth accounts after first-run setup, no email
 - Create a normalized media record with an explicit provider and provider ID, category, title, year, runtime, genres, synopsis, artwork reference, and age/content flags.
 - Implement provider adapters on the server. Store API keys in server secrets or a secret manager; never expose them to the browser or return them in admin responses.
 - Start with a small Movies/Shows catalogue and fixture-backed adapter tests, then connect a permitted provider and add attribution in the app’s About/Credits area.
-- Cache provider results, add request limits and retries, and show an empty state when no metadata source has available titles. Development fixtures must stay separate from discovery content.
-- Evaluate anime coverage in the Movies and Shows searches without creating a separate Anime category.
+- Request provider feeds on demand without persisting media metadata; bound request counts and show a clear retry state when a provider is unavailable. Development fixtures must stay separate from discovery content.
+- Evaluate anime coverage in the Movies and Shows feeds without creating a separate Anime category.
 
-**Progress:** the normalized catalogue model, fixture seeder, server loader, protected status reporting, opt-in TMDB search/import and automatic popularity-sorted Movies/Shows discovery imports are implemented. TMDB discovery records include genres, ratings, years, and poster paths; responses are cached and saved to PostgreSQL. The gated text-only ThePornDB/StashDB Adult imports remain available. Anime series are found under Shows and anime films under Movies. TMDB attribution is available at `/credits`. Automatic refresh beyond the first two pages, cache/retention policy review, provider health, service connection checks/actions, and full database-backed account-flow validation remain open.
+**Progress:** the normalized legacy catalogue model, fixture seeder, protected provider settings, and on-demand popularity-ranked Movies/Shows feeds are implemented. The gated Adult feed combines enabled ThePornDB scene/movie results and StashDB popularity-ranked scenes; stable provider IDs keep swipe history attached across requests. Provider responses are not cached or persisted and there is no background sync. Anime series are found under Shows and anime films under Movies. TMDB attribution is available at `/credits`. Provider health reporting, provider terms and request-volume review, service connection checks/actions, and full database-backed account-flow validation remain open.
 
 **Provider notes:**
 
 - **TMDB:** its FAQ says the developer API is free for non-commercial use with attribution, and commercial use requires contacting TMDB. It also says its data and images may not be used in connection with pornographic content. This creates an unresolved conflict with a single Choice Fatigue product that includes an Adult section. Get written guidance from TMDB or keep the TMDB-powered experience and Adult experience separate before launch. [TMDB API FAQ](https://developer.themoviedb.org/docs/faq)
-- **ThePornDB and StashDB:** Stash's docs list both as supported Stash-Box metadata sources, and ThePornDB publishes API documentation for scenes and movies. Choice Fatigue uses them for Adult metadata, with credentials kept on the server and no explicit artwork in the first integration. The Stash guide describes a local Stash installation, so request-volume and cache behavior still need to be confirmed for the hosted beta. [Stash guide](https://docs.stashapp.cc/beginner-guides/guide-to-scraping/), [Stash-Box instances](https://docs.stashapp.cc/metadata-sources/stash-box-instances/), [ThePornDB API docs](https://api.theporndb.net/docs), [StashDB access guide](https://guidelines.stashdb.org/docs/faq_getting-started/stashdb/accessing-stashdb/)
+- **ThePornDB and StashDB:** Stash's docs list both as supported Stash-Box metadata sources, and ThePornDB publishes API documentation for scenes and movies. Choice Fatigue uses them for Adult metadata, with credentials kept on the server and no explicit artwork in the first integration. The Stash guide describes a local Stash installation, so request-volume and cache guidance remain a 1.0 review item. [Stash guide](https://docs.stashapp.cc/beginner-guides/guide-to-scraping/), [Stash-Box instances](https://docs.stashapp.cc/metadata-sources/stash-box-instances/), [ThePornDB API docs](https://api.theporndb.net/docs), [StashDB access guide](https://guidelines.stashdb.org/docs/faq_getting-started/stashdb/accessing-stashdb/)
 
 **Exit condition:** the app can serve a reliable, attributed catalogue through one provider adapter without putting credentials in the client, and provider failures do not break discovery.
 
@@ -56,32 +56,32 @@ The app now has invite-only Better Auth accounts after first-run setup, no email
 
 **Exit condition:** a user can complete the whole flow repeatedly across devices without losing, duplicating, or confusing temporary and saved choices.
 
-### 4. Replace the admin mockup with real administration
+### 4. Complete administrator controls
 
 - Require an authenticated admin role on every admin page and server action/API route.
 - Start with global settings, feature flags, provider connection status, and user role/status management.
-- Configure API credentials through server deployment secrets first. Only add secret editing to the admin UI if the backend encrypts secrets, masks them on read, audits changes, and supports rotation.
-- Add an audit trail for admin actions and protect destructive or bulk changes with confirmation and recovery where possible.
+- The admin UI already encrypts provider and service credentials, masks them on read, and supports key rotation. Add the per-account Adult grant and verify access changes are enforced by server routes.
+- Keep role promotion as a trusted-shell operation and protect account disablement with the existing last-admin safeguards.
 
 **Exit condition:** normal users cannot reach admin data or operations; admins can diagnose integrations and manage accounts without seeing stored secret values.
 
-### 5. Prepare and run an invite beta
+### 5. Prepare the self-hosted 1.0 release
 
-- Deploy staging and production with HTTPS, database backups, error reporting, request limits, and an operational rollback path.
-- Publish privacy, terms, cookie, and content policies that match the actual data and providers used. Add contact and account support routes.
-- Confirm the name and domain, provider rights, hosting acceptable-use rules, and any age/access obligations for the chosen launch regions.
-- Invite a small group, observe completion and return rates for the discovery/review loop, and fix the biggest usability failures before opening signups.
+- Provide Docker Compose and Proxmox LXC setup, upgrade, secret-handling, and database restore instructions.
+- Verify provider terms, request-volume expectations, and Adult access responsibilities for the supported private-instance use.
+- Complete account, discovery, service, recommendation, backup, and restore checks against a clean installation before tagging 1.0.
 
 **Exit condition:** backup restoration has been rehearsed, account deletion works, provider and hosting terms have been checked, and beta feedback shows users can complete the core flow without help.
 
 ### 6. Decide what to build after beta
 
-Use beta feedback to choose among collaborative sessions, shareable shortlists, persistent recommendation profiles, more catalogue sources, and paid plans. Keep these out of the initial launch unless testing shows they are required for the core product.
+After 1.0, use self-hosted feedback to choose among collaborative sessions, shareable shortlists, more catalogue sources, and paid plans. Keep these out of the initial release.
 
 ## Immediate next steps
 
-1. Exercise sign-up, account export/deletion, and cross-session discovery persistence against the local OrbStack database.
-2. Implement connection health checks and library lookup through Seerr, then add direct Whisparr v2/v3 and Stash actions for Adult.
-3. Add Plex and Trakt OAuth, followed by direct Radarr/Sonarr fallbacks for users who do not use Seerr. Keep connections account-scoped and support multiple instances.
-4. Confirm TMDB's cache/retention terms and the Adult-content boundary; confirm ThePornDB/StashDB request-volume and cache guidance for hosted use.
-5. Choose hosting and rehearse database backup restoration before inviting anyone outside local development.
+1. The researched ranking baseline and ID-only replay traces are implemented. Build chronological replay and choice-funnel evaluation; consider an opt-in comparison only after those results establish a useful variant.
+2. Complete automated coverage and account-flow checks for invite registration, export/deletion, Adult grants, event corrections, profile reset, and cross-session ranking.
+3. Finish and document Docker Compose and Proxmox LXC setup, upgrades, secrets, and backup/restore; rehearse database restoration.
+4. Review provider terms, request-volume expectations, and Adult-content boundaries for the supported self-hosted use.
+5. Validate shared service checks and Seerr/Plex actions against real supported service versions, with useful setup and failure guidance.
+6. Complete an end-to-end pass through the discovery, review, save, undo, reset, and account recovery flows before tagging 1.0.

@@ -40,14 +40,14 @@ Email is not used for account creation, verification, or sign-in. SMTP is option
 
 - `GET /api/discovery-state` returns the authenticated user's saved discovery state, or the default state on first use.
 - `PUT /api/discovery-state` validates and writes the state for the authenticated user. The account ID comes from the session cookie; the request body cannot choose another user's row. Writes require a matching same-origin `Origin` header and are limited to 256 KiB.
-- `GET /api/account/export` downloads the signed-in account's profile and discovery state as JSON. It excludes password hashes, sessions, verification tokens, server addresses, and credentials.
+- `GET /api/account/export` downloads the signed-in account's profile, discovery state, and recommendation history as JSON. It excludes password hashes, sessions, verification tokens, server addresses, and credentials.
 - `/account` provides the export link and account deletion flow. Deletion requires the current password and typed confirmation. The server protects the last active administrator and removes the account's discovery state and sessions.
 
 ## Administrator settings
 
-`GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton `GlobalSettings` row. It stores the app name, default category, Adult-section flag, hashed invite code, private-network access flag, and optional SMTP configuration. Adult entries and Adult-only services remain unavailable until the administrator enables the section.
+`GET` and `PUT /api/admin/settings` require an administrator session and read or update the singleton `GlobalSettings` row. It stores the app name, default category, Adult master switch, hashed invite code, private-network access flag, and optional SMTP configuration. Adult entries remain unavailable unless the administrator enables the master switch and grants Adult access to the account. Each account defaults to no Adult grant.
 
-`GET /api/admin/users` returns a limited account list. Same-origin `PATCH /api/admin/users` disables or restores an account, revokes sessions when disabling, and protects the current and last active administrator. Administrator roles are managed from a trusted shell:
+`GET /api/admin/users` returns a limited account list, including each account's Adult grant. Same-origin `PATCH /api/admin/users` disables/restores an account or changes its Adult grant, revokes sessions when disabling, and protects the current and last active administrator. Administrator roles are managed from a trusted shell:
 
 ```sh
 volta run pnpm admin:promote -- exact-account-email@example.com
@@ -57,11 +57,10 @@ volta run pnpm admin:promote -- exact-account-email@example.com
 
 Metadata provider keys and enablement are saved through Admin → Metadata sources. The keys and optional TVDB PIN are encrypted before storage. The API reports only configured and enabled status; secrets are never returned to the browser.
 
-- TMDB search/import supports Movies and Shows. Anime series are included in Shows; anime films are included in Movies. The adapter uses TMDB's TV endpoints for Shows, sets `include_adult=false`, rejects adult-flagged results, and stores imported titles in `CatalogueEntry`. `/credits` contains TMDB attribution.
-- TheTVDB v4 search is configured with a project API key and optional subscriber PIN. TMDB artwork may be matched only when title and year match exactly.
-- ThePornDB and StashDB can be used for text-only Adult entries. Source artwork is not imported or displayed. Adult imports are marked age-restricted and stored in the Adult category.
+- TMDB supplies popular Movies and Shows on demand. Anime series are included in Shows; anime films are included in Movies. The adapter uses TMDB's TV endpoints for Shows, sets `include_adult=false`, and rejects adult-flagged results. `/credits` contains TMDB attribution.
+- ThePornDB supplies Adult scenes and movies; StashDB supplies popularity-ranked Adult scenes. Adult metadata is text-only and source artwork is not displayed.
 
-All provider calls require an administrator session, an enabled provider, and saved credentials. No provider-specific environment flags are used. Review [provider-review.md](provider-review.md) before enabling provider calls on a hosted instance.
+All provider calls require an administrator session, an enabled provider, and saved credentials. No provider-specific environment flags are used. Review [provider-review.md](provider-review.md) before enabling provider calls on a shared instance.
 
 ## Shared media services
 
@@ -80,9 +79,11 @@ To rotate the encryption key, stop the app, set the temporary `INTEGRATION_CREDE
 
 ## Catalogue and recommendation boundary
 
-`CatalogueEntry` is the normalized server-side catalogue table. `volta run pnpm db:seed` idempotently loads local fixtures. The discovery page reads active entries from PostgreSQL and falls back to fixtures when the table is empty or unavailable. Adult rows are filtered before they reach the browser unless Adult access is enabled.
+Discovery does not read or write provider metadata in `CatalogueEntry`. On each page request, the server gets current provider-ranked feeds directly. There is no scheduled sync or provider-response cache. Account discovery state and recommendation events retain provider item IDs only; media details are returned transiently to render the current feed. `CatalogueEntry` and local fixture rows remain for backwards compatibility but are not shown as discovery titles. Adult feeds are requested and returned only when both the instance switch and the account grant are enabled.
 
-The session ranker uses the current discovery snapshot for pass, shortlist, and seen-title star ratings. The planned approach and required durable event data are in [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md). Cross-session preference learning still waits until history can distinguish review keep/remove/restore, save, and undo.
+The ranker combines current choices with account-owned `RecommendationEvent` history from earlier sessions. Same-origin `POST /api/recommendation-events` accepts event batches for the signed-in account; `GET /api/recommendation-events?category=Movies&excludeSessionId=...` returns category-scoped profile signals. Undo and pre-review shortlist withdrawal retract the targeted decision signal. Review and save actions remain distinct history events and are not collapsed into swipe decisions. See [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md).
+
+`GET /api/health` performs a database readiness check without returning connection details. See [self-hosting.md](self-hosting.md) for Docker Compose and Proxmox LXC deployment instructions.
 
 ## Server helpers
 
@@ -93,8 +94,8 @@ Import these only from server code:
 - `requireAdmin()` returns an administrator session or throws `AuthenticationError` / `AuthorizationError` (HTTP 401/403).
 - `getDiscoveryState()` reads the current signed-in user's JSON state.
 - `saveDiscoveryState(state)` upserts the current signed-in user's state using the verified session ID.
-- `getGlobalSettings()` returns public display settings from the database, including the Adult-section flag.
+- `getGlobalSettings()` returns public display settings from the database, including the Adult master switch. Account grants are checked separately before returning Adult content.
 
 ## Database models
 
-Better Auth owns `User`, `Session`, `Account`, and `Verification`. On an empty installation, a serialized server-side hook promotes the first account to administrator. `DiscoveryState` stores per-account discovery data. `GlobalSettings` stores shared application options. `MetadataProviderCredential` stores encrypted metadata-provider keys. `AdminServiceIntegration` stores encrypted shared media-service connections.
+Better Auth owns `User`, `Session`, `Account`, and `Verification`. On an empty installation, a serialized server-side hook promotes the first account to administrator. `DiscoveryState` stores per-account JSON state. `RecommendationEvent` stores durable account-owned choices and corrections. `GlobalSettings` stores shared application options. `MetadataProviderCredential` stores encrypted metadata-provider keys. `AdminServiceIntegration` stores encrypted shared media-service connections.

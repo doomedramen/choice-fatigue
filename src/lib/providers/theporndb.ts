@@ -2,6 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
+import type { MediaItem } from "@/data";
+import { recommendationFeatureKeys } from "@/lib/recommendations";
 
 export const thePornDBKinds = ["scene", "movie"] as const;
 export type ThePornDBKind = (typeof thePornDBKinds)[number];
@@ -114,6 +116,42 @@ function toSearchResult(record: ThePornDBRecord, kind: ThePornDBKind) {
   };
 }
 
+function popularItem(record: ThePornDBRecord, kind: ThePornDBKind): MediaItem | null {
+  const result = toSearchResult(record, kind);
+  if (!result) return null;
+  const rating = typeof record.rating === "number" && Number.isFinite(record.rating)
+    ? Math.min(10, Math.max(0, record.rating))
+    : null;
+  return {
+    id: `theporndb-${kind}-${result.sourceId}`,
+    title: result.title,
+    ...(result.year ? { year: result.year } : {}),
+    type: kind === "movie" ? "Movie" : "Scene",
+    runtime: result.runtime ?? "—",
+    rating: rating === null ? "—" : rating.toFixed(1),
+    genre: result.genres,
+    synopsis: result.synopsis,
+    palette: ["#58352e", "#362b30", "#211c28"],
+    art: "noir",
+    label: result.title,
+    category: "Adult",
+    age: 18,
+    contentFlags: ["adult"],
+  };
+}
+
+/** Load ThePornDB's relevance-ranked scene and movie feeds on demand. */
+export async function getPopularThePornDBCatalogue(): Promise<MediaItem[]> {
+  const token = await accessToken();
+  const load = async (kind: ThePornDBKind) => {
+    const params = new URLSearchParams({ orderBy: "most_relevant", per_page: "25", page: "1" });
+    const payload = await requestThePornDB<ThePornDBPayload>(`${apiPath(kind)}?${params.toString()}`, token);
+    return recordsFrom(payload).map(record => popularItem(record, kind)).filter((item): item is MediaItem => item !== null);
+  };
+  const [scenes, movies] = await Promise.all([load("scene"), load("movie")]);
+  return [...scenes, ...movies];
+}
+
 function apiPath(kind: ThePornDBKind, id?: string) {
   const collection = kind === "scene" ? "scenes" : "movies";
   return id ? `${collection}/${encodeURIComponent(id)}` : collection;
@@ -127,6 +165,15 @@ export async function searchThePornDB(query: string, kind: ThePornDBKind) {
     .map(record => toSearchResult(record, kind))
     .filter((result): result is NonNullable<typeof result> => result !== null)
     .slice(0, 12);
+}
+
+export async function getThePornDBRecommendationFeatures(kind: ThePornDBKind, sourceId: string) {
+  if (!idPattern.test(sourceId)) throw new ThePornDBInvalidRecordError();
+  const token = await accessToken();
+  const payload = await requestThePornDB<ThePornDBPayload>(apiPath(kind, sourceId), token);
+  const record = recordsFrom(payload)[0];
+  if (!record || recordId(record) !== sourceId) throw new ThePornDBInvalidRecordError();
+  return recommendationFeatureKeys({ genres: genresFrom(record.tags), year: yearFrom(record), type: kind === "movie" ? "Movie" : "Scene" });
 }
 
 export async function importThePornDBEntry(input: { sourceId: string; kind: ThePornDBKind }) {

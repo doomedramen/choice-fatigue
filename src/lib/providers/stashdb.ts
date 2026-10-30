@@ -2,6 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
+import type { MediaItem } from "@/data";
+import { recommendationFeatureKeys } from "@/lib/recommendations";
 
 const ENDPOINT = "https://stashdb.org/graphql";
 const RESULT_LIMIT = 12;
@@ -20,6 +22,7 @@ type StashScene = {
 
 type GraphqlResponse<T> = { data?: T; errors?: Array<{ message?: unknown }> };
 type SceneSearchResponse = { searchScenes?: { count?: number; scenes?: StashScene[] } };
+type SceneBrowseResponse = { queryScenes?: { count?: number; scenes?: StashScene[] } };
 type FindSceneResponse = { findScene?: StashScene | null };
 
 export class StashDbNotEnabledError extends Error {}
@@ -122,6 +125,21 @@ const findQuery = `query FindSceneById($id: ID!) {
   }
 }`;
 
+const popularQuery = `query PopularScenes($input: SceneQueryInput!) {
+  queryScenes(input: $input) {
+    count
+    scenes {
+      id
+      title
+      details
+      release_date
+      duration
+      tags { name }
+      studio { name }
+    }
+  }
+}`;
+
 export async function searchStashDbScenes(term: string) {
   const apiKey = await getApiKey();
   const response = await graphql<SceneSearchResponse>(searchQuery, { term, limit: RESULT_LIMIT }, apiKey);
@@ -129,6 +147,42 @@ export async function searchStashDbScenes(term: string) {
     .map(normalizeScene)
     .filter((scene): scene is NonNullable<typeof scene> => scene !== null)
     .slice(0, RESULT_LIMIT);
+}
+
+/** Browse a provider-ranked adult scene pool without importing it into the local catalogue. */
+export async function getPopularStashDbCatalogue(): Promise<MediaItem[]> {
+  const apiKey = await getApiKey();
+  const response = await graphql<SceneBrowseResponse>(popularQuery, { input: { page: 1, per_page: RESULT_LIMIT, direction: "DESC", sort: "POPULARITY" } }, apiKey);
+  return (Array.isArray(response.queryScenes?.scenes) ? response.queryScenes.scenes : [])
+    .map(normalizeScene)
+    .filter((scene): scene is NonNullable<typeof scene> => scene !== null)
+    .map(scene => ({
+      id: `stashdb-${scene.sourceId}`,
+      title: scene.title,
+      ...(scene.year ? { year: scene.year } : {}),
+      type: "Scene",
+      runtime: scene.runtime ?? "—",
+      rating: "—",
+      genre: scene.genres,
+      synopsis: scene.synopsis,
+      palette: ["#3d2d38", "#2a202b", "#181620"],
+      art: "noir",
+      label: scene.title,
+      category: "Adult" as const,
+      age: 18,
+      contentFlags: ["adult"],
+    }));
+}
+
+export async function getStashDbRecommendationFeatures(sourceId: string) {
+  if (!sourceId || sourceId.length > 160 || !/^[A-Za-z0-9_-]+$/.test(sourceId)) throw new StashDbMissingSceneError();
+  const apiKey = await getApiKey();
+  const response = await graphql<FindSceneResponse>(findQuery, { id: sourceId }, apiKey);
+  const scene = response.findScene;
+  if (!scene) throw new StashDbMissingSceneError();
+  const normalized = normalizeScene(scene);
+  if (!normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
+  return recommendationFeatureKeys({ genres: normalized.genres, year: normalized.year, type: "Scene" });
 }
 
 export async function importStashDbScene(sourceId: string) {

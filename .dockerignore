@@ -1,0 +1,11 @@
+.git
+.next
+node_modules
+src/generated/prisma
+.env
+.env.*
+!.env.example
+deploy/env.compose
+*.tsbuildinfo
+outputs
+work

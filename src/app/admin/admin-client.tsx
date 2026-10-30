@@ -1,11 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import TmdbCatalogue from "./tmdb-catalogue";
 import TmdbProviderSettings, { type TmdbProviderStatus } from "./tmdb-provider-settings";
-import TvdbProvider, { type TvdbProviderStatus } from "./tvdb-provider";
 import AdultProviderSettings, { type AdultProviderStatus } from "./adult-provider-settings";
-import AdultCatalogue from "./adult-catalogue";
 import ServiceIntegrations from "./service-integrations";
 import "./admin.css";
 
@@ -23,10 +20,9 @@ type Settings = {
   smtpConfigured: boolean;
   clearSmtpConfig: boolean;
 };
-type User = { id: string; name: string; email: string; role: string; disabled: boolean; createdAt: string };
+type User = { id: string; name: string; email: string; role: string; disabled: boolean; adultAllowed: boolean; createdAt: string };
 type ProviderStatuses = {
   tmdb: TmdbProviderStatus;
-  tvdb: TvdbProviderStatus;
   theporndb: AdultProviderStatus;
   stashdb: AdultProviderStatus;
 };
@@ -124,22 +120,24 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
     setNotice("New invite code generated. Save settings to activate it, then copy it to share.");
   }
 
-  async function setUserDisabled(user: User) {
-    const disabled = !user.disabled;
+  async function updateUser(user: User, change: "disabled" | "adultAllowed") {
+    const value = !user[change];
     setUpdatingUserId(user.id);
     setNotice("");
     try {
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId: user.id, disabled }),
+        body: JSON.stringify({ userId: user.id, [change]: value }),
       });
       if (response.status === 401) { window.location.replace("/sign-in"); return; }
       if (response.status === 403) { window.location.replace("/"); return; }
       const data = await response.json() as { user?: User; error?: string };
       if (!response.ok || !data.user) throw new Error(data.error || "Account could not be updated.");
       setUsers(current => current.map(item => item.id === data.user!.id ? data.user! : item));
-      setNotice(disabled ? "Account disabled and active sessions revoked." : "Account restored.");
+      setNotice(change === "adultAllowed"
+        ? value ? `Adult access enabled for ${user.name}.` : `Adult access revoked for ${user.name}.`
+        : value ? "Account disabled and active sessions revoked." : "Account restored.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Account could not be updated.");
     } finally {
@@ -156,14 +154,11 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
         <nav className="admin-nav" aria-label="Admin sections">{([['providers', 'Metadata sources'], ['services', 'Services'], ['settings', 'Global settings'], ['users', 'Users']] as const).map(([id, label]) => <button key={id} type="button" className={tab === id ? "selected" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => { setTab(id); setNotice(""); }}>{label}<span aria-hidden="true">→</span></button>)}</nav>
         <section className="admin-content" aria-labelledby="admin-section-title">
           {tab === "providers" && <>
-            <div className="admin-section-head"><div><p className="admin-eyebrow">CATALOGUE SETUP</p><h2 id="admin-section-title">Metadata sources</h2><p>Manage provider keys and turn sources on or off here. Credentials are encrypted in the database; titles imported from any enabled source join the shared catalogue used by discovery.</p></div></div>
+            <div className="admin-section-head"><div><p className="admin-eyebrow">LIVE PROVIDER FEEDS</p><h2 id="admin-section-title">Metadata sources</h2><p>Configure provider access here. Discovery requests current popular titles directly from enabled sources; media details are not saved to the local catalogue.</p></div></div>
             <div className="provider-list">
               <TmdbProviderSettings status={providerStatuses?.tmdb ?? { credentialConfigured: false, enabled: false, encryptionConfigured: false }} onStatusChange={status => updateProviderStatus("tmdb", status)} />
-              {providerStatuses?.tmdb.enabled && <TmdbCatalogue />}
-              <TvdbProvider status={providerStatuses?.tvdb ?? { credentialConfigured: false, pinConfigured: false, enabled: false, encryptionConfigured: false }} onStatusChange={status => updateProviderStatus("tvdb", status)} />
               <AdultProviderSettings provider="theporndb" title="ThePornDB" description="Adult scene and movie text metadata. Source artwork is not imported or displayed." status={providerStatuses?.theporndb ?? { credentialConfigured: false, enabled: false, encryptionConfigured: false }} onStatusChange={status => updateProviderStatus("theporndb", status)} />
               <AdultProviderSettings provider="stashdb" title="StashDB" description="Adult scene, performer, and studio text metadata. Source artwork is not imported or displayed." status={providerStatuses?.stashdb ?? { credentialConfigured: false, enabled: false, encryptionConfigured: false }} onStatusChange={status => updateProviderStatus("stashdb", status)} />
-              {settings.adultSectionEnabled && (providerStatuses?.theporndb.enabled || providerStatuses?.stashdb.enabled) && <AdultCatalogue enabledProviders={{ theporndb: providerStatuses?.theporndb.enabled === true, stashdb: providerStatuses?.stashdb.enabled === true }} />}
               {!settings.adultSectionEnabled && <p className="admin-help">Adult metadata stays unavailable until you enable the Adult section in Global settings.</p>}
             </div>
             <p className="admin-help">Credentials are encrypted before storage. See the <a href="/provider-review">provider review notes</a> for source boundaries and remaining checks.</p>
@@ -174,7 +169,7 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
             <div className="admin-card">
               <label className="field"><span>App name</span><input value={settings.appName} maxLength={50} onChange={event => setSettings({ ...settings, appName: event.target.value })} /></label>
               <label className="field"><span>Default category</span><select value={settings.defaultCategory} onChange={event => setSettings({ ...settings, defaultCategory: event.target.value })}><option>Movies</option><option>Shows</option></select></label>
-              <label className="check-row"><input type="checkbox" checked={settings.adultSectionEnabled} disabled={!ready} onChange={event => setSettings({ ...settings, adultSectionEnabled: event.target.checked })} /><span><strong>Enable the Adult section</strong><small>Enables the age-gated Adult category for this instance.</small></span></label>
+              <label className="check-row"><input type="checkbox" checked={settings.adultSectionEnabled} disabled={!ready} onChange={event => setSettings({ ...settings, adultSectionEnabled: event.target.checked })} /><span><strong>Allow Adult access for this instance</strong><small>Master switch. Each account also needs an individual grant in Users.</small></span></label>
             </div>
             <section className="admin-card" aria-labelledby="invite-settings-title">
               <div><h3 id="invite-settings-title">Invitation code</h3><p className="admin-help">The first account can register without an invite and becomes admin. Later sign-ups require this code. Only a secure hash is stored.</p></div>
@@ -196,8 +191,8 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
           </>}
           {tab === "users" && <>
             <div className="admin-section-head"><div><p className="admin-eyebrow">ACCESS</p><h2 id="admin-section-title">Accounts</h2><p>Registered accounts in this instance.</p></div><span className="admin-count">{users.length} {users.length === 1 ? "account" : "accounts"}</span></div>
-            <div className="admin-card user-list">{users.length ? users.map(user => <article className="user-row" key={user.id}><div className="user-info"><strong>{user.name}{user.id === userId ? " · You" : ""}</strong><span>{user.email}</span></div><span className={`role-pill ${user.role === "admin" ? "role-admin" : ""}`}>{user.role === "admin" ? "Admin" : "Member"}</span><span className={`account-status ${user.disabled ? "account-disabled" : ""}`}>{user.disabled ? "Disabled" : "Active"}</span><span className="user-created">Joined {new Date(user.createdAt).toLocaleDateString()}</span><button className={`account-toggle ${user.disabled ? "restore-account" : "disable-account"}`} type="button" disabled={updatingUserId !== null || (user.id === userId && !user.disabled)} onClick={() => void setUserDisabled(user)} aria-label={`${user.disabled ? "Restore" : "Disable"} ${user.name} account`} title={user.id === userId && !user.disabled ? "You cannot disable your own account" : undefined}>{updatingUserId === user.id ? "Saving…" : user.id === userId && !user.disabled ? "You" : user.disabled ? "Restore" : "Disable"}</button></article>) : <p className="admin-help">No accounts are registered yet.</p>}</div>
-            <div className="admin-alert"><strong>Account controls</strong><span>Disabled accounts can’t sign in or use account features. Disabling an account revokes its current sessions. Admin roles remain managed through the trusted server command.</span></div>
+            <div className="admin-card user-list">{users.length ? users.map(user => <article className="user-row" key={user.id}><div className="user-info"><strong>{user.name}{user.id === userId ? " · You" : ""}</strong><span>{user.email}</span></div><span className={`role-pill ${user.role === "admin" ? "role-admin" : ""}`}>{user.role === "admin" ? "Admin" : "Member"}</span><span className={`account-status ${user.disabled ? "account-disabled" : ""}`}>{user.disabled ? "Disabled" : "Active"}</span><span className="user-created">Joined {new Date(user.createdAt).toLocaleDateString()}</span><button className={`account-toggle ${user.adultAllowed ? "restore-account" : "disable-account"}`} type="button" disabled={updatingUserId !== null} onClick={() => void updateUser(user, "adultAllowed")} aria-label={`${user.adultAllowed ? "Revoke" : "Grant"} Adult access for ${user.name}`}>{updatingUserId === user.id ? "Saving…" : user.adultAllowed ? "Adult on" : "Adult off"}</button><button className={`account-toggle ${user.disabled ? "restore-account" : "disable-account"}`} type="button" disabled={updatingUserId !== null || (user.id === userId && !user.disabled)} onClick={() => void updateUser(user, "disabled")} aria-label={`${user.disabled ? "Restore" : "Disable"} ${user.name} account`} title={user.id === userId && !user.disabled ? "You cannot disable your own account" : undefined}>{updatingUserId === user.id ? "Saving…" : user.id === userId && !user.disabled ? "You" : user.disabled ? "Restore" : "Disable"}</button></article>) : <p className="admin-help">No accounts are registered yet.</p>}</div>
+            <div className="admin-alert"><strong>Account controls</strong><span>Adult access is granted separately for each account and remains hidden when the instance-level Adult switch is off. Disabled accounts cannot sign in; disabling an account revokes its current sessions. Admin roles remain managed through the trusted server command.</span></div>
           </>}
           {tab !== "settings" && <p className="admin-notice" role="status" aria-live="polite">{notice}</p>}
         </section>

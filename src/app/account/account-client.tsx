@@ -5,12 +5,14 @@ import { useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth-client";
 import "./account.css";
 
-export default function AccountClient({ name, email, isAdmin }: { name: string; email: string; isAdmin: boolean }) {
+export default function AccountClient({ userId, name, email, isAdmin }: { userId: string; name: string; email: string; isAdmin: boolean }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [resettingRecommendations, setResettingRecommendations] = useState(false);
+  const [recommendationNotice, setRecommendationNotice] = useState("");
   const canDelete = password.length > 0 && confirmation === "DELETE" && !pending;
 
   async function deleteAccount(event: FormEvent<HTMLFormElement>) {
@@ -34,12 +36,30 @@ export default function AccountClient({ name, email, isAdmin }: { name: string; 
     }
   }
 
+  async function clearRecommendationHistory() {
+    if (!window.confirm("Clear your saved recommendation history? Your current discovery session will continue to influence this session only.")) return;
+    setResettingRecommendations(true);
+    setRecommendationNotice("");
+    try {
+      const response = await fetch("/api/recommendation-events", { method: "DELETE" });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Recommendation history could not be cleared.");
+      try { localStorage.removeItem(`choice-fatigue-learning-${userId}`); } catch { /* Local storage is optional. */ }
+      setRecommendationNotice("Saved recommendation history cleared. Current-session choices still apply until you start a fresh session.");
+    } catch (cause) {
+      setRecommendationNotice(cause instanceof Error ? cause.message : "Recommendation history could not be cleared.");
+    } finally {
+      setResettingRecommendations(false);
+    }
+  }
+
   return <div className="account-page">
     <header className="account-header"><Link href="/" className="account-brand"><span aria-hidden="true">✳</span> Choice Fatigue</Link><Link href="/" className="account-back">← Back to discovery</Link></header>
     <main className="account-main">
       <div className="account-heading"><p className="account-eyebrow">YOUR PROFILE</p><h1>Account settings</h1><p>Manage your profile and your Choice Fatigue data.</p></div>
       <section className="account-panel" aria-labelledby="profile-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PROFILE DETAILS</p><h2 id="profile-title">Your information</h2></div></div><dl className="profile-details"><div><dt>Name</dt><dd>{name}</dd></div><div><dt>Email address</dt><dd>{email}</dd></div></dl></section>
       <section className="account-panel" aria-labelledby="data-title"><div className="account-panel-heading"><div><p className="account-eyebrow">YOUR DATA</p><h2 id="data-title">Take your choices with you</h2><p>Download a copy of your profile and discovery data.</p></div></div><a className="account-download" href="/api/account/export">Download my data <span aria-hidden="true">↓</span></a></section>
+      <section className="account-panel" aria-labelledby="recommendation-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PERSONALISATION</p><h2 id="recommendation-title">Recommendation history</h2><p>Earlier choices help shape future sessions. Adult choices are kept separate from Movies and Shows.</p></div></div><button className="account-download" type="button" onClick={() => void clearRecommendationHistory()} disabled={resettingRecommendations}>{resettingRecommendations ? "Clearing…" : "Clear recommendation history"}</button>{recommendationNotice && <p role="status" className="account-success">{recommendationNotice}</p>}</section>
       <section className="account-panel" aria-labelledby="connections-title"><div className="account-panel-heading"><div><p className="account-eyebrow">INSTANCE SERVICES</p><h2 id="connections-title">Shared services</h2><p>Media services are configured for this instance and shared with all accounts.</p></div></div>{isAdmin && <Link className="account-download" href="/admin?section=services">Manage services <span aria-hidden="true">→</span></Link>}</section>
       <section className="account-danger" aria-labelledby="delete-title"><div className="account-panel-heading"><div><p className="account-eyebrow">DANGER ZONE</p><h2 id="delete-title">Delete your account</h2><p>This permanently deletes your account and saved discovery data. You’ll be signed out immediately.</p></div></div><form className="delete-form" onSubmit={deleteAccount}>
         <label className="account-field">Confirm your password<input type="password" name="password" autoComplete="current-password" required value={password} onChange={event=>setPassword(event.target.value)} /></label>

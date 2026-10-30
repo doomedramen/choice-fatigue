@@ -10,6 +10,7 @@
     "prebuild": "prisma generate",
     "start": "next start --hostname 0.0.0.0 --port 4173",
     "typecheck": "prisma generate && tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:setup": "pnpm db:generate && pnpm db:migrate",

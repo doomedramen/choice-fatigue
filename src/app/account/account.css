@@ -18,6 +18,7 @@
 .profile-details dd { margin:0; color:#fff; font-size:14px; overflow-wrap:anywhere; }
 .account-download { display:flex; width:max-content; min-height:46px; align-items:center; gap:10px; margin-top:18px; padding:0 14px; border:1px solid #7660b8; border-radius:8px; background:#2b2148; color:#e3d9ff; font-size:14px; font-weight:800; text-decoration:none; }
 .account-download:hover { background:#3a2c60; }
+.account-download:disabled { cursor:wait; opacity:.6; }
 .account-download span { font-size:18px; line-height:1; }
 .delete-form { display:grid; gap:15px; margin-top:19px; padding-top:17px; border-top:1px solid #55343d; }
 .account-field { display:grid; gap:7px; color:#f0e6e9; font-size:14px; font-weight:700; }

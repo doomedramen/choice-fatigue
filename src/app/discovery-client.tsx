@@ -3,22 +3,26 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
-import { rankSessionRecommendations } from "@/lib/recommendations";
+import { rankSessionRecommendations, type RecommendationComparison, type RecommendationSignal } from "@/lib/recommendations";
 
 type Decision = "keep" | "pass" | "seen";
 interface SessionState {
+  sessionId: string;
+  eventSequence: number;
+  reviewId: string | null;
   category: Category;
   lockedItemId: string | null;
   decisions: Record<string, Decision>;
   ratings: Record<string, number>;
   shortlisted: string[];
   saved: string[];
-  history: Array<{ id: string; decision: Decision; rating?: number }>;
+  history: Array<{ id: string; decision: Decision; rating?: number; eventId?: string }>;
   reviewRemoved: string[];
   view: "discover" | "review";
   ageVerified: boolean;
 }
-const initialState = (): SessionState => ({ category:"Movies", lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
+type LearningEvent = { id: string; sessionId: string; reviewId: string | null; sequence: number; itemId: string | null; candidateIds?: string[] | null; category: Category; eventType: string; decision: Decision | null; rating: number | null; targetEventId: string | null; algorithmVersion: "content-v2" };
+const initialState = (): SessionState => ({ sessionId:"", eventSequence:0, reviewId:null, category:"Movies", lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
 const seerrAvailabilityLabels: Record<string, string> = {
   "not-listed": "No matching result in Seerr",
   "not-requested": "Not requested",
@@ -84,6 +88,7 @@ function DetailsBackdrop({ item }: { item: MediaItem }) {
 interface DiscoveryClientProps {
   appName: string;
   userName: string;
+  userId: string;
   isAdmin: boolean;
   adultSectionEnabled: boolean;
   mediaItems: MediaItem[];
@@ -92,7 +97,7 @@ interface DiscoveryClientProps {
   plexConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems, catalogueNotice, seerrConnections, plexConnections }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, userId, isAdmin, adultSectionEnabled, mediaItems, catalogueNotice, seerrConnections, plexConnections }: DiscoveryClientProps) {
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -117,12 +122,27 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const mediaCard = useRef<HTMLElement|null>(null);
   const ratingInput = useRef<HTMLInputElement|null>(null);
   const seenButton = useRef<HTMLButtonElement|null>(null);
+  const shownItemKey = useRef("");
   const accountMenu = useRef<HTMLDetailsElement|null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveVersion = useRef(0);
+  const learningQueue = useRef<LearningEvent[]>([]);
+  const learningWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const learningSequence = useRef(0);
+  const [historicalProfile, setHistoricalProfile] = useState<{ category: Category; sessionId: string; signals: RecommendationSignal[]; comparisons: RecommendationComparison[] }>({ category: "Movies", sessionId: "", signals: [], comparisons: [] });
+  const activeRecommendationContext = useRef({ category: session.category, sessionId: session.sessionId });
+  activeRecommendationContext.current = { category: session.category, sessionId: session.sessionId };
   const catalogue = mediaItems.filter(item => adultSectionEnabled || item.category !== "Adult");
   const categoryItems = catalogue.filter(item => item.category === session.category);
-  const recommendations = rankSessionRecommendations(categoryItems, session.decisions, session.ratings);
+  const categoryItemSignature = categoryItems.map(item => item.id).join(",");
+  const historicalSignals = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.signals : [];
+  const historicalComparisons = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.comparisons : [];
+  const savedIds = new Set(session.saved);
+  const recommendationSignals = [
+    ...historicalSignals.filter(signal => !(signal.weight === 1.5 && savedIds.has(signal.itemId))),
+    ...[...savedIds].map(itemId => ({ itemId, decision: "keep" as const, weight: 1.5 })),
+  ];
+  const recommendations = rankSessionRecommendations(categoryItems, session.decisions, session.ratings, recommendationSignals, historicalComparisons);
   const items = recommendations.items;
   const remainingItems = items.filter(candidate => !session.decisions[candidate.id]);
   const item = remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0];
@@ -154,6 +174,10 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
         }
         if (cancelled) return;
         const next = { ...initialState(), ...stored };
+        if (!next.sessionId) next.sessionId = crypto.randomUUID();
+        if (typeof next.eventSequence !== "number" || next.eventSequence < 0) next.eventSequence = 0;
+        if (typeof next.reviewId !== "string") next.reviewId = null;
+        learningSequence.current = next.eventSequence;
         if ((next.category as string) === "TV") next.category = "Shows";
         if (!adultSectionEnabled && next.category === "Adult") next.category = "Movies";
         const availableIds = new Set(catalogue.map(candidate => candidate.id));
@@ -176,6 +200,73 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     void loadState();
     return () => { cancelled = true; };
   }, [adultSectionEnabled, loadAttempt]);
+
+  useEffect(() => {
+    if (!ready || !session.sessionId) return;
+    async function loadLearningData() {
+      const queueKey = `choice-fatigue-learning-${userId}`;
+      try {
+        const storedQueue = localStorage.getItem(queueKey);
+        if (storedQueue) {
+          const parsed = JSON.parse(storedQueue) as LearningEvent[];
+          if (Array.isArray(parsed)) {
+            learningQueue.current = parsed.filter(event => event && typeof event.id === "string" && typeof event.sessionId === "string");
+            const currentSessionSequence = learningQueue.current.filter(event => event.sessionId === session.sessionId).reduce((latest, event) => Math.max(latest, event.sequence + 1), 0);
+            learningSequence.current = Math.max(learningSequence.current, currentSessionSequence);
+          }
+        }
+      } catch { /* Keep any in-memory queued events when browser storage is unavailable. */ }
+      await refreshHistoricalProfile();
+      if (learningQueue.current.length) void flushLearningQueue();
+    }
+    void loadLearningData();
+  }, [ready, session.sessionId, session.category, userId, adultSectionEnabled]);
+
+  function flushLearningQueue() {
+    learningWriteQueue.current = learningWriteQueue.current.catch(() => undefined).then(async () => {
+      const batch = learningQueue.current.filter(event => adultSectionEnabled || event.category !== "Adult").slice(0, 500);
+      if (!batch.length) return;
+      const response = await fetch("/api/recommendation-events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ events: batch }),
+      });
+      if (!response.ok) return;
+      const data = await response.json() as { acceptedIds?: string[] };
+      const accepted = new Set(data.acceptedIds ?? []);
+      learningQueue.current = learningQueue.current.filter(event => !accepted.has(event.id));
+      try { localStorage.setItem(`choice-fatigue-learning-${userId}`, JSON.stringify(learningQueue.current)); } catch { /* Event delivery is already confirmed by the server. */ }
+    }).catch(() => undefined);
+    return learningWriteQueue.current;
+  }
+
+  async function refreshHistoricalProfile() {
+    const context = { ...activeRecommendationContext.current };
+    if (!context.sessionId) return;
+    try {
+      const query = new URLSearchParams({ category: context.category, excludeSessionId: context.sessionId });
+      for (const candidate of catalogue.filter(item => item.category === context.category).slice(0, 100)) query.append("candidateId", candidate.id);
+      const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json() as { signals?: RecommendationSignal[]; comparisons?: RecommendationComparison[] };
+      const current = activeRecommendationContext.current;
+      if (current.category === context.category && current.sessionId === context.sessionId) {
+        setHistoricalProfile({ ...context, signals: Array.isArray(data.signals) ? data.signals : [], comparisons: Array.isArray(data.comparisons) ? data.comparisons : [] });
+      }
+    } catch { /* Discovery continues with the current session's signals. */ }
+  }
+
+  function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null) {
+    const event: LearningEvent = {
+      id: crypto.randomUUID(), sessionId: session.sessionId, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
+      eventType, decision, rating, targetEventId, algorithmVersion: "content-v2",
+    };
+    learningQueue.current = [...learningQueue.current, event];
+    try { localStorage.setItem(`choice-fatigue-learning-${userId}`, JSON.stringify(learningQueue.current)); } catch { /* The server write below is still attempted. */ }
+    setSession(current => ({ ...current, eventSequence: Math.max(current.eventSequence, event.sequence + 1) }));
+    void flushLearningQueue();
+    return event;
+  }
 
   useEffect(() => {
     if (!ready) return;
@@ -202,6 +293,23 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     }, 180);
     return () => window.clearTimeout(timer);
   }, [ready, session]);
+
+  const recordedCandidateSets = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready || !session.sessionId || !categoryItems.length) return;
+    const key = `${session.sessionId}:${session.category}:${categoryItemSignature}`;
+    if (recordedCandidateSets.current.has(key)) return;
+    recordedCandidateSets.current.add(key);
+    enqueueLearningEvent("candidate_set", null, session.category, null, null, null, null, categoryItems.map(candidate => candidate.id));
+  }, [ready, session.sessionId, session.category, categoryItemSignature]);
+
+  useEffect(() => {
+    if (!ready || session.view !== "discover" || !item) return;
+    const key = `${session.sessionId}:${session.history.length}:${session.shortlisted.length}:${item.id}`;
+    if (shownItemKey.current === key) return;
+    shownItemKey.current = key;
+    enqueueLearningEvent("item_shown", item.id, item.category, null, null, null, null, remainingItems.map(candidate => candidate.id));
+  }, [ready, session.view, session.sessionId, item?.id, session.history.length, session.shortlisted.length]);
 
   useEffect(() => {
     if (ratingSelectorOpen) ratingInput.current?.focus();
@@ -308,7 +416,8 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     if (decision === "seen" && (!rating || rating < 1 || rating > 5 || !Number.isInteger(rating))) return;
     const currentItem = item;
     const nextItemId = nextItem?.id ?? null;
-    const historyEntry = decision === "seen" ? {id:currentItem.id, decision, rating:rating!} : {id:currentItem.id, decision};
+    const event = enqueueLearningEvent("decision", currentItem.id, currentItem.category, decision, decision === "seen" ? rating! : null, null, null);
+    const historyEntry = decision === "seen" ? {id:currentItem.id, decision, rating:rating!, eventId:event.id} : {id:currentItem.id, decision, eventId:event.id};
     setSession(current => ({
       ...current,
       lockedItemId:nextItemId && !current.decisions[nextItemId] && catalogue.some(candidate => candidate.id === nextItemId && candidate.category === current.category) ? nextItemId : null,
@@ -339,8 +448,9 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     },handoffDelay);
   }
   function undo() {
+    const last = session.history.at(-1);
+    if (last?.eventId) enqueueLearningEvent("decision_undone", last.id, catalogue.find(candidate=>candidate.id===last.id)?.category ?? session.category, null, null, last.eventId, null);
     setSession(current => {
-      const last=current.history.at(-1);
       if (!last) return current;
       const decisions={...current.decisions}; delete decisions[last.id];
       const ratings={...current.ratings}; delete ratings[last.id];
@@ -354,16 +464,29 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     setSession(current=>({...current, category, lockedItemId:category === current.category ? current.lockedItemId : null, view:"discover"})); setDetails(null); setRatingSelectorOpen(false);
   }
   function removePick(id:string) {
+    const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
+    enqueueLearningEvent("shortlist_withdrawn", id, catalogue.find(candidate=>candidate.id===id)?.category ?? session.category, null, null, targetEventId);
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions}; });
     showNotice("Back in discovery — your first impression still counts.");
   }
-  function beginReview() { setSession(current=>({...current, reviewRemoved:[], view:"review"})); }
-  function leaveReview() { setSession(current=>({...current, reviewRemoved:[], view:"discover"})); }
+  function beginReview() {
+    const reviewId = crypto.randomUUID();
+    enqueueLearningEvent("review_started", null, session.category, null, null, null, reviewId);
+    setSession(current=>({...current, reviewId, reviewRemoved:[], view:"review"}));
+  }
+  function leaveReview() {
+    enqueueLearningEvent("review_abandoned", null, session.category);
+    setSession(current=>({...current, reviewId:null, reviewRemoved:[], view:"discover"}));
+  }
   function removeFromReview(id:string) {
+    const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
+    enqueueLearningEvent("review_removed", id, catalogue.find(candidate=>candidate.id===id)?.category ?? session.category, null, null, targetEventId);
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions, reviewRemoved:[...new Set([...current.reviewRemoved,id])]}; });
     showNotice("Removed for now — you can restore it below.");
   }
   function restorePick(id:string) {
+    const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
+    enqueueLearningEvent("review_restored", id, catalogue.find(candidate=>candidate.id===id)?.category ?? session.category, null, null, targetEventId);
     setSession(current=>({...current, shortlisted:[...new Set([...current.shortlisted,id])], decisions:{...current.decisions,[id]:"keep"}, reviewRemoved:current.reviewRemoved.filter(value=>value!==id)}));
     showNotice("Restored to your shortlist");
   }
@@ -371,11 +494,17 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     if (!picks.length) return;
     const count=picks.length;
     const visiblePickIds=picks.map(pick=>pick.id);
+    for (const pick of picks) {
+      enqueueLearningEvent("review_kept", pick.id, pick.category);
+      enqueueLearningEvent("saved", pick.id, pick.category);
+    }
     setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), view:"discover"}));
     setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
+    void flushLearningQueue().then(refreshHistoricalProfile);
   }
   function startFresh() {
-    setSession(current=>({...current, lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
+    enqueueLearningEvent("session_ended", null, session.category);
+    setSession(current=>({...current, sessionId:crypto.randomUUID(), eventSequence:0, reviewId:null, lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
     setRatingSelectorOpen(false);
     showNotice("Fresh session started");
   }

@@ -1,5 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import type { MediaItem } from "@/data";
+import { recommendationFeatureKeys } from "@/lib/recommendations";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
 
 export const tmdbCategories = ["Movies", "Shows"] as const;
@@ -21,6 +23,7 @@ type TmdbRecord = {
   vote_count?: unknown;
   popularity?: unknown;
   genre_ids?: unknown;
+  genres?: Array<{ name?: unknown }>;
 };
 
 type TmdbSearchPayload = { results?: TmdbRecord[] };
@@ -30,17 +33,14 @@ export class TmdbRequestError extends Error {}
 export class TmdbAdultResultError extends Error {}
 export { TmdbConfigurationError, TmdbNotEnabledError };
 
-async function requestTmdb<T>(path: string, token: string, revalidateSeconds = 0): Promise<T> {
+async function requestTmdb<T>(path: string, token: string): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const options = {
+    const response = await fetch(`https://api.themoviedb.org/3${path}`, {
       headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
       signal: controller.signal,
-      ...(revalidateSeconds > 0 ? { next: { revalidate: revalidateSeconds } } : { cache: "no-store" as const }),
-    };
-    const response = await fetch(`https://api.themoviedb.org/3${path}`, {
-      ...options,
+      cache: "no-store",
     });
     if (!response.ok) throw new TmdbRequestError();
     return await response.json() as T;
@@ -112,6 +112,26 @@ export async function searchTmdb(query: string, category: TmdbCategory) {
     .slice(0, 12);
 }
 
+export async function getTmdbTitleDetails(mediaType: TmdbMediaType, tmdbId: number) {
+  if (!Number.isSafeInteger(tmdbId) || tmdbId < 1) throw new TmdbRequestError();
+  const token = await getEnabledTmdbToken();
+  const record = await requestTmdb<TmdbRecord & { runtime?: unknown; episode_run_time?: unknown; number_of_seasons?: unknown }>(`/${mediaType}/${tmdbId}?language=en-US`, token);
+  if (record.adult === true || record.id !== tmdbId) throw new TmdbAdultResultError();
+  const title = titleFor(record, mediaType);
+  if (!title) throw new TmdbRequestError();
+  return {
+    title,
+    year: yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date),
+    runtime: formatRuntime(record, mediaType),
+    genres: Array.isArray(record.genres) ? record.genres.map(genre => text(genre.name)).filter(Boolean) : [],
+  };
+}
+
+export async function getTmdbRecommendationFeatures(mediaType: TmdbMediaType, tmdbId: number) {
+  const details = await getTmdbTitleDetails(mediaType, tmdbId);
+  return recommendationFeatureKeys({ genres: details.genres, year: details.year, type: mediaType === "movie" ? "Movie" : "Series" });
+}
+
 function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder: number, genresById: Map<number, string>) {
   const mediaType = mediaTypeFor(record, category);
   if (!mediaType || record.adult === true || typeof record.id !== "number" || record.id < 1) return null;
@@ -152,15 +172,14 @@ function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder
   };
 }
 
-/** Cache and persist a small starter pool from TMDB so discovery has real titles without manual imports. */
-export async function syncTmdbDiscoveryCatalogue() {
+/** Fetch the current popular feed on demand without caching or persisting provider metadata. */
+export async function getPopularTmdbCatalogue(): Promise<MediaItem[]> {
   const token = await getEnabledTmdbToken();
-  const cacheSeconds = 6 * 60 * 60;
   const [movieGenres, tvGenres, moviePages, tvPages] = await Promise.all([
-    requestTmdb<TmdbGenrePayload>("/genre/movie/list?language=en-US", token, 24 * 60 * 60),
-    requestTmdb<TmdbGenrePayload>("/genre/tv/list?language=en-US", token, 24 * 60 * 60),
-    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/movie?include_adult=false&include_video=false&language=en-US&page=${page}&sort_by=popularity.desc`, token, cacheSeconds))),
-    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/tv?include_adult=false&include_null_first_air_dates=false&language=en-US&page=${page}&sort_by=popularity.desc`, token, cacheSeconds))),
+    requestTmdb<TmdbGenrePayload>("/genre/movie/list?language=en-US", token),
+    requestTmdb<TmdbGenrePayload>("/genre/tv/list?language=en-US", token),
+    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/movie?include_adult=false&include_video=false&language=en-US&page=${page}&sort_by=popularity.desc`, token))),
+    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/tv?include_adult=false&include_null_first_air_dates=false&language=en-US&page=${page}&sort_by=popularity.desc`, token))),
   ]);
 
   const movieGenreMap = new Map<number, string>((movieGenres.genres ?? [])
@@ -170,33 +189,32 @@ export async function syncTmdbDiscoveryCatalogue() {
     .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
     .map(genre => [genre.id as number, text(genre.name)]));
 
-  const rows = [
-    ...moviePages.flatMap((payload, pageIndex) => (Array.isArray(payload.results) ? payload.results : [])
-      .map((record, index) => discoveryEntry(record, "Movies", 100 + pageIndex * 20 + index, movieGenreMap))),
-    ...tvPages.flatMap((payload, pageIndex) => (Array.isArray(payload.results) ? payload.results : [])
-      .map((record, index) => discoveryEntry(record, "Shows", 100 + pageIndex * 20 + index, tvGenreMap))),
-  ].filter((row): row is NonNullable<typeof row> => row !== null);
-
-  if (rows.length === 0) return 0;
-
-  const existing = await prisma.catalogueEntry.findMany({
-    where: { source: "tmdb", sourceId: { in: rows.map(row => row.sourceId) } },
-    select: { sourceId: true, backdropUrl: true },
-  });
-  const existingBySourceId = new Map(existing.map(entry => [entry.sourceId, entry.backdropUrl]));
-  const newRows = rows.filter(row => !existingBySourceId.has(row.sourceId));
-  const missingBackdrops = rows.filter(row => existingBySourceId.has(row.sourceId) && !existingBySourceId.get(row.sourceId) && row.backdropUrl);
-
-  if (newRows.length > 0) {
-    await prisma.catalogueEntry.createMany({ data: newRows, skipDuplicates: true });
-  }
-  if (missingBackdrops.length > 0) {
-    await prisma.$transaction(missingBackdrops.map(row => prisma.catalogueEntry.update({
-      where: { source_sourceId: { source: "tmdb", sourceId: row.sourceId } },
-      data: { backdropUrl: row.backdropUrl },
-    })));
-  }
-  return rows.length;
+  const toMediaItem = (record: TmdbRecord, category: TmdbCategory, genresById: Map<number, string>): MediaItem | null => {
+    const entry = discoveryEntry(record, category, 0, genresById);
+    if (!entry) return null;
+    const mediaType = mediaTypeFor(record, category)!;
+    return {
+      id: entry.id,
+      title: entry.title,
+      ...(entry.year === null ? {} : { year: entry.year }),
+      type: entry.type,
+      runtime: entry.runtime,
+      rating: entry.rating === null ? "—" : entry.rating.toFixed(1),
+      genre: entry.genres,
+      synopsis: entry.synopsis,
+      ...(entry.artworkUrl ? { artworkUrl: entry.artworkUrl } : {}),
+      ...(entry.backdropUrl ? { backdropUrl: entry.backdropUrl } : {}),
+      palette: ["#344255", "#263244", "#151d2c"],
+      art: "mist",
+      label: entry.label,
+      category,
+      requestable: { provider: "tmdb", mediaType, id: Number(record.id) },
+    };
+  };
+  return [
+    ...moviePages.flatMap(payload => (Array.isArray(payload.results) ? payload.results : []).map(record => toMediaItem(record, "Movies", movieGenreMap))),
+    ...tvPages.flatMap(payload => (Array.isArray(payload.results) ? payload.results : []).map(record => toMediaItem(record, "Shows", tvGenreMap))),
+  ].filter((item): item is MediaItem => item !== null);
 }
 
 function formatMinutes(value: unknown) {
