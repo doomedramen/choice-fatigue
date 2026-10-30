@@ -82,7 +82,7 @@ To rotate the encryption key, stop the app, set the temporary `INTEGRATION_CREDE
 
 `CatalogueEntry` is the normalized server-side catalogue table. `volta run pnpm db:seed` idempotently loads local fixtures. The discovery page reads active entries from PostgreSQL and falls back to fixtures when the table is empty or unavailable. Adult rows are filtered before they reach the browser unless Adult access is enabled.
 
-The planned recommendation approach and required event data are in [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md). The current discovery state is a UI snapshot, not a preference-learning event history; do not turn on personalization until the action history can distinguish pass, shortlist, review keep/remove/restore, save, and undo.
+The session ranker uses the current discovery snapshot for pass, shortlist, and seen-title star ratings. The planned approach and required durable event data are in [recommendation-algorithm-plan.md](recommendation-algorithm-plan.md). Cross-session preference learning still waits until history can distinguish review keep/remove/restore, save, and undo.
 
 ## Server helpers
 

@@ -6,7 +6,7 @@
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue. Local fixtures support development but are not displayed in discovery. When TMDB is enabled, its popularity-sorted Movies and TV pages are imported into the catalogue automatically alongside entries from other metadata providers. A session-scoped content ranker uses shortlist `+1`, pass `−0.5`, genres, release decade, title type, and source rating; persistent preference learning remains open. Adult remains off by default and its age prompt is self-attested.
+The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue. Local fixtures support development but are not displayed in discovery. When TMDB is enabled, its popularity-sorted Movies and TV pages are imported into the catalogue automatically alongside entries from other metadata providers. A session-scoped content ranker uses shortlist `+1`, pass `−0.5`, seen-title ratings from `−0.5` to `+1`, genres, release decade, title type, and source rating; persistent preference learning remains open. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 

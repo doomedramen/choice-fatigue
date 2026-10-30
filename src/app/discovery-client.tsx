@@ -5,19 +5,20 @@ import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 import { rankSessionRecommendations } from "@/lib/recommendations";
 
-type Decision = "keep" | "pass";
+type Decision = "keep" | "pass" | "seen";
 interface SessionState {
   category: Category;
   lockedItemId: string | null;
   decisions: Record<string, Decision>;
+  ratings: Record<string, number>;
   shortlisted: string[];
   saved: string[];
-  history: Array<{ id: string; decision: Decision }>;
+  history: Array<{ id: string; decision: Decision; rating?: number }>;
   reviewRemoved: string[];
   view: "discover" | "review";
   ageVerified: boolean;
 }
-const initialState = (): SessionState => ({ category:"Movies", lockedItemId:null, decisions:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
+const initialState = (): SessionState => ({ category:"Movies", lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
 const seerrAvailabilityLabels: Record<string, string> = {
   "not-listed": "No matching result in Seerr",
   "not-requested": "Not requested",
@@ -30,7 +31,7 @@ const seerrAvailabilityLabels: Record<string, string> = {
 };
 const seerrTrackedStatuses = new Set(["pending", "processing", "partially-available", "available"]);
 
-type IconName = "spark"|"back"|"close"|"left"|"check"|"bookmark"|"arrow"|"info"|"rewind"|"lock";
+type IconName = "spark"|"back"|"close"|"left"|"check"|"bookmark"|"arrow"|"info"|"rewind"|"lock"|"eye";
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, React.ReactNode> = {
     spark:<><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/></>,
@@ -43,6 +44,7 @@ function Icon({ name }: { name: IconName }) {
     info:<><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></>,
     rewind:<><path d="M3 7v5h5"/><path d="M4.5 16a8 8 0 1 0 .4-8.3L3 12"/></>,
     lock:<><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></>,
+    eye:<><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
   };
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -97,6 +99,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "error">("saving");
   const [details, setDetails] = useState<MediaItem|null>(null);
+  const [ratingSelectorOpen, setRatingSelectorOpen] = useState(false);
   const [ageOpen, setAgeOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
@@ -112,11 +115,13 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
   const drag = useRef<{ x:number }|null>(null);
   const swipeExit = useRef(false);
   const mediaCard = useRef<HTMLElement|null>(null);
+  const ratingInput = useRef<HTMLInputElement|null>(null);
+  const seenButton = useRef<HTMLButtonElement|null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveVersion = useRef(0);
   const catalogue = mediaItems.filter(item => adultSectionEnabled || item.category !== "Adult");
   const categoryItems = catalogue.filter(item => item.category === session.category);
-  const recommendations = rankSessionRecommendations(categoryItems, session.decisions);
+  const recommendations = rankSessionRecommendations(categoryItems, session.decisions, session.ratings);
   const items = recommendations.items;
   const remainingItems = items.filter(candidate => !session.decisions[candidate.id]);
   const item = remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0];
@@ -153,8 +158,11 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
         next.shortlisted = next.shortlisted.filter(id => typeof id === "string" && availableIds.has(id));
         next.saved = next.saved.filter(id => typeof id === "string" && availableIds.has(id));
         next.reviewRemoved = next.reviewRemoved.filter(id => typeof id === "string" && availableIds.has(id));
-        next.history = next.history.filter(entry => entry && typeof entry.id === "string" && availableIds.has(entry.id) && (entry.decision === "keep" || entry.decision === "pass"));
-        next.decisions = Object.fromEntries(Object.entries(next.decisions).filter(([id, decision]) => availableIds.has(id) && (decision === "keep" || decision === "pass")));
+        const storedRatings = next.ratings ?? {};
+        const validRating = (rating: unknown) => typeof rating === "number" && Number.isInteger(rating) && rating >= 1 && rating <= 5;
+        next.decisions = Object.fromEntries(Object.entries(next.decisions).filter(([id, decision]) => availableIds.has(id) && (decision === "keep" || decision === "pass" || decision === "seen" && validRating(storedRatings[id]))));
+        next.ratings = Object.fromEntries(Object.entries(storedRatings).filter(([id, rating]) => availableIds.has(id) && next.decisions[id] === "seen" && validRating(rating)));
+        next.history = next.history.filter(entry => entry && typeof entry.id === "string" && availableIds.has(entry.id) && (entry.decision === "keep" || entry.decision === "pass" || entry.decision === "seen" && validRating(entry.rating)));
         if (next.lockedItemId && (!availableIds.has(next.lockedItemId) || next.decisions[next.lockedItemId] || !catalogue.some(candidate => candidate.id === next.lockedItemId && candidate.category === next.category))) next.lockedItemId = null;
         setSession(next);
         if (hasLegacyState) { try { localStorage.setItem("choice-fatigue-legacy-pending", "1"); } catch { /* Continue without browser-local migration bookkeeping. */ } }
@@ -193,9 +201,17 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     return () => window.clearTimeout(timer);
   }, [ready, session]);
 
+  useEffect(() => {
+    if (ratingSelectorOpen) ratingInput.current?.focus();
+  }, [ratingSelectorOpen]);
+
   function showNotice(message:string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2100);
+  }
+  function cancelRatingSelector() {
+    setRatingSelectorOpen(false);
+    window.requestAnimationFrame(() => seenButton.current?.focus());
   }
   async function requestSavedTitle(pick: MediaItem) {
     if (!selectedSeerrId || !pick.requestable || requestingKey || availabilityCheckingKey || plexAvailabilityCheckingKey) return;
@@ -269,25 +285,30 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
       setPlexAvailabilityCheckingKey("");
     }
   }
-  function decide(decision:Decision) {
+  function decide(decision:Decision, rating?:number) {
     if (!item) return;
+    if (decision === "seen" && (!rating || rating < 1 || rating > 5 || !Number.isInteger(rating))) return;
     const currentItem = item;
     const nextItemId = nextItem?.id ?? null;
+    const historyEntry = decision === "seen" ? {id:currentItem.id, decision, rating:rating!} : {id:currentItem.id, decision};
     setSession(current => ({
       ...current,
       lockedItemId:nextItemId && !current.decisions[nextItemId] && catalogue.some(candidate => candidate.id === nextItemId && candidate.category === current.category) ? nextItemId : null,
       decisions:{...current.decisions, [currentItem.id]:decision},
+      ratings:decision === "seen" ? {...current.ratings, [currentItem.id]:rating!} : current.ratings,
       shortlisted:decision === "keep" ? [...current.shortlisted.filter(id => id !== currentItem.id), currentItem.id] : current.shortlisted,
-      history:[...current.history, {id:currentItem.id, decision}],
+      history:[...current.history, historyEntry],
     }));
   }
-  function transitionDecision(decision:Decision, source:"drag"|"control"="control") {
+  function transitionDecision(decision:Decision, source:"drag"|"control"="control", rating?:number) {
     if (swipeExit.current || !item) return;
+    if (decision === "seen" && (!rating || rating < 1 || rating > 5 || !Number.isInteger(rating))) return;
+    setRatingSelectorOpen(false);
     const element=mediaCard.current;
-    if (!element) { decide(decision); return; }
+    if (!element) { decide(decision, rating); return; }
     swipeExit.current=true;
     setCardExiting(true);
-    element.style.transform=`translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
+    element.style.transform=decision === "seen" ? "translateY(-10px) scale(.98)" : `translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
     element.style.opacity="0";
     element.style.pointerEvents="none";
     if (source==="control") element.classList.add("control-exit");
@@ -296,7 +317,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     window.setTimeout(()=>{
       swipeExit.current=false;
       setCardExiting(false);
-      decide(decision);
+      decide(decision, rating);
     },handoffDelay);
   }
   function undo() {
@@ -304,13 +325,15 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
       const last=current.history.at(-1);
       if (!last) return current;
       const decisions={...current.decisions}; delete decisions[last.id];
+      const ratings={...current.ratings}; delete ratings[last.id];
       const restoredCategory=catalogue.find(candidate=>candidate.id===last.id)?.category ?? current.category;
-      return {...current, category:restoredCategory, lockedItemId:last.id, view:"discover", decisions, shortlisted:current.shortlisted.filter(id=>id!==last.id), history:current.history.slice(0,-1)};
+      return {...current, category:restoredCategory, lockedItemId:last.id, view:"discover", decisions, ratings, shortlisted:current.shortlisted.filter(id=>id!==last.id), history:current.history.slice(0,-1)};
     });
+    setRatingSelectorOpen(false);
   }
   function changeCategory(category:Category) {
     if (category === "Adult" && !session.ageVerified) { setAgeOpen(true); return; }
-    setSession(current=>({...current, category, lockedItemId:category === current.category ? current.lockedItemId : null, view:"discover"})); setDetails(null);
+    setSession(current=>({...current, category, lockedItemId:category === current.category ? current.lockedItemId : null, view:"discover"})); setDetails(null); setRatingSelectorOpen(false);
   }
   function removePick(id:string) {
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions}; });
@@ -334,11 +357,12 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
     setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
   }
   function startFresh() {
-    setSession(current=>({...current, lockedItemId:null, decisions:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
+    setSession(current=>({...current, lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
+    setRatingSelectorOpen(false);
     showNotice("Fresh session started");
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
-    if (swipeExit.current || (event.target as HTMLElement).closest("button")) return;
+    if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;
     if (!mediaCard.current) return;
     drag.current={x:event.clientX}; event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -378,7 +402,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
       className={`media-card ${active ? "card-active" : "card-under"}`}
       tabIndex={active ? 0 : -1}
       aria-hidden={active ? undefined : true}
-      aria-label={active ? `${candidate.title}, ${candidate.year}. Use left and right arrow keys to pass or shortlist.` : undefined}
+      aria-label={active ? `${candidate.title}, ${candidate.year}. Use left and right arrow keys to pass or shortlist, or mark it seen and rate it.` : undefined}
       onPointerDown={active ? onCardPointerDown : undefined}
       onPointerMove={active ? onCardPointerMove : undefined}
       onPointerUp={active ? onCardPointerUp : undefined}
@@ -390,7 +414,17 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           <h2>{candidate.title}</h2>
           <div className="card-footer">
             <div className="tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{candidate.runtime}</span></div>
-            {active && <button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`More about ${candidate.title}`}><Icon name="info"/><span>Details</span></button>}
+            <div className="card-actions">
+              {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`}>
+                <legend className="sr-only">Rate {candidate.title} with 1 to 5 stars to continue.</legend>
+                <div className="seen-rating-options">{[1,2,3,4,5].map(stars=><label key={stars}>
+                  <input ref={stars===1?ratingInput:undefined} type="radio" name={`seen-rating-${candidate.id}`} value={stars} aria-label={`${stars} star${stars===1?"":"s"}`} onChange={()=>transitionDecision("seen","control",stars)}/>
+                  <span aria-hidden="true">★</span>
+                </label>)}</div>
+                <button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button>
+              </fieldset> : <button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button>)}
+              {active && <button className="card-details-button" type="button" onClick={()=>{setRatingSelectorOpen(false);setDetails(candidate);}} aria-label={`More about ${candidate.title}`}><Icon name="info"/><span>Details</span></button>}
+            </div>
           </div>
         </div>
       {active && <><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div></>}
@@ -399,14 +433,15 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
 
   useEffect(() => {
     function onKeyDown(event:KeyboardEvent) {
-      if (event.key === "Escape") { if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
+      if (event.key === "Escape") { if(ratingSelectorOpen)cancelRatingSelector(); else if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
       if (!ready || session.view !== "discover" || details || savedOpen || ageOpen || cardExiting) return;
+      if (event.target instanceof HTMLElement && event.target.closest("button, input, select, textarea, [contenteditable='true']")) return;
       if (event.key === "ArrowLeft") { event.preventDefault(); transitionDecision("pass"); }
       if (event.key === "ArrowRight") { event.preventDefault(); transitionDecision("keep"); }
     }
     window.addEventListener("keydown",onKeyDown);
     return ()=>window.removeEventListener("keydown",onKeyDown);
-  },[ready,session,details,savedOpen,ageOpen,cardExiting]);
+  },[ready,session,details,savedOpen,ageOpen,cardExiting,ratingSelectorOpen]);
 
   async function handleSignOut() {
     if (ready) {
@@ -447,7 +482,7 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
-          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Your choices shape what comes next through genre, era, and format; source ratings help with close calls.":"Pass or shortlist each title. Your choices shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
+          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Shortlists, passes, and your star ratings shape what appears next.":"Pass, shortlist, or mark a title as seen and rate it to shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className={`card-stack ${nextItem ? "has-next-card" : ""}`} aria-label="Media discovery card">
               {nextItem && renderMediaCard(nextItem, false)}

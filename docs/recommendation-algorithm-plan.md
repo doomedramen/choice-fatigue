@@ -1,6 +1,6 @@
 # Choice Fatigue recommendation plan
 
-**Status:** A session-scoped content ranker and automatic TMDB starter catalogue are implemented; persistent preference learning and more advanced diversity ranking remain planned
+**Status:** A session-scoped content ranker with pass, shortlist, and seen-title star ratings is implemented; persistent preference learning and more advanced diversity ranking remain planned
 **Date:** 30 October 2026
 
 ## Product goal
@@ -17,6 +17,7 @@ Keep the kinds of feedback separate. The first version should use only deliberat
 | --- | --- | --- |
 | Pass | Explicit negative signal, but weaker than a positive choice | Start at **−0.5**; reduce the weight of matching genres |
 | Shortlist during discovery | Explicit positive choice | Start at **+1**; raise the weight of matching genres |
+| Seen it + star rating | A watched title with a direct quality/preference judgment | Map 1–5 stars to **−0.5, −0.25, 0, +0.5, +1**; use the score as evidence for matching genres, decade, and type |
 | Remove before review | The initial interest was withdrawn | Remove that title's positive contribution; do not count it as a pass |
 | Remove during review | The title was promising, but lost out after seeing alternatives | Do not count it as a pass; relative comparison can be added when review events are retained |
 | Keep through review | The title remained attractive after comparison | Potentially stronger than an initial shortlist; the current ranker does not yet distinguish the two |
@@ -28,7 +29,7 @@ In particular, a review removal must not be treated like a swipe left. When a re
 
 ## First algorithm: understandable and content-based
 
-The first implementation is a deterministic, content-based ranker. It needs no recommendation API, model training, or cross-user data, and it can work with the catalogue and explicit actions already planned for the product. The initial signal weights are **shortlist = +1** and **pass = −0.5**: a pass lowers similar candidates, but less than a shortlist raises them.
+The first implementation is a deterministic, content-based ranker. It needs no recommendation API, model training, or cross-user data, and it can work with the catalogue and explicit actions already planned for the product. The initial signal weights are **shortlist = +1**, **pass = −0.5**, and a 1–5 star review of a seen title = **−0.5, −0.25, 0, +0.5, +1**. A seen title leaves the active deck after rating; its rating contributes preference evidence for similar titles. A three-star rating is neutral.
 
 ### 1. Build an eligible candidate set
 
@@ -39,7 +40,7 @@ The first implementation is a deterministic, content-based ranker. It needs no r
 
 ### 2. Represent user and title interests
 
-The current ranker uses source genres, release decade, and title type. Genre affinity uses the average of the +1 and −0.5 signals from current-session decisions. Decade and type use smaller weights (0.25 each); genre features use 1.0. The source rating adds a small quality prior, bounded from −0.05 to +0.05, so it helps order close candidates without overriding explicit choices. Category is a strict candidate boundary: the selected category is ranked on its own, and Adult choices cannot affect Movies or TV.
+The current ranker uses source genres, release decade, and title type. For each feature, it averages the current-session keep, pass, or star-rating signals. Decade and type use smaller feature weights (0.25 each); genre features use 1.0. The source rating adds a small quality prior, bounded from −0.05 to +0.05, so it helps order close candidates without overriding explicit choices. Category is a strict candidate boundary: the selected category is ranked on its own, and Adult choices cannot affect Movies or TV.
 
 The main catalogue combines imported metadata-source entries with an automatic TMDB starter pool: two popularity-sorted discovery pages each for Movies and TV, with source genres, ratings, years, and poster paths. TMDB responses are cached for six hours and genre names for a day; discovered records are stored in PostgreSQL so session and saved-title IDs remain stable. Adult-flagged TMDB results are excluded. Local fixture rows are for development seeding and are not presented as discovery content. If no metadata source has available titles, the app shows its existing empty state.
 
@@ -54,7 +55,7 @@ The longer-term design should track two distinct estimates:
 1. **Initial interest:** likelihood that this title is worth shortlisting.
 2. **Second-look retention:** likelihood it remains appealing after comparison and is ultimately saved.
 
-The current ranker only estimates initial content fit from current-session swipes. It does not yet predict second-look retention. Once review outcomes are recorded as durable events, estimate that separately and give confirmed review and save actions more weight. Review keep/remove pairs from the same review can add relative evidence. Do not collapse both estimates into a single “like” score.
+The current ranker estimates initial content fit from current-session choices and seen-title ratings. It does not yet predict second-look retention. Once review outcomes are recorded as durable events, estimate that separately and give confirmed review and save actions more weight. Review keep/remove pairs from the same review can add relative evidence. Do not collapse both estimates into a single “like” score.
 
 ### 4. Reorder with variety and exploration
 

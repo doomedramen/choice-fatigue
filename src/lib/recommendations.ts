@@ -1,10 +1,19 @@
 import type { MediaItem } from "@/data";
 
-export type RecommendationDecision = "keep" | "pass";
+export type RecommendationDecision = "keep" | "pass" | "seen";
 
-export const recommendationWeights: Record<RecommendationDecision, number> = {
+export const recommendationWeights: Record<Exclude<RecommendationDecision, "seen">, number> = {
   keep: 1,
   pass: -0.5,
+};
+
+/** A 1–5 star review is explicit preference evidence, centered on neutral. */
+export const reviewRatingWeights: Record<number, number> = {
+  1: -0.5,
+  2: -0.25,
+  3: 0,
+  4: 0.5,
+  5: 1,
 };
 
 interface FeatureEvidence {
@@ -45,6 +54,7 @@ function ratingPrior(rating: string) {
 export function rankSessionRecommendations(
   items: MediaItem[],
   decisions: Record<string, RecommendationDecision | undefined>,
+  ratings: Record<string, number | undefined> = {},
 ) {
   const featureEvidence = new Map<string, FeatureEvidence>();
   let signalCount = 0;
@@ -53,8 +63,12 @@ export function rankSessionRecommendations(
     const decision = decisions[item.id];
     if (!decision) continue;
 
+    const weight = decision === "seen"
+      ? reviewRatingWeights[ratings[item.id] ?? 0]
+      : recommendationWeights[decision];
+    if (weight === undefined) continue;
+
     signalCount += 1;
-    const weight = recommendationWeights[decision];
     for (const feature of featuresFor(item)) {
       const evidence = featureEvidence.get(feature.key) ?? { total: 0, count: 0 };
       evidence.total += weight;

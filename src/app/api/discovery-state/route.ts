@@ -9,24 +9,26 @@ const MAX_COLLECTION_ITEMS = 5_000;
 const MAX_ID_LENGTH = 128;
 
 type Category = "Movies" | "TV" | "Adult";
-type Decision = "keep" | "pass";
+type Decision = "keep" | "pass" | "seen";
 interface SessionState {
   category: Category;
   lockedItemId: string | null;
   decisions: Record<string, Decision>;
+  ratings: Record<string, number>;
   shortlisted: string[];
   saved: string[];
-  history: Array<{ id: string; decision: Decision }>;
+  history: Array<{ id: string; decision: Decision; rating?: number }>;
   reviewRemoved: string[];
   view: "discover" | "review";
   ageVerified: boolean;
 }
-type PersistedSessionState = Omit<SessionState, "lockedItemId"> & { lockedItemId?: string | null };
+type PersistedSessionState = Omit<SessionState, "lockedItemId" | "ratings"> & { lockedItemId?: string | null; ratings?: Record<string, number> };
 
 const defaultState: SessionState = {
   category: "Movies",
   lockedItemId: null,
   decisions: {},
+  ratings: {},
   shortlisted: [],
   saved: [],
   history: [],
@@ -47,23 +49,34 @@ function isIdList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= MAX_COLLECTION_ITEMS && value.every(isId);
 }
 
+function isReviewRating(value: unknown): value is number {
+  return Number.isInteger(value) && typeof value === "number" && value >= 1 && value <= 5;
+}
+
 function isSessionState(value: unknown): value is PersistedSessionState {
   if (!isObject(value)) return false;
-  const keys = ["category", "lockedItemId", "decisions", "shortlisted", "saved", "history", "reviewRemoved", "view", "ageVerified"];
-  const legacyKeys = keys.filter(key => key !== "lockedItemId");
+  const requiredKeys = ["category", "decisions", "shortlisted", "saved", "history", "reviewRemoved", "view", "ageVerified"];
+  const optionalKeys = ["lockedItemId", "ratings"];
   const valueKeys = Object.keys(value);
-  const hasCurrentShape = valueKeys.length === keys.length && keys.every(key => key in value);
-  const hasLegacyShape = valueKeys.length === legacyKeys.length && legacyKeys.every(key => key in value);
-  if (!hasCurrentShape && !hasLegacyShape) return false;
+  if (!requiredKeys.every(key => key in value) || valueKeys.some(key => !requiredKeys.includes(key) && !optionalKeys.includes(key))) return false;
   if (value.lockedItemId !== undefined && value.lockedItemId !== null && !isId(value.lockedItemId)) return false;
   if (value.category !== "Movies" && value.category !== "TV" && value.category !== "Adult") return false;
   if (value.view !== "discover" && value.view !== "review") return false;
   if (typeof value.ageVerified !== "boolean") return false;
   if (!isIdList(value.shortlisted) || !isIdList(value.saved) || !isIdList(value.reviewRemoved)) return false;
-  if (!isObject(value.decisions) || Object.keys(value.decisions).length > MAX_COLLECTION_ITEMS) return false;
-  if (!Object.entries(value.decisions).every(([id, decision]) => isId(id) && (decision === "keep" || decision === "pass"))) return false;
+  const decisions = value.decisions;
+  if (!isObject(decisions) || Object.keys(decisions).length > MAX_COLLECTION_ITEMS) return false;
+  if (!Object.entries(decisions).every(([id, decision]) => isId(id) && (decision === "keep" || decision === "pass" || decision === "seen"))) return false;
+  const ratings = value.ratings === undefined ? {} : value.ratings;
+  if (!isObject(ratings) || Object.keys(ratings).length > MAX_COLLECTION_ITEMS) return false;
+  if (!Object.entries(ratings).every(([id, rating]) => isId(id) && isReviewRating(rating) && decisions[id] === "seen")) return false;
+  if (!Object.entries(decisions).every(([id, decision]) => decision !== "seen" || isReviewRating(ratings[id]))) return false;
   if (!Array.isArray(value.history) || value.history.length > MAX_COLLECTION_ITEMS) return false;
-  if (!value.history.every(entry => isObject(entry) && Object.keys(entry).length === 2 && isId(entry.id) && (entry.decision === "keep" || entry.decision === "pass"))) return false;
+  if (!value.history.every(entry => {
+    if (!isObject(entry) || !isId(entry.id)) return false;
+    if (entry.decision === "seen") return Object.keys(entry).length === 3 && isReviewRating(entry.rating);
+    return Object.keys(entry).length === 2 && (entry.decision === "keep" || entry.decision === "pass");
+  })) return false;
   return true;
 }
 
@@ -84,9 +97,9 @@ export async function GET() {
       return jsonError("Saved discovery data could not be read.", 500);
     }
     if (state.category === "Adult" && !settings.adultSectionEnabled) {
-      return NextResponse.json({ ...defaultState, category: settings.defaultCategory as Category, decisions: state.decisions, shortlisted: state.shortlisted, saved: state.saved, history: state.history, reviewRemoved: state.reviewRemoved });
+      return NextResponse.json({ ...defaultState, category: settings.defaultCategory as Category, decisions: state.decisions, ratings: state.ratings ?? {}, shortlisted: state.shortlisted, saved: state.saved, history: state.history, reviewRemoved: state.reviewRemoved });
     }
-    return NextResponse.json({ ...state, lockedItemId: state.lockedItemId ?? null }, { headers: { "x-discovery-state-exists": "true" } });
+    return NextResponse.json({ ...state, lockedItemId: state.lockedItemId ?? null, ratings: state.ratings ?? {} }, { headers: { "x-discovery-state-exists": "true" } });
   } catch (error) {
     console.error("Unable to read discovery state.", error);
     return jsonError("Saved discovery data could not be read.", 500);
