@@ -91,7 +91,7 @@ export default function TmdbCatalogue() {
       <div>
         <p className={styles.eyebrow}>CURATE THE CATALOGUE</p>
         <h3 id="tmdb-catalogue-title">Find titles on TMDB</h3>
-        <p>Search movies or TV series and add them to the local catalogue. Anime series are found under TV; anime films are found under Movies.</p>
+        <p>Discovery loads popular movies and TV series from TMDB automatically. Search here to add a specific title to the catalogue. Anime series are found under TV; anime films are found under Movies.</p>
       </div>
       <span className={styles.sourceBadge}>Movies · TV</span>
     </div>

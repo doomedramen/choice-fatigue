@@ -49,7 +49,7 @@ function Icon({ name }: { name: IconName }) {
 function Poster({ item, className="" }: { item: MediaItem; className?: string }) {
   const style = { "--p1":item.palette[0], "--p2":item.palette[1], "--p3":item.palette[2] } as CSSProperties;
   return <div className={`poster art-${item.art} ${item.artworkUrl?"has-artwork":""} ${className}`} style={style}>
-    {item.artworkUrl&&<img className="poster-artwork" src={item.artworkUrl} alt="" loading="lazy" referrerPolicy="no-referrer"/>}<div className="poster-grain"/><div className="poster-mark" aria-hidden="true"/>
+    {item.artworkUrl&&<img className="poster-artwork" src={item.artworkUrl} alt="" loading="lazy" draggable={false} referrerPolicy="no-referrer"/>}<div className="poster-grain"/><div className="poster-mark" aria-hidden="true"/>
     <div className="poster-copy"><span className="poster-kicker">{item.category === "Adult" ? "AFTER DARK · 18+" : item.type.toUpperCase()}</span><strong>{item.title}</strong><small>{item.label}</small></div>
     <span className="poster-year">{item.year}</span>
   </div>;
@@ -61,11 +61,12 @@ interface DiscoveryClientProps {
   isAdmin: boolean;
   adultSectionEnabled: boolean;
   mediaItems: MediaItem[];
+  catalogueNotice: string;
   seerrConnections: Array<{ id: string; name: string }>;
   plexConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems, seerrConnections, plexConnections }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, isAdmin, adultSectionEnabled, mediaItems, catalogueNotice, seerrConnections, plexConnections }: DiscoveryClientProps) {
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -384,7 +385,8 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           </> : <div className="review-empty"><div className="empty-orbit"><Icon name="spark"/></div><h2>No picks in the maybe pile.</h2><p>Keep browsing and shortlist anything that catches your eye.</p><button className="button button-dark" onClick={leaveReview}>Keep browsing <Icon name="arrow"/></button></div>}
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
-          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Your shortlist moves similar genres up. Passing moves them down more gently.":"Pass or shortlist each title. Your choices shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
+          {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
+          <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>Find your<br/><em>next watch.</em></h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Your choices shape what comes next through genre, era, and format; source ratings help with close calls.":"Pass or shortlist each title. Your choices shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className="card-stack" aria-label="Media discovery card"><div className="stack-card stack-back stack-back-2"/><div className="stack-card stack-back stack-back-1"/>
               <article key={item.id} ref={mediaCard} className="media-card" tabIndex={0} aria-label={`${item.title}, ${item.year}. Use left and right arrow keys to pass or shortlist.`} onPointerDown={onCardPointerDown} onPointerMove={onCardPointerMove} onPointerUp={onCardPointerUp} onPointerCancel={onCardPointerCancel}>

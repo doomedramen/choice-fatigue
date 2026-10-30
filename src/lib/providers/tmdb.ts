@@ -17,22 +17,29 @@ type TmdbRecord = {
   poster_path?: unknown;
   media_type?: unknown;
   vote_average?: unknown;
+  vote_count?: unknown;
+  popularity?: unknown;
+  genre_ids?: unknown;
 };
 
 type TmdbSearchPayload = { results?: TmdbRecord[] };
+type TmdbGenrePayload = { genres?: Array<{ id?: unknown; name?: unknown }> };
 
 export class TmdbRequestError extends Error {}
 export class TmdbAdultResultError extends Error {}
 export { TmdbConfigurationError, TmdbNotEnabledError };
 
-async function requestTmdb<T>(path: string, token: string): Promise<T> {
+async function requestTmdb<T>(path: string, token: string, revalidateSeconds = 0): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`https://api.themoviedb.org/3${path}`, {
+    const options = {
       headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
       signal: controller.signal,
-      cache: "no-store",
+      ...(revalidateSeconds > 0 ? { next: { revalidate: revalidateSeconds } } : { cache: "no-store" as const }),
+    };
+    const response = await fetch(`https://api.themoviedb.org/3${path}`, {
+      ...options,
     });
     if (!response.ok) throw new TmdbRequestError();
     return await response.json() as T;
@@ -95,6 +102,76 @@ export async function searchTmdb(query: string, category: TmdbCategory) {
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .slice(0, 12);
+}
+
+function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder: number, genresById: Map<number, string>) {
+  const mediaType = mediaTypeFor(record, category);
+  if (!mediaType || record.adult === true || typeof record.id !== "number" || record.id < 1) return null;
+  const title = titleFor(record, mediaType);
+  if (!title) return null;
+
+  const genreIds = Array.isArray(record.genre_ids) ? record.genre_ids : [];
+  const genres = [...new Set(genreIds
+    .filter((id): id is number => typeof id === "number")
+    .map(id => genresById.get(id))
+    .filter((genre): genre is string => Boolean(genre)))].slice(0, 8);
+  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average)
+    ? Math.min(10, Math.max(0, record.vote_average))
+    : null;
+  const sourceId = `${mediaType}:${record.id}`;
+
+  return {
+    id: `tmdb-${sourceId.replace(":", "-")}`,
+    source: "tmdb",
+    sourceId,
+    title,
+    category,
+    year: yearFrom(mediaType === "movie" ? record.release_date : record.first_air_date) ?? null,
+    type: mediaType === "movie" ? "Movie" : "TV series",
+    runtime: mediaType === "movie" ? "—" : "Series",
+    rating,
+    genres,
+    synopsis: text(record.overview),
+    palette: ["#344255", "#263244", "#151d2c"],
+    art: "mist",
+    label: title,
+    artworkUrl: posterUrl(record.poster_path) ?? null,
+    ageRestriction: null,
+    contentFlags: [],
+    active: true,
+    displayOrder,
+  };
+}
+
+/** Cache and persist a small starter pool from TMDB so discovery has real titles without manual imports. */
+export async function syncTmdbDiscoveryCatalogue() {
+  const token = await getEnabledTmdbToken();
+  const cacheSeconds = 6 * 60 * 60;
+  const [movieGenres, tvGenres, moviePages, tvPages] = await Promise.all([
+    requestTmdb<TmdbGenrePayload>("/genre/movie/list?language=en-US", token, 24 * 60 * 60),
+    requestTmdb<TmdbGenrePayload>("/genre/tv/list?language=en-US", token, 24 * 60 * 60),
+    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/movie?include_adult=false&include_video=false&language=en-US&page=${page}&sort_by=popularity.desc`, token, cacheSeconds))),
+    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/tv?include_adult=false&include_null_first_air_dates=false&language=en-US&page=${page}&sort_by=popularity.desc`, token, cacheSeconds))),
+  ]);
+
+  const movieGenreMap = new Map<number, string>((movieGenres.genres ?? [])
+    .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
+    .map(genre => [genre.id as number, text(genre.name)]));
+  const tvGenreMap = new Map<number, string>((tvGenres.genres ?? [])
+    .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
+    .map(genre => [genre.id as number, text(genre.name)]));
+
+  const rows = [
+    ...moviePages.flatMap((payload, pageIndex) => (Array.isArray(payload.results) ? payload.results : [])
+      .map((record, index) => discoveryEntry(record, "Movies", 100 + pageIndex * 20 + index, movieGenreMap))),
+    ...tvPages.flatMap((payload, pageIndex) => (Array.isArray(payload.results) ? payload.results : [])
+      .map((record, index) => discoveryEntry(record, "TV", 100 + pageIndex * 20 + index, tvGenreMap))),
+  ].filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (rows.length > 0) {
+    await prisma.catalogueEntry.createMany({ data: rows, skipDuplicates: true });
+  }
+  return rows.length;
 }
 
 function formatMinutes(value: unknown) {

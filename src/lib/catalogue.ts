@@ -1,6 +1,8 @@
 import "server-only";
 import { categories, media as fixtureCatalogue, type Category, type MediaItem } from "@/data";
 import { prisma } from "@/lib/prisma";
+import { syncTmdbDiscoveryCatalogue } from "@/lib/providers/tmdb";
+import { getTmdbProviderStatus } from "@/lib/providers/tmdb-config";
 
 const categorySet = new Set<string>(categories);
 const defaultPalette: [string, string, string] = ["#344255", "#263244", "#151d2c"];
@@ -41,12 +43,44 @@ function fromDatabase(entry: Awaited<ReturnType<typeof prisma.catalogueEntry.fin
 export async function getCatalogue(): Promise<MediaItem[]> {
   try {
     const entries = await prisma.catalogueEntry.findMany({
+      where: { source: { not: "local" } },
       orderBy: [{ category: "asc" }, { displayOrder: "asc" }, { title: "asc" }],
     });
-    if (entries.length === 0) return fixtureCatalogue;
     return entries.filter(entry => entry.active).map(fromDatabase).filter((item): item is MediaItem => item !== null);
   } catch {
-    console.warn("Catalogue table unavailable; using the local fixture catalogue.");
-    return fixtureCatalogue;
+    console.warn("Catalogue table unavailable; discovery has no provider entries to show.");
+    return [];
+  }
+}
+
+function deduplicateTitles(items: MediaItem[]) {
+  const preferred = [...items].sort((a, b) => Number(Boolean(b.requestable)) - Number(Boolean(a.requestable)));
+  const ids = new Set<string>();
+  const titles = new Set<string>();
+  return preferred.filter(item => {
+    const normalizedTitle = item.title.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+    const titleKey = `${item.category}:${normalizedTitle}:${item.year ?? "unknown-year"}`;
+    if (ids.has(item.id) || titles.has(titleKey)) return false;
+    ids.add(item.id);
+    titles.add(titleKey);
+    return true;
+  });
+}
+
+export async function getDiscoveryCatalogue() {
+  const existingItems = await getCatalogue();
+  try {
+    const status = await getTmdbProviderStatus();
+    if (!status.enabled) return { items: deduplicateTitles(existingItems), notice: "" };
+
+    await syncTmdbDiscoveryCatalogue();
+    const items = deduplicateTitles(await getCatalogue());
+    return { items, notice: "" };
+  } catch {
+    console.warn("TMDB discovery could not refresh the catalogue; showing imported provider entries only.");
+    return {
+      items: deduplicateTitles(existingItems),
+      notice: "TMDB titles couldn’t be loaded. Already imported titles are still available.",
+    };
   }
 }

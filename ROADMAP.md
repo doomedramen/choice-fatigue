@@ -6,7 +6,7 @@
 
 ## Where the project is today
 
-The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue seeded from local fixtures. Users can save multiple encrypted service connection records on their own accounts. The local OrbStack PostgreSQL database has its migrations applied and 12 fixture entries; no provider credentials or service connections are configured. Service health checks and request/library actions remain open. A session-scoped genre ranker uses shortlist `+1` and pass `−0.5`; persistent preference learning remains open. Adult remains off by default and its age prompt is self-attested.
+The app now has invite-only Better Auth accounts after first-run setup, no email verification, password recovery, per-account discovery persistence, account export and deletion, admin-only settings and account controls, and a normalized server-side catalogue. Local fixtures support development but are not displayed in discovery. When TMDB is enabled, its popularity-sorted Movies and TV pages are imported into the catalogue automatically alongside entries from other metadata providers. A session-scoped content ranker uses shortlist `+1`, pass `−0.5`, genres, release decade, title type, and source rating; persistent preference learning remains open. Adult remains off by default and its age prompt is self-attested.
 
 ## Product decisions to settle first
 
@@ -35,10 +35,10 @@ The app now has invite-only Better Auth accounts after first-run setup, no email
 - Create a normalized media record with an explicit provider and provider ID, category, title, year, runtime, genres, synopsis, artwork reference, and age/content flags.
 - Implement provider adapters on the server. Store API keys in server secrets or a secret manager; never expose them to the browser or return them in admin responses.
 - Start with a small Movies/TV catalogue and fixture-backed adapter tests, then connect a permitted provider and add attribution in the app’s About/Credits area.
-- Add caching, request limits, timeouts, retries, provider health status, and a way to fall back to cached or seeded catalogue data.
+- Cache provider results, add request limits and retries, and show an empty state when no metadata source has available titles. Development fixtures must stay separate from discovery content.
 - Evaluate anime coverage in the Movies and TV searches without creating a separate Anime category.
 
-**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, protected status reporting, opt-in TMDB search/import for Movies and TV, and gated text-only ThePornDB/StashDB search/import for Adult are implemented. Anime series are found under TV and anime films under Movies. TMDB attribution is available at `/credits`. Automatic refresh, caching/retention policy, provider health, service connection checks/actions, and full database-backed account-flow validation remain open.
+**Progress:** the normalized catalogue model, fixture seeder, server loader, protected status reporting, opt-in TMDB search/import and automatic popularity-sorted Movies/TV discovery imports are implemented. TMDB discovery records include genres, ratings, years, and poster paths; responses are cached and saved to PostgreSQL. The gated text-only ThePornDB/StashDB Adult imports remain available. Anime series are found under TV and anime films under Movies. TMDB attribution is available at `/credits`. Automatic refresh beyond the first two pages, cache/retention policy review, provider health, service connection checks/actions, and full database-backed account-flow validation remain open.
 
 **Provider notes:**
 

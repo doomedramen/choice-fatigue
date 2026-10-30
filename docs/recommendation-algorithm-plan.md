@@ -1,6 +1,6 @@
 # Choice Fatigue recommendation plan
 
-**Status:** A transparent, session-scoped genre ranker is implemented; persistent preference learning and richer catalogue features remain planned
+**Status:** A session-scoped content ranker and automatic TMDB starter catalogue are implemented; persistent preference learning and more advanced diversity ranking remain planned
 **Date:** 30 October 2026
 
 ## Product goal
@@ -39,9 +39,11 @@ The first implementation is a deterministic, content-based ranker. It needs no r
 
 ### 2. Represent user and title interests
 
-The current ranker uses genre tags because they are available consistently in the local catalogue. For each genre, it averages the +1 and −0.5 signals from the user's current-session decisions. A candidate receives the mean score of its genres; genres with no evidence contribute zero. Unseen candidates are sorted by score, with the existing catalogue order breaking ties. Only decisions from the selected category are considered, so Adult choices cannot affect Movies or TV.
+The current ranker uses source genres, release decade, and title type. Genre affinity uses the average of the +1 and −0.5 signals from current-session decisions. Decade and type use smaller weights (0.25 each); genre features use 1.0. The source rating adds a small quality prior, bounded from −0.05 to +0.05, so it helps order close candidates without overriding explicit choices. Category is a strict candidate boundary: the selected category is ranked on its own, and Adult choices cannot affect Movies or TV.
 
-This is a within-session first pass, not a lasting taste profile. Starting a fresh session clears the signals used by the ranker. Persisting preferences across sessions requires the per-account event history described below. Later versions can add well-supported features such as release era, language, runtime, and carefully normalized themes or keywords, and can decay older evidence.
+The main catalogue combines imported metadata-source entries with an automatic TMDB starter pool: two popularity-sorted discovery pages each for Movies and TV, with source genres, ratings, years, and poster paths. TMDB responses are cached for six hours and genre names for a day; discovered records are stored in PostgreSQL so session and saved-title IDs remain stable. Adult-flagged TMDB results are excluded. Local fixture rows are for development seeding and are not presented as discovery content. If no metadata source has available titles, the app shows its existing empty state.
+
+This is a within-session first pass, not a lasting taste profile. Starting a fresh session clears the signals used by the ranker. Persisting preferences across sessions requires the per-account event history described below. Later versions can add well-supported features such as language, runtime, and carefully normalized themes or keywords, and can decay older evidence.
 
 Keep a confidence value alongside each preference. A few passes should not make the profile certain that a user dislikes an entire genre. After an undo, restoration, or preference reset, rebuild the profile from the surviving event history rather than trying to patch a stale score.
 
@@ -52,11 +54,11 @@ The longer-term design should track two distinct estimates:
 1. **Initial interest:** likelihood that this title is worth shortlisting.
 2. **Second-look retention:** likelihood it remains appealing after comparison and is ultimately saved.
 
-The current ranker only estimates initial genre fit from current-session swipes. It does not yet predict second-look retention. Once review outcomes are recorded as durable events, estimate that separately and give confirmed review and save actions more weight. Review keep/remove pairs from the same review can add relative evidence. Do not collapse both estimates into a single “like” score.
+The current ranker only estimates initial content fit from current-session swipes. It does not yet predict second-look retention. Once review outcomes are recorded as durable events, estimate that separately and give confirmed review and save actions more weight. Review keep/remove pairs from the same review can add relative evidence. Do not collapse both estimates into a single “like” score.
 
 ### 4. Reorder with variety and exploration
 
-The session ranker currently sorts by genre fit and keeps the catalogue's original order for ties. The next reranking step should mix preference-fit candidates with a broad, exploratory set and limit runs of very similar genres, years, franchises, or themes. **Starting experiment:** use exploration for about one in five shown titles, and compare that with lower and higher shares during the opt-in trial. This is a tuning hypothesis, not a product rule. Keep the share configurable rather than burying an arbitrary constant in code.
+The session ranker currently sorts by content fit and uses source rating and catalogue popularity order as small priors. The next reranking step should mix preference-fit candidates with a broad, exploratory set and limit runs of very similar genres, years, franchises, or themes. **Starting experiment:** use exploration for about one in five shown titles, and compare that with lower and higher shares during the opt-in trial. This is a tuning hypothesis, not a product rule. Keep the share configurable rather than burying an arbitrary constant in code.
 
 At today's catalogue size, rank the eligible catalogue directly. If it grows, add candidate retrieval first (for example, titles related to items the user kept or saved), then rerank that smaller set for expected interest, second-look retention, quality, diversity, and exploration. This staged approach is common in published recommender designs; it avoids making early complexity a prerequisite for a useful first release. [Meta's Instagram Explore write-up](https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/) describes retrieval followed by ranking stages and using selected interaction-history items as similarity seeds.
 

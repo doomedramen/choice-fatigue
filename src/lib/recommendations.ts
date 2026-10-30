@@ -7,13 +7,38 @@ export const recommendationWeights: Record<RecommendationDecision, number> = {
   pass: -0.5,
 };
 
-interface GenreEvidence {
+interface FeatureEvidence {
   total: number;
   count: number;
 }
 
-function genreKey(genre: string) {
-  return genre.trim().toLowerCase();
+interface ItemFeature {
+  key: string;
+  weight: number;
+}
+
+function normalized(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function featuresFor(item: MediaItem): ItemFeature[] {
+  const genres = [...new Set(item.genre.map(normalized).filter(Boolean))]
+    .map(genre => ({ key: `genre:${genre}`, weight: 1 }));
+  const decade = typeof item.year === "number" ? Math.floor(item.year / 10) * 10 : null;
+  const type = normalized(item.type);
+
+  return [
+    ...genres,
+    ...(decade === null ? [] : [{ key: `decade:${decade}`, weight: 0.25 }]),
+    ...(type && type !== "title" ? [{ key: `type:${type}`, weight: 0.25 }] : []),
+  ];
+}
+
+function ratingPrior(rating: string) {
+  const parsed = Number.parseFloat(rating);
+  if (!Number.isFinite(parsed)) return 0;
+  const normalizedRating = Math.min(10, Math.max(0, parsed)) / 10;
+  return (normalizedRating - 0.5) * 0.1;
 }
 
 /** Rank one category using only explicit choices made in the current session. */
@@ -21,7 +46,7 @@ export function rankSessionRecommendations(
   items: MediaItem[],
   decisions: Record<string, RecommendationDecision | undefined>,
 ) {
-  const genreEvidence = new Map<string, GenreEvidence>();
+  const featureEvidence = new Map<string, FeatureEvidence>();
   let signalCount = 0;
 
   for (const item of items) {
@@ -30,24 +55,26 @@ export function rankSessionRecommendations(
 
     signalCount += 1;
     const weight = recommendationWeights[decision];
-    for (const genre of new Set(item.genre.map(genreKey).filter(Boolean))) {
-      const evidence = genreEvidence.get(genre) ?? { total: 0, count: 0 };
+    for (const feature of featuresFor(item)) {
+      const evidence = featureEvidence.get(feature.key) ?? { total: 0, count: 0 };
       evidence.total += weight;
       evidence.count += 1;
-      genreEvidence.set(genre, evidence);
+      featureEvidence.set(feature.key, evidence);
     }
   }
 
-  const genreScores = new Map(
-    [...genreEvidence].map(([genre, evidence]) => [genre, evidence.total / evidence.count]),
+  const featureScores = new Map(
+    [...featureEvidence].map(([feature, evidence]) => [feature, evidence.total / evidence.count]),
   );
 
   const ranked = items
     .map((item, originalIndex) => {
-      const genres = [...new Set(item.genre.map(genreKey).filter(Boolean))];
-      const score = genres.length
-        ? genres.reduce((total, genre) => total + (genreScores.get(genre) ?? 0), 0) / genres.length
+      const features = featuresFor(item);
+      const featureWeight = features.reduce((total, feature) => total + feature.weight, 0);
+      const preferenceScore = featureWeight
+        ? features.reduce((total, feature) => total + (featureScores.get(feature.key) ?? 0) * feature.weight, 0) / featureWeight
         : 0;
+      const score = preferenceScore + ratingPrior(item.rating);
       return { item, originalIndex, score };
     })
     .sort((a, b) => b.score - a.score || a.originalIndex - b.originalIndex);
