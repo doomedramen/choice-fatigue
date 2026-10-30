@@ -36,9 +36,9 @@ The app now has invite-only Better Auth accounts after first-run setup, no email
 - Implement provider adapters on the server. Store API keys in server secrets or a secret manager; never expose them to the browser or return them in admin responses.
 - Start with a small Movies/TV catalogue and fixture-backed adapter tests, then connect a permitted provider and add attribution in the app’s About/Credits area.
 - Add caching, request limits, timeouts, retries, provider health status, and a way to fall back to cached or seeded catalogue data.
-- Evaluate Anime coverage against a representative list before adding a dedicated anime provider.
+- Evaluate anime coverage in the Movies and TV searches without creating a separate Anime category.
 
-**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, protected status reporting, opt-in TMDB search/import for Movies/TV/Anime, and gated text-only ThePornDB/StashDB search/import for Adult are implemented. TMDB attribution is available at `/credits`. Automatic refresh, caching/retention policy, provider health, service connection checks/actions, and full database-backed account-flow validation remain open.
+**Progress:** the normalized catalogue model, fixture seeder, server loader, empty-table fallback, protected status reporting, opt-in TMDB search/import for Movies and TV, and gated text-only ThePornDB/StashDB search/import for Adult are implemented. Anime series are found under TV and anime films under Movies. TMDB attribution is available at `/credits`. Automatic refresh, caching/retention policy, provider health, service connection checks/actions, and full database-backed account-flow validation remain open.
 
 **Provider notes:**
 

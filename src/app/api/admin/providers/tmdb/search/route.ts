@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("query")?.trim() ?? "";
   const category = request.nextUrl.searchParams.get("category") ?? "";
   if (query.length < 2 || query.length > 80 || !tmdbCategories.includes(category as typeof tmdbCategories[number])) {
-    return NextResponse.json({ error: "Enter a search of 2 to 80 characters and choose Movies, TV, or Anime." }, { status: 400 });
+    return NextResponse.json({ error: "Enter a search of 2 to 80 characters and choose Movies or TV." }, { status: 400 });
   }
 
   try {

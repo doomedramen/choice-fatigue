@@ -3,7 +3,7 @@ import { getAdminGlobalSettings, saveAdminGlobalSettings } from "@/lib/global-se
 import { requireAdmin, AuthenticationError, AuthorizationError } from "@/lib/auth-session";
 import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 
-const categories = ["Movies", "TV", "Anime"] as const;
+const categories = ["Movies", "TV"] as const;
 const acceptedKeys = ["appName", "defaultCategory", "adultSectionEnabled", "allowPrivateNetworkTargets", "betaInviteCode", "smtpEnabled", "smtpFrom", "smtpUrl", "clearSmtpConfig"] as const;
 
 function errorResponse(error: unknown) {

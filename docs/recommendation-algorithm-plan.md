@@ -34,7 +34,7 @@ Start with a deterministic content-based ranker. It needs no recommendation API,
 
 - Respect the selected category and its access rules.
 - Exclude titles already seen in the current session, plus titles the user has permanently hidden or saved when that matches their settings.
-- Do not let Adult choices affect Movies, TV, or Anime profiles, or the reverse.
+- Do not let Adult choices affect Movies or TV profiles, or the reverse.
 - Keep service availability (already in a library or already requested) as an eligibility or display signal, separate from taste.
 
 ### 2. Represent user and title interests
@@ -74,7 +74,7 @@ Keep the current saved/shortlist snapshot for fast UI restore. Treat the event h
 
 ## Adult-section boundary
 
-Keep the Adult profile, signals, candidates, and retrieval isolated from general categories. Never use Adult interactions to personalize Movies, TV, or Anime. Do not introduce cross-user collaborative signals for Adult in the first versions. Preserve the existing age gate and provider boundaries at candidate generation, not only in the interface.
+Keep the Adult profile, signals, candidates, and retrieval isolated from general categories. Never use Adult interactions to personalize Movies or TV. Do not introduce cross-user collaborative signals for Adult in the first versions. Preserve the existing age gate and provider boundaries at candidate generation, not only in the interface.
 
 ## Evaluation and rollout
 

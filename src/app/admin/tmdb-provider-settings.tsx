@@ -46,11 +46,11 @@ export default function TmdbProviderSettings({ status, onStatusChange }: { statu
     {status.credentialConfigured && <p className={styles.savedHint}>A token is saved in the database. Leave this field blank to keep it, or enter a new token to replace it.</p>}
     <form className={styles.form} onSubmit={save}>
       <label className={styles.field} htmlFor={tokenId}><span>API Read Access Token</span><input id={tokenId} type="password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} value={token} maxLength={2048} required={!status.credentialConfigured} placeholder={status.credentialConfigured ? "Saved · leave blank to keep" : "Paste the long Bearer token from TMDB API settings"} onChange={event => setToken(event.target.value)} /></label>
-      <label className={styles.enable}><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /><span><strong>Enable TMDB metadata</strong><small>Use for Movies, TV, and Anime. Adult entries are kept separate.</small></span></label>
+      <label className={styles.enable}><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /><span><strong>Enable TMDB metadata</strong><small>Use for Movies and TV, including anime series under TV. Adult entries are kept separate.</small></span></label>
       <button className={styles.save} type="submit" disabled={!status.encryptionConfigured || saving}>{saving ? "Saving…" : "Save TMDB settings"}</button>
     </form>
     {error && <p className={styles.error} role="alert">{error}</p>}
     {message && <p className={styles.success} role="status" aria-live="polite">{message}</p>}
-    <p className={styles.terms}>TMDB artwork can be used only for Movies, TV, and Anime within this app. View the <a href="https://developer.themoviedb.org/docs/authentication-application" target="_blank" rel="noreferrer">TMDB token instructions ↗</a>.</p>
+    <p className={styles.terms}>TMDB artwork can be used for Movies and TV within this app. Anime films are under Movies; anime series are under TV. View the <a href="https://developer.themoviedb.org/docs/authentication-application" target="_blank" rel="noreferrer">TMDB token instructions ↗</a>.</p>
   </section>;
 }

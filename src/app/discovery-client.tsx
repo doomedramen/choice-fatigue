@@ -110,9 +110,9 @@ export default function DiscoveryClient({ appName, userName, isAdmin, adultSecti
           try {
             const legacy = localStorage.getItem("elsewhere-discovery-v1");
             if (legacy) {
-              const parsed = JSON.parse(legacy) as Partial<SessionState>;
+              const parsed = JSON.parse(legacy) as Omit<Partial<SessionState>, "category"> & { category?: Category | "Anime" };
               const validShape = parsed && ["Movies", "TV", "Anime", "Adult"].includes(parsed.category ?? "") && typeof parsed.decisions === "object" && parsed.decisions !== null && Array.isArray(parsed.shortlisted) && Array.isArray(parsed.saved) && Array.isArray(parsed.history) && Array.isArray(parsed.reviewRemoved) && (parsed.view === "discover" || parsed.view === "review") && typeof parsed.ageVerified === "boolean";
-              if (validShape) { stored = parsed; hasLegacyState = true; }
+              if (validShape) { stored = { ...parsed, category: parsed.category === "Anime" ? "TV" : parsed.category }; hasLegacyState = true; }
             }
           } catch { /* Ignore invalid browser-local data and start clean. */ }
         }

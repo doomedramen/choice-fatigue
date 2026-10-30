@@ -3,7 +3,7 @@
 import { useId, useState, type FormEvent } from "react";
 import styles from "./tmdb-catalogue.module.css";
 
-type Category = "Movies" | "TV" | "Anime";
+type Category = "Movies" | "TV";
 type MediaType = "movie" | "tv";
 interface SearchResult {
   tmdbId: number;
@@ -91,9 +91,9 @@ export default function TmdbCatalogue() {
       <div>
         <p className={styles.eyebrow}>CURATE THE CATALOGUE</p>
         <h3 id="tmdb-catalogue-title">Find titles on TMDB</h3>
-        <p>Search a title and add it to the local catalogue. Anime search focuses on Japanese animated titles. Imported metadata appears for new discovery sessions.</p>
+        <p>Search movies or TV series and add them to the local catalogue. Anime series are found under TV; anime films are found under Movies.</p>
       </div>
-      <span className={styles.sourceBadge}>Movies · TV · Anime</span>
+      <span className={styles.sourceBadge}>Movies · TV</span>
     </div>
 
     <form className={styles.searchForm} onSubmit={search}>
@@ -106,7 +106,6 @@ export default function TmdbCatalogue() {
         <select id={categoryId} value={category} disabled={searching || importingKey !== null} onChange={event => { setCategory(event.target.value as Category); setResults([]); setSearched(false); setError(""); setMessage(""); }}>
           <option value="Movies">Movies</option>
           <option value="TV">TV</option>
-          <option value="Anime">Anime</option>
         </select>
       </label>
       <button className={styles.searchButton} type="submit" disabled={searching || importingKey !== null || query.trim().length < 2}>

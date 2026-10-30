@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
 
-export const tmdbCategories = ["Movies", "TV", "Anime"] as const;
+export const tmdbCategories = ["Movies", "TV"] as const;
 export type TmdbCategory = (typeof tmdbCategories)[number];
 export type TmdbMediaType = "movie" | "tv";
 
@@ -17,9 +17,6 @@ type TmdbRecord = {
   poster_path?: unknown;
   media_type?: unknown;
   vote_average?: unknown;
-  genre_ids?: unknown;
-  original_language?: unknown;
-  origin_country?: unknown;
 };
 
 type TmdbSearchPayload = { results?: TmdbRecord[] };
@@ -64,17 +61,11 @@ function posterUrl(pathValue: unknown) {
 function mediaTypeFor(record: TmdbRecord, category: TmdbCategory): TmdbMediaType | null {
   if (category === "Movies") return "movie";
   if (category === "TV") return "tv";
-  return record.media_type === "movie" || record.media_type === "tv" ? record.media_type : null;
+  return null;
 }
 
 function titleFor(record: TmdbRecord, mediaType: TmdbMediaType) {
   return text(mediaType === "movie" ? record.title : record.name);
-}
-
-function looksLikeAnime(record: TmdbRecord) {
-  const hasAnimationGenre = Array.isArray(record.genre_ids) && record.genre_ids.includes(16);
-  const japanese = record.original_language === "ja" || (Array.isArray(record.origin_country) && record.origin_country.includes("JP"));
-  return hasAnimationGenre && japanese;
 }
 
 export async function searchTmdb(query: string, category: TmdbCategory) {
@@ -82,12 +73,10 @@ export async function searchTmdb(query: string, category: TmdbCategory) {
   const encoded = encodeURIComponent(query);
   const endpoint = category === "Movies"
     ? `/search/movie?query=${encoded}&include_adult=false&language=en-US&page=1`
-    : category === "TV"
-      ? `/search/tv?query=${encoded}&include_adult=false&language=en-US&page=1`
-      : `/search/multi?query=${encoded}&include_adult=false&language=en-US&page=1`;
+    : `/search/tv?query=${encoded}&include_adult=false&language=en-US&page=1`;
   const payload = await requestTmdb<TmdbSearchPayload>(endpoint, token);
   return (Array.isArray(payload.results) ? payload.results : [])
-    .filter(record => record && record.adult !== true && (category !== "Anime" || looksLikeAnime(record)))
+    .filter(record => record && record.adult !== true)
     .map(record => {
       const mediaType = mediaTypeFor(record, category);
       if (!mediaType || typeof record.id !== "number" || record.id < 1) return null;

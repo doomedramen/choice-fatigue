@@ -173,7 +173,7 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
             <div className="admin-section-head"><div><p className="admin-eyebrow">PREFERENCES</p><h2 id="admin-section-title">Global settings</h2><p>These defaults are shared by everyone using the app.</p></div></div>
             <div className="admin-card">
               <label className="field"><span>App name</span><input value={settings.appName} maxLength={50} onChange={event => setSettings({ ...settings, appName: event.target.value })} /></label>
-              <label className="field"><span>Default category</span><select value={settings.defaultCategory} onChange={event => setSettings({ ...settings, defaultCategory: event.target.value })}><option>Movies</option><option>TV</option><option>Anime</option></select></label>
+              <label className="field"><span>Default category</span><select value={settings.defaultCategory} onChange={event => setSettings({ ...settings, defaultCategory: event.target.value })}><option>Movies</option><option>TV</option></select></label>
               <label className="check-row"><input type="checkbox" checked={settings.adultSectionEnabled} disabled={!ready} onChange={event => setSettings({ ...settings, adultSectionEnabled: event.target.checked })} /><span><strong>Enable the Adult section</strong><small>Enables the age-gated Adult category for this instance.</small></span></label>
             </div>
             <section className="admin-card" aria-labelledby="invite-settings-title">

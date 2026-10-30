@@ -8,7 +8,7 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_COLLECTION_ITEMS = 5_000;
 const MAX_ID_LENGTH = 128;
 
-type Category = "Movies" | "TV" | "Anime" | "Adult";
+type Category = "Movies" | "TV" | "Adult";
 type Decision = "keep" | "pass";
 interface SessionState {
   category: Category;
@@ -48,7 +48,7 @@ function isSessionState(value: unknown): value is SessionState {
   if (!isObject(value)) return false;
   const keys = ["category", "decisions", "shortlisted", "saved", "history", "reviewRemoved", "view", "ageVerified"];
   if (Object.keys(value).length !== keys.length || keys.some(key => !(key in value))) return false;
-  if (value.category !== "Movies" && value.category !== "TV" && value.category !== "Anime" && value.category !== "Adult") return false;
+  if (value.category !== "Movies" && value.category !== "TV" && value.category !== "Adult") return false;
   if (value.view !== "discover" && value.view !== "review") return false;
   if (typeof value.ageVerified !== "boolean") return false;
   if (!isIdList(value.shortlisted) || !isIdList(value.saved) || !isIdList(value.reviewRemoved)) return false;
