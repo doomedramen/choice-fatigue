@@ -156,7 +156,7 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
         <nav className="admin-nav" aria-label="Admin sections">{([['providers', 'Metadata sources'], ['services', 'Services'], ['settings', 'Global settings'], ['users', 'Users']] as const).map(([id, label]) => <button key={id} type="button" className={tab === id ? "selected" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => { setTab(id); setNotice(""); }}>{label}<span aria-hidden="true">→</span></button>)}</nav>
         <section className="admin-content" aria-labelledby="admin-section-title">
           {tab === "providers" && <>
-            <div className="admin-section-head"><div><p className="admin-eyebrow">CATALOGUE SETUP</p><h2 id="admin-section-title">Metadata sources</h2><p>Manage provider keys and turn sources on or off here. Credentials are encrypted in the database.</p></div></div>
+            <div className="admin-section-head"><div><p className="admin-eyebrow">CATALOGUE SETUP</p><h2 id="admin-section-title">Metadata sources</h2><p>Manage provider keys and turn sources on or off here. Credentials are encrypted in the database; titles imported from any enabled source join the shared catalogue used by discovery.</p></div></div>
             <div className="provider-list">
               <TmdbProviderSettings status={providerStatuses?.tmdb ?? { credentialConfigured: false, enabled: false, encryptionConfigured: false }} onStatusChange={status => updateProviderStatus("tmdb", status)} />
               {providerStatuses?.tmdb.enabled && <TmdbCatalogue />}
