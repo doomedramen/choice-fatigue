@@ -3,7 +3,9 @@ import { AuthenticationError, requireSession } from "@/lib/auth-session";
 import { decryptIntegrationConfig, IntegrationCiphertextError, IntegrationEncryptionUnavailableError, integrationEncryptionContext } from "@/lib/integrations/crypto";
 import { IntegrationTargetError, requestIntegrationService } from "@/lib/integrations/http";
 import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
+import { getGlobalSettings } from "@/lib/global-settings";
 import { prisma } from "@/lib/prisma";
+import { serverConfig } from "@/lib/server-config";
 
 export const dynamic = "force-dynamic";
 
@@ -25,18 +27,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const row = await prisma.userIntegration.findFirst({ where: { id: (await params).id, userId: session.user.id } });
     if (!row) return jsonError("Connection not found.", 404);
+    if (row.service === "whisparr-v2" || row.service === "whisparr-v3") {
+      const settings = await getGlobalSettings();
+      if (!serverConfig.adultSectionEnabled || !settings.adultSectionEnabled) return jsonError("Enable the Adult section before checking this connection.", 403);
+    }
     const endpoint = row.service === "seerr"
       ? "api/v1/settings/network"
       : row.service === "radarr" || row.service === "sonarr"
         ? "api"
         : row.service === "plex"
           ? ""
+        : row.service === "whisparr-v2" || row.service === "whisparr-v3"
+          ? "api/v3/system/status"
         : null;
-    if (endpoint === null) return jsonError("Connection checks are available for Seerr, Plex, Radarr, and Sonarr in this release.", 409);
+    if (endpoint === null) return jsonError("Connection checks are available for Seerr, Plex, Radarr, Sonarr, and Whisparr in this release.", 409);
 
     const config = decryptIntegrationConfig(row.encryptedConfig, integrationEncryptionContext(row.userId, row.id));
     const response = await requestIntegrationService(config, endpoint, row.service === "plex" ? { credentialHeader: "x-plex-token" } : {});
-    const serviceName = row.service === "seerr" ? "Seerr" : row.service === "plex" ? "Plex" : row.service === "radarr" ? "Radarr" : "Sonarr";
+    const serviceName = row.service === "seerr" ? "Seerr" : row.service === "plex" ? "Plex" : row.service === "radarr" ? "Radarr" : row.service === "sonarr" ? "Sonarr" : "Whisparr";
     if (response.status === 401 || response.status === 403) return jsonError(`${serviceName} rejected this credential. Check the token or service settings.`, 422);
     if (response.status < 200 || response.status >= 300) return jsonError(`${serviceName} responded, but its API could not verify the connection.`, 502);
 
@@ -54,7 +62,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         ? Boolean(plexContainer && typeof plexContainer === "object" && !Array.isArray(plexContainer)
           && typeof (plexContainer as Record<string, unknown>).machineIdentifier === "string"
           && typeof (plexContainer as Record<string, unknown>).friendlyName === "string")
-        : (typeof fields.current === "string" || fields.current === null) && Array.isArray(fields.deprecated);
+        : row.service === "whisparr-v2" || row.service === "whisparr-v3"
+          ? fields.appName === "Whisparr" && typeof fields.version === "string"
+          : (typeof fields.current === "string" || fields.current === null) && Array.isArray(fields.deprecated);
     if (!validResponse) {
       return jsonError(`The address responded, but it does not look like a ${serviceName} server.`, 422);
     }
