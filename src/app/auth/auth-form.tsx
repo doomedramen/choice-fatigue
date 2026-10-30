@@ -7,7 +7,7 @@ import "./auth.css";
 
 type AuthMode = "sign-in" | "sign-up";
 
-export function AuthForm({ mode }: { mode: AuthMode }) {
+export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; firstAccount?: boolean }) {
   const isSignUp = mode === "sign-up";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -52,15 +52,15 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     </header>
     <main className="auth-main">
       <section className="auth-card" aria-labelledby="auth-title">
-        <p className="auth-eyebrow">{isSignUp ? "INVITE BETA" : "WELCOME BACK"}</p>
-        <h1 id="auth-title">{isSignUp ? "Create your account." : "Sign in."}</h1>
+        <p className="auth-eyebrow">{isSignUp ? firstAccount ? "FIRST ACCOUNT" : "INVITE BETA" : "WELCOME BACK"}</p>
+        <h1 id="auth-title">{isSignUp ? firstAccount ? "Set up Choice Fatigue." : "Create your account." : "Sign in."}</h1>
         <p className="auth-intro">{isSignUp ? "Make room for better choices, one shortlist at a time." : "Pick up where your discovery session left off."}</p>
 
-        {isSignUp && <p className="auth-invite-note">Choice Fatigue is currently invite only. Enter the invitation code you received to request an account. The code is checked with your request and isn’t saved to your profile.</p>}
+        {isSignUp && <p className="auth-invite-note">{firstAccount ? "This is the first account for this Choice Fatigue instance. It will become the administrator account." : "Choice Fatigue is currently invite only. Enter the invitation code you received to request an account. The code is checked with your request and isn’t saved to your profile."}</p>}
 
         {message ? <div className="auth-success" role="status"><strong>Check your email</strong><p>{message}</p><Link href="/sign-in">Continue to sign in</Link></div> : <form className="auth-form" onSubmit={submit} aria-busy={pending}>
           {isSignUp && <label className="auth-field">Name<input name="name" autoComplete="name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>}
-          {isSignUp && <label className="auth-field">Invitation code<input name="inviteCode" autoComplete="off" autoCapitalize="none" spellCheck={false} required maxLength={128} value={inviteCode} onChange={event => setInviteCode(event.target.value)} aria-describedby="invite-code-help" /><span className="auth-field-hint" id="invite-code-help">Your inviter can share this code with you.</span></label>}
+          {isSignUp && !firstAccount && <label className="auth-field">Invitation code<input name="inviteCode" autoComplete="off" autoCapitalize="none" spellCheck={false} required maxLength={128} value={inviteCode} onChange={event => setInviteCode(event.target.value)} aria-describedby="invite-code-help" /><span className="auth-field-hint" id="invite-code-help">Your inviter can share this code with you.</span></label>}
           <label className="auth-field">Email address<input name="email" type="email" autoComplete="email" autoCapitalize="none" required maxLength={254} value={email} onChange={event => setEmail(event.target.value)} /></label>
           <label className="auth-field">Password
             <span className="auth-password-wrap"><input name="password" type={showPassword ? "text" : "password"} autoComplete={isSignUp ? "new-password" : "current-password"} required minLength={8} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} aria-describedby={isSignUp ? "password-help" : undefined} /><button className="auth-password-toggle" type="button" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "Hide" : "Show"}<span className="sr-only"> password</span></button></span>
@@ -70,7 +70,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           <button className="auth-submit" type="submit" disabled={pending}>{pending ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}</button>
         </form>}
 
-        {!message && <p className="auth-foot">{isSignUp ? <>Already have an account? <Link href="/sign-in">Sign in</Link></> : <><Link href="/forgot-password">Forgot your password?</Link><br/>New to Choice Fatigue? <Link href="/sign-up">Join with an invite</Link></>}</p>}
+        {!message && <p className="auth-foot">{isSignUp ? <>Already have an account? <Link href="/sign-in">Sign in</Link></> : <><Link href="/forgot-password">Forgot your password?</Link><br/>New to Choice Fatigue? <Link href="/sign-up">{firstAccount ? "Set up the first account" : "Join with an invite"}</Link></>}</p>}
       </section>
     </main>
     <footer className="auth-footer">Your discovery choices stay private to your account.</footer>

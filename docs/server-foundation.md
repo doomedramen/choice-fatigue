@@ -6,7 +6,7 @@ This is the server-side foundation for Choice Fatigue. Discovery data persists p
 
 Copy `.env.example` to `.env` for Prisma commands and `.env.local` for Next.js. The example explicitly enables development-only console email delivery, which prints verification and password-reset links to the server terminal. Start PostgreSQL with `docker compose up -d postgres`, then run `npm run db:setup`.
 
-Set a unique `BETTER_AUTH_SECRET` and the canonical `BETTER_AUTH_URL` for shared deployments. Configure `BETA_INVITE_CODE`; signup is denied in every environment when it is absent. The signup request must include `x-beta-invite-code`, which is checked by a server-side Better Auth hook and is never stored.
+Set a unique `BETTER_AUTH_SECRET` and the canonical `BETTER_AUTH_URL` for shared deployments. Configure `BETA_INVITE_CODE` for later signups. When the database has no accounts, the first account can sign up without an invite and receives the administrator role. After that, signup requires `x-beta-invite-code`; it is checked by a server-side Better Auth hook and is never stored. Email delivery must still be configured before signup is allowed.
 
 Shared deployments must set `AUTH_EMAIL_MODE=smtp`, `SMTP_URL` (a Nodemailer SMTP connection URL), and `SMTP_FROM` (the verified sender address). Signup is denied unless email delivery is configured. Development can explicitly use `AUTH_EMAIL_MODE=console`; this mode is rejected outside `NODE_ENV=development`. Unverified accounts cannot obtain sessions. Verification is sent at signup and sign-in; password resets revoke existing sessions.
 
@@ -18,7 +18,7 @@ Per-user service connections require a separate `INTEGRATION_CREDENTIALS_KEY` co
 
 Better Auth is mounted at `/api/auth/*`:
 
-- `POST /api/auth/sign-up/email` creates an account. Include `x-beta-invite-code`; a verification email is required before the account can start a session.
+- `POST /api/auth/sign-up/email` creates an account. The first account in an empty database does not need `x-beta-invite-code` and becomes administrator. Later accounts must include the configured invite code. A verification email is required before any account can start a session.
 - `POST /api/auth/sign-in/email` signs in a verified account. An unverified account receives a verification email.
 - `POST /api/auth/request-password-reset` accepts an email and redirect URL; Better Auth emails the reset link.
 - `POST /api/auth/reset-password` accepts the reset token and new password and revokes existing sessions.
@@ -70,7 +70,7 @@ Import these only from server code:
 
 ## Database models and administrator bootstrap
 
-Better Auth owns the `User`, `Session`, `Account`, and `Verification` records. `User.role` defaults to `user`, and signup never assigns an administrator role. After the first account has verified its email, bootstrap an administrator from a trusted shell with:
+Better Auth owns the `User`, `Session`, `Account`, and `Verification` records. `User.role` defaults to `user`; on an empty installation, a serialized server-side database hook promotes the oldest account to administrator. For an existing installation that needs administrator recovery, promote a verified account from a trusted shell with:
 
 ```sh
 npm run admin:promote -- exact-verified-email@example.com

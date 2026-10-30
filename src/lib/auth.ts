@@ -77,6 +77,27 @@ export const auth = betterAuth({
       },
     },
   },
+  databaseHooks: {
+    user: {
+      create: {
+        after: async () => {
+          // Serialize bootstrap promotion so concurrent first signups cannot
+          // accidentally create multiple administrators.
+          await prisma.$transaction(async (transaction) => {
+            await transaction.$queryRaw`SELECT pg_advisory_xact_lock(714221903)`;
+            const adminCount = await transaction.user.count({ where: { role: "admin" } });
+            if (adminCount > 0) return;
+
+            const firstUser = await transaction.user.findFirst({
+              orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+              select: { id: true },
+            });
+            if (firstUser) await transaction.user.update({ where: { id: firstUser.id }, data: { role: "admin" } });
+          });
+        },
+      },
+    },
+  },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/delete-user") {
@@ -110,6 +131,9 @@ export const auth = betterAuth({
           message: "Signup is unavailable until authentication email delivery is configured.",
         });
       }
+
+      const accountCount = await prisma.user.count();
+      if (accountCount === 0) return;
 
       const inviteCode = process.env.BETA_INVITE_CODE;
       const suppliedCode = ctx.headers?.get("x-beta-invite-code");
