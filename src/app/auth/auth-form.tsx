@@ -12,8 +12,10 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -23,6 +25,11 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
     setPending(true);
     setError("");
     try {
+      if (isSignUp && password !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+
       const result = isSignUp
         ? await signUp.email({
             name: name.trim(),
@@ -63,6 +70,10 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
             <span className="auth-password-wrap"><input name="password" type={showPassword ? "text" : "password"} autoComplete={isSignUp ? "new-password" : "current-password"} required minLength={8} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} aria-describedby={isSignUp ? "password-help" : undefined} /><button className="auth-password-toggle" type="button" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "Hide" : "Show"}<span className="sr-only"> password</span></button></span>
             {isSignUp && <span className="auth-field-hint" id="password-help">Use at least 8 characters.</span>}
           </label>
+          {isSignUp && <label className="auth-field">Confirm password
+            <span className="auth-password-wrap"><input name="confirmPassword" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" required minLength={8} maxLength={128} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} aria-invalid={confirmPassword.length > 0 && password !== confirmPassword} aria-describedby="confirm-password-help" /><button className="auth-password-toggle" type="button" aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword(value => !value)}>{showConfirmPassword ? "Hide" : "Show"}<span className="sr-only"> confirmation</span></button></span>
+            <span className={`auth-field-hint ${confirmPassword.length > 0 && password !== confirmPassword ? "auth-field-error" : ""}`} id="confirm-password-help" aria-live="polite">{confirmPassword.length > 0 && password !== confirmPassword ? "Passwords do not match." : "Enter the same password again."}</span>
+          </label>}
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button className="auth-submit" type="submit" disabled={pending}>{pending ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}</button>
         </form>

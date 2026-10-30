@@ -15,6 +15,7 @@
 .auth-field input::placeholder { color:#8491a8; }
 .auth-field input:focus-visible { outline:3px solid #bcaaff; outline-offset:2px; border-color:#bcaaff; }
 .auth-field-hint { color:#aebbd0; font-size:12px; font-weight:400; line-height:1.45; }
+.auth-field-error { color:#ffbdb4; }
 .auth-password-wrap { position:relative; }
 .auth-password-wrap input { padding-right:74px; }
 .auth-password-toggle { position:absolute; top:5px; right:5px; min-width:64px; min-height:38px; border:0; border-radius:6px; background:#202a3d; color:#d7ccff; font-size:12px; font-weight:800; }
