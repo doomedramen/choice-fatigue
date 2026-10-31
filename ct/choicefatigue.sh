@@ -10,12 +10,11 @@ APP="Choice Fatigue"
 var_tags="${var_tags:-media;discovery}"
 var_cpu="${var_cpu:-2}"
 var_ram="${var_ram:-4096}"
-var_disk="${var_disk:-20}"
+var_disk="${var_disk:-6}"
 var_os="${var_os:-debian}"
 var_version="${var_version:-13}"
 var_unprivileged="${var_unprivileged:-1}"
 var_arm64="${var_arm64:-yes}"
-export var_public_url="${var_public_url:-}"
 
 header_info "$APP"
 variables
@@ -36,6 +35,11 @@ function update_script() {
     msg_info "Backing up the Choice Fatigue database"
     install -d -m 0750 -o postgres -g postgres /var/backups/choice-fatigue
     runuser -u postgres -- pg_dump --format=custom --file="/var/backups/choice-fatigue/choice-fatigue-$(date +%Y%m%d%H%M%S).dump" choice_fatigue
+    backup_files=(/var/backups/choice-fatigue/choice-fatigue-*.dump)
+    if (( ${#backup_files[@]} > 3 )); then
+      remove_count=$((${#backup_files[@]} - 3))
+      rm -f -- "${backup_files[@]:0:remove_count}"
+    fi
     msg_ok "Backed up the Choice Fatigue database"
 
     msg_info "Stopping Choice Fatigue"
@@ -80,4 +84,4 @@ build_container
 description
 
 msg_ok "Completed successfully"
-echo -e "${INFO}${YW}After configuring HTTPS on your reverse proxy, open the URL you entered during installation.${CL}"
+echo -e "${INFO}${YW}Open Choice Fatigue at http://<LXC-IP>:4173 on your trusted local network. To add a reverse proxy later, update BETTER_AUTH_URL in /opt/choice-fatigue/.env to its browser-facing URL and restart choice-fatigue.service.${CL}"

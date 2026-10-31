@@ -17,14 +17,6 @@
   "documentation": "https://github.com/doomedramen/choice-fatigue/blob/main/docs/self-hosting.md",
   "repository": "https://github.com/doomedramen/choice-fatigue",
   "description": "Choice Fatigue is a self-hosted media discovery app with account-scoped recommendation learning, saved lists, and optional Adult discovery.",
-  "app_vars": [
-    {
-      "name": "var_public_url",
-      "label": "Public HTTPS URL",
-      "type": "text",
-      "default": ""
-    }
-  ],
   "install_methods": [
     {
       "type": "default",
@@ -33,7 +25,7 @@
       "resources": {
         "cpu": 2,
         "ram": 4096,
-        "hdd": 20,
+        "hdd": 6,
         "os": "Debian",
         "version": "13"
       }
@@ -45,7 +37,7 @@
   },
   "notes": [
     {
-      "text": "Configure an HTTPS reverse proxy to the container on port 4173 before remote access. The URL entered during setup must match the browser-facing HTTPS origin.",
+      "text": "The app is available over HTTP at the LXC IPv4 address on port 4173 for trusted local-network access. Before exposing it remotely, put it behind a trusted HTTPS reverse proxy and update BETTER_AUTH_URL in /opt/choice-fatigue/.env to the browser-facing URL, then restart choice-fatigue.service.",
       "type": "info"
     },
     {

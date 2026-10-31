@@ -12,7 +12,7 @@ From a root shell on the Proxmox VE host, run this command to create a new Debia
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/doomedramen/choice-fatigue/main/ct/choicefatigue.sh)"
 ```
 
-The installer prompts for the public HTTPS URL and uses the Community Scripts defaults of 2 CPU cores, 4 GB RAM, and 20 GB disk. Read [the Proxmox setup notes](docs/self-hosting.md) before running it.
+The installer detects the container IPv4 address and starts with local-network access at `http://<LXC-IP>:4173`; no domain or reverse proxy is required for initial setup. It uses the Community Scripts defaults of 2 CPU cores, 4 GB RAM, and 6 GB disk. Read [the Proxmox setup notes](docs/self-hosting.md) before running it.
 
 ## Deploy with Docker Compose
 

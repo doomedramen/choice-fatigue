@@ -39,7 +39,7 @@ Run the installer from a root shell on the Proxmox VE host:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/doomedramen/choice-fatigue/main/ct/choicefatigue.sh)"
 ```
 
-This uses the [Community Scripts core](https://github.com/community-scripts/core) to create and configure an unprivileged Debian 13 LXC. The default allocation is 2 CPU cores, 4 GB memory, and 20 GB storage; the Community Scripts advanced setup lets the operator change the container resources, networking, and storage. The installer asks for the public HTTPS URL that users will open.
+This uses the [Community Scripts core](https://github.com/community-scripts/core) to create and configure an unprivileged Debian 13 LXC. The default allocation is 2 CPU cores, 4 GB memory, and 6 GB storage; the Community Scripts advanced setup lets the operator change the container resources, networking, and storage. The installer detects the container IPv4 address and sets `BETTER_AUTH_URL` to `http://<LXC-IP>:4173`, so the app can be opened on a trusted local network without a domain or reverse proxy.
 
 The app installer currently tracks the public `main` branch because the project has no GitHub release yet. When releases are published, switch the installer to the release-based updater. The Community Scripts update command inside the container checks and deploys newer `main` commits, creates a PostgreSQL dump before app updates, rebuilds the app, applies database migrations, and restarts the service.
 
@@ -52,7 +52,7 @@ bash ct/choicefatigue.sh
 
 The in-container installer uses the Community Scripts helpers for Debian updates, PostgreSQL 17, and Node.js 22, then installs pnpm 12.16.1, generates the authentication and credential-encryption secrets, builds the app, applies migrations, and creates the `choice-fatigue` systemd service on port 4173. The database and `.env` live in the container's persistent storage.
 
-Configure a trusted reverse proxy to the LXC address on port 4173. Set the installer URL to the browser-facing HTTPS address so authentication cookies use the correct origin. Check the service with `systemctl status choice-fatigue` and `curl http://127.0.0.1:4173/api/health`; use `journalctl -u choice-fatigue` for logs.
+Open `http://<LXC-IP>:4173` from a trusted local network. When you are ready to add a reverse proxy, point it at the LXC address on port 4173, then change `BETTER_AUTH_URL` in `/opt/choice-fatigue/.env` to the exact browser-facing URL (for example `https://choice.example.com`) and run `systemctl restart choice-fatigue`. This keeps authentication origin checks and cookies aligned with the URL users open. Check the service with `systemctl status choice-fatigue` and `curl http://127.0.0.1:4173/api/health`; use `journalctl -u choice-fatigue` for logs.
 
 ## First-run setup and access
 
@@ -62,6 +62,6 @@ Configure metadata providers and shared media services in Admin settings. Servic
 
 ## Upgrades and recovery
 
-For Compose, back up PostgreSQL and the deployment secrets before pulling or checking out the desired release, then rerun the Compose command above. For LXC, the in-container `update` command downloads a PostgreSQL dump to `/var/backups/choice-fatigue/` before updating the app. Back up `/opt/choice-fatigue/.env` separately and copy database dumps off the container. The v1 cleanup migration drops the unused `CatalogueEntry` table and deletes the obsolete TVDB credential row. It does not affect account choices, saved provider IDs, or integrations; retain an off-container backup before upgrading or restoring.
+For Compose, back up PostgreSQL and the deployment secrets before pulling or checking out the desired release, then rerun the Compose command above. For LXC, the in-container `update` command downloads a PostgreSQL dump to `/var/backups/choice-fatigue/` before updating the app and retains the three newest dumps. Back up `/opt/choice-fatigue/.env` separately and copy database dumps off the container. The v1 cleanup migration drops the unused `CatalogueEntry` table and deletes the obsolete TVDB credential row. It does not affect account choices, saved provider IDs, or integrations; retain an off-container backup before upgrading or restoring.
 
 To recover first-admin access, use the documented `pnpm admin:promote -- account-email@example.com` command from a trusted shell in the app environment. Do not recreate the database or regenerate the encryption key as an account-recovery step.

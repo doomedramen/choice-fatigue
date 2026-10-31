@@ -11,14 +11,13 @@ setting_up_container
 network_check
 update_os
 
-if [[ -z "${var_public_url:-}" ]]; then
-  read -r -p "Public Choice Fatigue HTTPS URL (for example https://choice.example.com): " var_public_url
-fi
-if [[ ! "$var_public_url" =~ ^https://[^[:space:]/]+/?$ ]]; then
-  msg_error "Enter the public HTTPS origin without a path, such as https://choice.example.com."
+app_ip=$(ip -4 -o addr show scope global | awk 'NR == 1 { split($4, address, "/"); print address[1] }')
+if [[ -z "$app_ip" ]]; then
+  msg_error "Could not determine the container's IPv4 address. Configure LXC networking and try again."
   exit 1
 fi
-var_public_url="${var_public_url%/}"
+app_url="http://${app_ip}:4173"
+msg_info "Choice Fatigue will be available on the local network at ${app_url}"
 
 msg_info "Installing Choice Fatigue dependencies"
 $STD apt install -y ca-certificates curl openssl
@@ -46,7 +45,7 @@ credential_key=$(openssl rand -base64 32 | tr -d '\n')
 cat <<EOF >/opt/choice-fatigue/.env
 DATABASE_URL=postgresql://${PG_DB_USER}:${PG_DB_PASS}@127.0.0.1:5432/${PG_DB_NAME}?schema=public
 BETTER_AUTH_SECRET=${auth_secret}
-BETTER_AUTH_URL=${var_public_url}
+BETTER_AUTH_URL=${app_url}
 INTEGRATION_CREDENTIALS_KEY=${credential_key}
 EOF
 chown choicefatigue:choicefatigue /opt/choice-fatigue/.env
