@@ -10,13 +10,14 @@ import { parseProviderTitleId } from "@/lib/media-provider-id";
 import { loadRecommendationProfile } from "@/lib/recommendation-profile";
 import { advanceFeedStreams, reconcileFeedStreams, type DiscoveryFeed, type FeedCursor, type FeedStream } from "@/lib/discovery-feed";
 import type { RecommendationCategory } from "@/lib/recommendation-event-validation";
+import { encodeFeedCursor, feedCursorSecret, InvalidFeedCursorError, readFeedCursor } from "@/lib/feed-cursor";
 export type { CategoryFeedStatus } from "@/lib/discovery-feed";
 
-export class InvalidFeedCursorError extends Error {}
-function decodeCursor(value: string, category: RecommendationCategory): FeedCursor {
+export { InvalidFeedCursorError };
+function decodeCursor(value: unknown, category: RecommendationCategory): FeedCursor {
   try {
-    if (value.length > 8192) throw new Error();
-    const cursor = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as FeedCursor;
+    const cursor = value as FeedCursor;
+    if (!cursor || typeof cursor !== "object") throw new Error();
     if (cursor.category !== category || !Array.isArray(cursor.streams) || cursor.streams.length > 6) throw new Error();
     const keys = new Set<string>();
     for (const stream of cursor.streams) {
@@ -41,7 +42,10 @@ function decodeCursor(value: string, category: RecommendationCategory): FeedCurs
 }
 
 /** Authorization is enforced by the page/API before Adult retrieval is requested. */
-export async function getDiscoveryFeed(userId: string, category: RecommendationCategory, cursorValue: string | null = null, refresh = false, pendingExcludedIds: string[] = []): Promise<DiscoveryFeed> {
+export async function getDiscoveryFeed(userId: string, category: RecommendationCategory, cursorParam: string | null = null, refresh = false, pendingExcludedIds: string[] = [], knownFeatureIds: string[] = []): Promise<DiscoveryFeed> {
+  const secret = feedCursorSecret();
+  // A cursor issued before signing reads as null and restarts the feed instead of being trusted.
+  const cursorValue = cursorParam ? readFeedCursor(cursorParam, userId, secret) : null;
   const enabled = new Set<string>();
   if (category === "Adult") {
     const statuses = await Promise.all([getAdultMetadataProviderStatus("theporndb"), getAdultMetadataProviderStatus("stashdb")]);
@@ -85,7 +89,9 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
   const candidateFeatures: Record<string, string[]> = {};
   const considered = new Set(profile ? buildRecommendationProfile(profile.events, profile.featuresByItemId, category).consideredIds : []);
   for (const id of pendingExcludedIds) if (parseProviderTitleId(id)?.category === category) considered.add(id);
-  const candidates = category === "Adult" ? [] : result.items.filter(item => !considered.has(item.id)).slice(0, 10);
+  // Ten credit lookups per page, spent on titles this tab has not already resolved or tried.
+  const known = new Set(knownFeatureIds);
+  const candidates = category === "Adult" ? [] : result.items.filter(item => !considered.has(item.id) && !known.has(item.id)).slice(0, 10);
   await Promise.all(candidates.map(async item => {
     const reference = parseProviderTitleId(item.id);
     if (!reference || reference.provider !== "tmdb") return;
@@ -96,7 +102,7 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
     snapshot: { candidateRequestedIds: candidates.map(item => item.id), candidateResolvedIds: Object.keys(candidateFeatures), historicalRequestedIds: profile?.requestedCreditItemIds ?? [], historicalResolvedIds: profile?.resolvedCreditItemIds ?? [] },
     items: result.items, batches: result.batches, sources: result.sources, status: result.status,
     hasMore: result.streams.some(stream => !stream.done),
-    cursor: result.streams.length ? Buffer.from(JSON.stringify({ category, streams: result.streams })).toString("base64url") : null,
+    cursor: result.streams.length ? encodeFeedCursor({ category, streams: result.streams }, userId, secret) : null,
   };
 }
 

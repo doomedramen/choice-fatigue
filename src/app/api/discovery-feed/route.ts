@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
       if (!adultAccessEnabled(settings.adultSectionEnabled, grant)) return NextResponse.json({ error: "The Adult category is currently disabled." }, { status: 403 });
     }
     const pendingIds = request.nextUrl.searchParams.getAll("excludeId").filter(id => id.length <= 200).slice(0, 100);
-    const result = await getDiscoveryFeed(session.user.id, category, request.nextUrl.searchParams.get("cursor"), request.nextUrl.searchParams.get("refresh") === "1", pendingIds);
+    const knownIds = request.nextUrl.searchParams.getAll("knownFeatureId").filter(id => id.length <= 200).slice(0, 200);
+    const result = await getDiscoveryFeed(session.user.id, category, request.nextUrl.searchParams.get("cursor"), request.nextUrl.searchParams.get("refresh") === "1", pendingIds, knownIds);
     return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof AuthenticationError) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });

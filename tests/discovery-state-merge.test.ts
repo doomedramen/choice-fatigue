@@ -32,6 +32,30 @@ test("applies a local undo while preserving another tab's new action", () => {
   assert.deepEqual(merged.history.map(entry => entry.eventId), ["event-2"]);
 });
 
+test("a title unsaved on one device stays unsaved when another device saves something else", () => {
+  const base: MergeableDiscoveryState = { ...empty(), saved: ["tmdb-movie-1", "tmdb-movie-2"] };
+  const local: MergeableDiscoveryState = { ...base, saved: ["tmdb-movie-2"] };
+  const remote: MergeableDiscoveryState = { ...base, saved: ["tmdb-movie-1", "tmdb-movie-2", "tmdb-movie-3"] };
+  assert.deepEqual(new Set(mergeDiscoveryState(base, local, remote).saved), new Set(["tmdb-movie-2", "tmdb-movie-3"]));
+});
+
+test("diverging decisions and shortlists keep each side's own changes; the local edit wins a same-title conflict", () => {
+  const base: MergeableDiscoveryState = { ...empty(), shortlisted: ["a"], decisions: { a: "keep" } };
+  const local: MergeableDiscoveryState = { ...base, shortlisted: [], decisions: { a: "pass", b: "keep" } };
+  const remote: MergeableDiscoveryState = { ...base, shortlisted: ["a", "c"], decisions: { a: "seen", c: "keep" } };
+  const merged = mergeDiscoveryState(base, local, remote);
+  assert.deepEqual(merged.decisions, { a: "pass", b: "keep", c: "keep" });
+  assert.deepEqual(merged.shortlisted, ["c"]);
+});
+
+test("concurrent history appends from two tabs both survive, and a shared entry is not duplicated", () => {
+  const shared = { id: "a", eventId: "e1", decision: "keep" };
+  const base: MergeableDiscoveryState = { ...empty(), history: [shared] };
+  const local: MergeableDiscoveryState = { ...base, history: [shared, { id: "b", eventId: "e2", decision: "pass" }] };
+  const remote: MergeableDiscoveryState = { ...base, history: [shared, { id: "c", eventId: "e3", decision: "keep" }] };
+  assert.deepEqual(mergeDiscoveryState(base, local, remote).history.map(entry => entry.eventId), ["e1", "e3", "e2"]);
+});
+
 test("preserves unchanged scalar state from the remote snapshot", () => {
   const base = empty();
   const local: MergeableDiscoveryState = { ...base, saved: ["tmdb-movie-1"] };

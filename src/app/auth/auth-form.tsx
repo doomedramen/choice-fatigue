@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { signIn, signUp } from "@/lib/auth-client";
 import "./auth.css";
 
@@ -19,6 +19,7 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [signInInstead, setSignInInstead] = useState(false);
+  const confirmInput = useRef<HTMLInputElement | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,8 +28,9 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
     setError("");
     setSignInInstead(false);
     try {
+      // The mismatch is already announced beside the field; send the user there instead of repeating it.
       if (isSignUp && password !== confirmPassword) {
-        setError("Passwords do not match.");
+        confirmInput.current?.focus();
         return;
       }
 
@@ -69,15 +71,15 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
         {isSignUp && <p className="auth-invite-note">{firstAccount ? "This is the first account for this Choice Fatigue instance. It will become the administrator account." : "Choice Fatigue is currently invite only. Enter the invitation code you received to request an account. The code is checked with your request and isn’t saved to your profile."}</p>}
 
         <form className="auth-form" onSubmit={submit} aria-busy={pending}>
-          {isSignUp && <label className="auth-field">Name<input name="name" autoComplete="name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>}
+          {isSignUp && <label className="auth-field">Name<input name="name" autoComplete="name" autoFocus required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>}
           {isSignUp && !firstAccount && <label className="auth-field">Invitation code<input name="inviteCode" autoComplete="off" autoCapitalize="none" spellCheck={false} required maxLength={128} value={inviteCode} onChange={event => setInviteCode(event.target.value)} aria-describedby="invite-code-help" /><span className="auth-field-hint" id="invite-code-help">Your inviter can share this code with you.</span></label>}
-          <label className="auth-field">Email address<input name="email" type="email" autoComplete="email" autoCapitalize="none" required maxLength={254} value={email} onChange={event => setEmail(event.target.value)} /></label>
+          <label className="auth-field">Email address<input name="email" type="email" autoComplete="email" autoCapitalize="none" autoFocus={!isSignUp} required maxLength={254} value={email} onChange={event => setEmail(event.target.value)} /></label>
           <label className="auth-field">Password
             <span className="auth-password-wrap"><input name="password" type={showPassword ? "text" : "password"} autoComplete={isSignUp ? "new-password" : "current-password"} required minLength={8} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} aria-describedby={isSignUp ? "password-help" : undefined} /><button className="auth-password-toggle" type="button" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "Hide" : "Show"}<span className="sr-only"> password</span></button></span>
             {isSignUp && <span className="auth-field-hint" id="password-help">Use at least 8 characters.</span>}
           </label>
           {isSignUp && <label className="auth-field">Confirm password
-            <span className="auth-password-wrap"><input name="confirmPassword" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" required minLength={8} maxLength={128} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} aria-invalid={confirmPassword.length > 0 && password !== confirmPassword} aria-describedby="confirm-password-help" /><button className="auth-password-toggle" type="button" aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword(value => !value)}>{showConfirmPassword ? "Hide" : "Show"}<span className="sr-only"> confirmation</span></button></span>
+            <span className="auth-password-wrap"><input ref={confirmInput} name="confirmPassword" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" required minLength={8} maxLength={128} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} aria-invalid={confirmPassword.length > 0 && password !== confirmPassword} aria-describedby="confirm-password-help" /><button className="auth-password-toggle" type="button" aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword(value => !value)}>{showConfirmPassword ? "Hide" : "Show"}<span className="sr-only"> confirmation</span></button></span>
             <span className={`auth-field-hint ${confirmPassword.length > 0 && password !== confirmPassword ? "auth-field-error" : ""}`} id="confirm-password-help" aria-live="polite">{confirmPassword.length > 0 && password !== confirmPassword ? "Passwords do not match." : "Enter the same password again."}</span>
           </label>}
           {error && <p className="auth-error" role="alert">{error}{signInInstead && <> <Link href="/sign-in">Sign in instead</Link></>}</p>}

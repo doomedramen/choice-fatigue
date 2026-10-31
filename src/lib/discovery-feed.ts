@@ -28,13 +28,37 @@ export function interleaveItems(groups: MediaItem[][]): MediaItem[] {
   return deduplicateTitles(items);
 }
 
+/**
+ * IDs always deduplicate. A matching title and known year only merges listings from different
+ * providers (the same scene on ThePornDB and StashDB); one provider's distinct IDs are distinct
+ * titles, such as a same-year remake, and an unknown year is never evidence of a match.
+ */
 export function deduplicateTitles(items: MediaItem[]) {
-  const ids = new Set<string>(), titles = new Set<string>();
+  const ids = new Set<string>(), titleProviders = new Map<string, string>();
   return items.filter(item => {
-    const key = `${item.category}:${item.title.trim().toLowerCase().replace(/\s+/g, " ")}:${item.year ?? "unknown-year"}`;
-    if (ids.has(item.id) || titles.has(key)) return false;
-    ids.add(item.id); titles.add(key); return true;
+    if (ids.has(item.id)) return false;
+    const provider = item.id.split("-")[0];
+    const key = item.year == null ? null : `${item.category}:${item.title.trim().toLowerCase().replace(/\s+/g, " ")}:${item.year}`;
+    if (key && titleProviders.has(key) && titleProviders.get(key) !== provider) return false;
+    ids.add(item.id);
+    if (key && !titleProviders.has(key)) titleProviders.set(key, provider);
+    return true;
   });
+}
+
+/** Milliseconds until the earliest failed source may be retried, or null when none is waiting. */
+export function feedRetryDelay(sources: FeedSourceStatus[], now = Date.now()): number | null {
+  const waiting = sources.filter(source => source.outcome === "unavailable" && source.retryAt !== null).map(source => source.retryAt! - now);
+  return waiting.length ? Math.max(0, Math.min(...waiting)) : null;
+}
+
+/**
+ * One non-blocking line for a deck that still has titles while a source is down or the latest page
+ * failed. A countdown would go stale between renders, so the retry is described, not timed.
+ */
+export function degradedFeedNotice(sources: FeedSourceStatus[], pageFailed = false): string {
+  if (!pageFailed && !sources.some(source => source.outcome === "unavailable")) return "";
+  return "A metadata source is temporarily unavailable. Showing the titles that loaded; more will be retried automatically.";
 }
 
 /** Independent source failures must not discard successful pages or advance failed cursors. */
@@ -72,8 +96,10 @@ export async function advanceFeedStreams(
     source: stream.source, lane: stream.lane, ...(stream.kind ? { kind: stream.kind } : {}),
     outcome: failed ? "unavailable" : items.length ? "ready" : "empty", retryAt: stream.retryAt,
   }));
-  const successfulSources = active.filter(result => !result.failed).length;
-  const outcome: FeedOutcome = !streams.length ? "unconfigured" : items.length ? "ready" : active.some(result => result.failed) ? "unavailable" : "empty";
+  // A selective refresh that only keeps existing lanes loaded nothing new, but those lanes are still healthy.
+  const keptSources = active.length ? 0 : next.filter((stream, index) => !stream.done && !shouldLoad(streams[index])).length;
+  const successfulSources = active.filter(result => !result.failed).length + keptSources;
+  const outcome: FeedOutcome = !streams.length ? "unconfigured" : items.length || keptSources ? "ready" : active.some(result => result.failed) ? "unavailable" : "empty";
   return {
     items, streams: next, sources,
     batches: active.filter(result => result.ids.length).map(({ stream, ids, fetchedPage, positions }) => ({ source: stream.source, lane: stream.lane, candidateIds: ids, ...(stream.lane === "related" ? { provenance: { seedItemId: stream.seedItemId!, seedEventId: stream.seedEventId!, endpoint: "recommendations" as const, page: fetchedPage, positions: ids.map((id, index) => positions?.[id] ?? index + 1) } } : {}) })),

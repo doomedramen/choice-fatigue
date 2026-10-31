@@ -11,12 +11,17 @@ export function recommendationEventBatch(events: RecommendationEventInput[], max
   return batch;
 }
 
+/**
+ * Settled events leave the outbox. Rejections are quarantined, except Adult events refused only
+ * because access is off right now: those are held and offered again once access returns.
+ */
 export function settleRecommendationBatch(batch: RecommendationEventInput[], acceptedIds: string[], rejected: RejectedRecommendationEvent[]) {
   const accepted = new Set(acceptedIds);
-  const rejectedIndices = new Set(rejected.map(event => event.index));
+  const codes = new Map(rejected.map(event => [event.index, event.code]));
   return {
     confirmed: batch.filter(event => accepted.has(event.id)),
-    quarantined: batch.filter((event, index) => !accepted.has(event.id) && rejectedIndices.has(index)),
-    remaining: batch.filter((event, index) => !accepted.has(event.id) && !rejectedIndices.has(index)),
+    held: batch.filter((event, index) => !accepted.has(event.id) && codes.get(index) === "adult_disabled"),
+    quarantined: batch.filter((event, index) => !accepted.has(event.id) && codes.has(index) && codes.get(index) !== "adult_disabled"),
+    remaining: batch.filter((event, index) => !accepted.has(event.id) && !codes.has(index)),
   };
 }

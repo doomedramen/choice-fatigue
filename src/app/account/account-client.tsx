@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth-client";
 import { buildRecommendationProfile, recommendationPreferenceProfile, type RecommendationFeatures, type RecommendationSignal } from "@/lib/recommendations";
 import type { RecommendationEventInput } from "@/lib/recommendation-event-validation";
+import { ConfirmDialog } from "@/app/modal";
 import "./account.css";
 
 type PreferenceCategory = "Movies" | "Shows" | "Adult";
@@ -90,6 +91,7 @@ export default function AccountClient({ userId, name, email, isAdmin }: { userId
   const [resettingRecommendations, setResettingRecommendations] = useState(false);
   const [recommendationNotice, setRecommendationNotice] = useState("");
   const [profileRevision, setProfileRevision] = useState(0);
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const canDelete = password.length > 0 && confirmation === "DELETE" && !pending;
 
   async function deleteAccount(event: FormEvent<HTMLFormElement>) {
@@ -114,14 +116,17 @@ export default function AccountClient({ userId, name, email, isAdmin }: { userId
   }
 
   async function clearRecommendationHistory() {
-    if (!window.confirm("Clear your recommendation history? Saved titles and your shortlist will be kept, but will stop shaping your preferences.")) return;
+    setConfirmingClear(false);
     setResettingRecommendations(true);
     setRecommendationNotice("");
     try {
       const response = await fetch("/api/recommendation-events", { method: "DELETE" });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "Recommendation history could not be cleared.");
-      try { localStorage.removeItem(`choice-fatigue-learning-v3-${userId}`); } catch { /* Local storage is optional. */ }
+      try {
+        localStorage.removeItem(`choice-fatigue-learning-v3-${userId}`);
+        localStorage.removeItem(`choice-fatigue-learning-held-${userId}`);
+      } catch { /* Local storage is optional. */ }
       setProfileRevision(revision => revision + 1);
       setRecommendationNotice("Saved recommendation history cleared. New choices will build a fresh profile.");
     } catch (cause) {
@@ -138,7 +143,7 @@ export default function AccountClient({ userId, name, email, isAdmin }: { userId
       <section className="account-panel" aria-labelledby="profile-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PROFILE DETAILS</p><h2 id="profile-title">Your information</h2></div></div><dl className="profile-details"><div><dt>Name</dt><dd>{name}</dd></div><div><dt>Email address</dt><dd>{email}</dd></div></dl></section>
       <TasteProfile revision={profileRevision} />
       <section className="account-panel" aria-labelledby="data-title"><div className="account-panel-heading"><div><p className="account-eyebrow">YOUR DATA</p><h2 id="data-title">Take your choices with you</h2><p>Download a copy of your profile and discovery data.</p></div></div><a className="account-download" href="/api/account/export">Download my data <span aria-hidden="true">↓</span></a></section>
-      <section className="account-panel" aria-labelledby="recommendation-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PERSONALISATION</p><h2 id="recommendation-title">Recommendation history</h2><p>Earlier choices help shape future sessions. Adult choices are kept separate from Movies and Shows.</p></div></div><button className="account-download" type="button" onClick={() => void clearRecommendationHistory()} disabled={resettingRecommendations}>{resettingRecommendations ? "Clearing…" : "Clear recommendation history"}</button>{recommendationNotice && <p role="status" className="account-success">{recommendationNotice}</p>}</section>
+      <section className="account-panel" aria-labelledby="recommendation-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PERSONALISATION</p><h2 id="recommendation-title">Recommendation history</h2><p>Earlier choices help shape future sessions. Adult choices are kept separate from Movies and Shows.</p></div></div><button className="account-download" type="button" onClick={() => setConfirmingClear(true)} disabled={resettingRecommendations}>{resettingRecommendations ? "Clearing…" : "Clear recommendation history"}</button>{recommendationNotice && <p role="status" className="account-success">{recommendationNotice}</p>}</section>
       <section className="account-panel" aria-labelledby="connections-title"><div className="account-panel-heading"><div><p className="account-eyebrow">INSTANCE SERVICES</p><h2 id="connections-title">Shared services</h2><p>Media services are configured for this instance and shared with all accounts.</p></div></div>{isAdmin && <Link className="account-download" href="/admin?section=services">Manage services <span aria-hidden="true">→</span></Link>}</section>
       <section className="account-danger" aria-labelledby="delete-title"><div className="account-panel-heading"><div><p className="account-eyebrow">DANGER ZONE</p><h2 id="delete-title">Delete your account</h2><p>This permanently deletes your account and saved discovery data. You’ll be signed out immediately.</p></div></div><form className="delete-form" onSubmit={deleteAccount}>
         <label className="account-field">Confirm your password<input type="password" name="password" autoComplete="current-password" required value={password} onChange={event=>setPassword(event.target.value)} /></label>
@@ -147,5 +152,6 @@ export default function AccountClient({ userId, name, email, isAdmin }: { userId
         <button className="account-delete-button" type="submit" disabled={!canDelete}>{pending ? "Deleting account…" : "Permanently delete account"}</button>
       </form></section>
     </main>
+    {confirmingClear && <ConfirmDialog title="Clear recommendation history?" body="Saved titles and your shortlist are kept, but they will stop shaping your preferences." confirmLabel="Clear history" onConfirm={() => void clearRecommendationHistory()} onCancel={() => setConfirmingClear(false)} />}
   </div>;
 }

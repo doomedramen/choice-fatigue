@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isValidRecommendationEvent, partitionRecommendationEvents, recommendationEventMatchesCategory, recommendationProviderCategoryForId, type RecommendationEventInput } from "../src/lib/recommendation-event-validation";
+import { invalidUndoTargetIds, isValidRecommendationEvent, partitionRecommendationEvents, recommendationEventMatchesCategory, recommendationProviderCategoryForId, type RecommendationEventInput } from "../src/lib/recommendation-event-validation";
 import { recommendationEventBatch, settleRecommendationBatch } from "../src/lib/recommendation-outbox";
 
 const base: RecommendationEventInput = { id: "event-1", sessionId: "session-1", reviewId: null, sequence: 1, itemId: null, category: "Movies", eventType: "candidate_batch", decision: null, rating: null, targetEventId: null, algorithmVersion: "content-v3", occurredAt: "2026-10-31T10:00:00.000Z", retrievalId: "fetch-1", source: "tmdb", lane: "popular", candidateIds: ["tmdb-movie-12", "tmdb-movie-13"] };
 const decision: RecommendationEventInput = { ...base, id: "decision", eventType: "decision", itemId: "tmdb-movie-12", decision: "keep", candidateIds: null, retrievalId: null, source: null, lane: null };
+const receivedAt = Date.parse("2026-10-31T10:01:00.000Z");
 
 test("accepts v3 source batches and actual shown order; rejects old contracts and metadata", () => {
   assert.equal(isValidRecommendationEvent(base), true);
@@ -23,10 +24,33 @@ test("strict provider IDs prevent category mixing", () => {
 });
 test("an invalid trace or disabled Adult event cannot block valid decisions", () => {
   const invalid = { ...base, candidateIds: Array.from({ length: 120 }, (_, i) => `tmdb-movie-${i + 1}`) };
-  const adult = { ...decision, id: "adult", category: "Adult", itemId: "stashdb-abc" };
-  const partition = partitionRecommendationEvents([invalid, decision, adult], false);
+  const current = { ...decision, algorithmVersion: "content-v7" as const };
+  const adult = { ...current, id: "adult", category: "Adult", itemId: "stashdb-abc" };
+  const partition = partitionRecommendationEvents([invalid, current, adult], false, receivedAt);
   assert.deepEqual(partition.accepted.map(event => event.id), ["decision"]);
   assert.deepEqual(partition.rejected.map(event => event.code), ["invalid", "adult_disabled"]);
+});
+
+test("writes accept only current versions and timestamps near receipt", () => {
+  const write = (overrides: Partial<RecommendationEventInput>) => partitionRecommendationEvents([{ ...decision, algorithmVersion: "content-v7", ...overrides }], false, receivedAt).rejected.map(event => event.code);
+  assert.deepEqual(write({}), []);
+  assert.deepEqual(write({ algorithmVersion: "content-v6" }), []);
+  assert.deepEqual(write({ algorithmVersion: "content-v3" }), ["version"]);
+  assert.deepEqual(write({ occurredAt: "2027-01-01T00:00:00.000Z" }), ["occurred_at_out_of_range"]);
+  assert.deepEqual(write({ occurredAt: "2026-08-01T00:00:00.000Z" }), ["occurred_at_out_of_range"]);
+  assert.equal(isValidRecommendationEvent({ ...decision, algorithmVersion: "content-v3" }), true, "older history stays readable");
+});
+
+test("save withdrawal names a title; undo must target the same title's decision", () => {
+  const withdrawn = { ...decision, id: "withdraw", eventType: "save_withdrawn" as const, decision: null };
+  assert.equal(isValidRecommendationEvent(withdrawn), true);
+  assert.equal(isValidRecommendationEvent({ ...withdrawn, itemId: null }), false);
+  const undo = { ...decision, id: "undo", eventType: "decision_undone" as const, decision: null, targetEventId: "decision" };
+  assert.deepEqual([...invalidUndoTargetIds([decision, undo], [])], [], "the target may arrive earlier in the same batch");
+  assert.deepEqual([...invalidUndoTargetIds([undo], [{ id: "decision", itemId: "tmdb-movie-12", eventType: "decision" }])], []);
+  assert.deepEqual([...invalidUndoTargetIds([undo], [{ id: "decision", itemId: "tmdb-movie-99", eventType: "decision" }])], ["undo"]);
+  assert.deepEqual([...invalidUndoTargetIds([undo], [{ id: "decision", itemId: "tmdb-movie-12", eventType: "saved" }])], ["undo"]);
+  assert.deepEqual([...invalidUndoTargetIds([undo], [])], ["undo"]);
 });
 test("outbox byte limits and partial acknowledgement allow later events to proceed", () => {
   const events = [base, decision];
@@ -37,6 +61,9 @@ test("outbox byte limits and partial acknowledgement allow later events to proce
   assert.deepEqual(result.quarantined, [base]);
   assert.deepEqual(result.remaining, []);
   assert.deepEqual(settleRecommendationBatch(events, [], []).remaining, events);
+  const held = settleRecommendationBatch(events, [], [{ id: decision.id, index: 1, code: "adult_disabled" }]);
+  assert.deepEqual(held.held, [decision], "Adult events refused while access is off are kept for later");
+  assert.deepEqual(held.quarantined, []);
 });
 
 test("ten-point ratings use v4 while queued v3 ratings retain their original range", () => {

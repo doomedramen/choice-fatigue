@@ -15,6 +15,27 @@ test("compares provider and ranker order against the same saved and shortlisted 
   assert.equal(result.providerOrder.saved.labeledTraces, 1);
 });
 
+test("reports a seeded random floor, kept-over-passed accuracy, and session-level intervals", () => {
+  const rows = Array.from({ length: 40 }, (_, index) => ({
+    providerOrder: Array.from({ length: 10 }, (_, rank) => `t${index}-${rank}`),
+    rankerOrder: [`t${index}-9`, ...Array.from({ length: 9 }, (_, rank) => `t${index}-${rank}`)],
+    shortlisted: [`t${index}-9`], saved: [], passed: [`t${index}-0`], sessionId: `s${index % 8}`,
+  }));
+  const first = compareRankings(rows, 7);
+  assert.deepEqual(compareRankings(rows, 7), first, "the same seed reproduces every number");
+  assert.equal(first.currentRanker.shortlisted.meanReciprocalRank, 1);
+  assert.equal(first.providerOrder.shortlisted.meanReciprocalRank, 0.1);
+  const random = first.randomOrder.shortlisted.meanReciprocalRank!;
+  assert.ok(random > 0.1 && random < 0.6, `a uniform shuffle lands near the expected 0.29, got ${random}`);
+  assert.equal(first.keptOverPassedAccuracy.currentRanker, 1);
+  assert.equal(first.keptOverPassedAccuracy.providerOrder, 0);
+  assert.deepEqual(first.shortlistedMeanReciprocalRank95.currentRanker, [1, 1]);
+  const [low, high] = first.shortlistedMeanReciprocalRank95.randomOrder!;
+  assert.ok(low <= random && random <= high);
+  assert.equal(compareRankings(rows.slice(0, 1)).shortlistedMeanReciprocalRank95.currentRanker, null, "one session is too few to resample");
+  assert.ok(first.exposureWeightedShortlistRecallAt10.currentRanker! >= first.exposureWeightedShortlistRecallAt10.providerOrder!);
+});
+
 test("reports missing relevant titles as zero coverage instead of inventing a score", () => {
   const result = compareRankings([
     { providerOrder: ["a"], rankerOrder: ["a"], shortlisted: ["missing"], saved: [] },

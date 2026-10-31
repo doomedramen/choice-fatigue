@@ -11,7 +11,7 @@ export interface RecommendationHistoryEvent {
 
 export function recommendationComparisonsFromHistory(events: RecommendationHistoryEvent[], category?: string): Array<Pick<RecommendationComparison, "preferredItemId" | "removedItemId">> {
   const reviews = new Map<string, { removed: Map<string, boolean>; saved: Set<string> }>();
-  for (const event of events) {
+  for (const event of effectiveRecommendationEvents(events)) {
     if ((category && event.category !== category) || !event.reviewId) continue;
     let review = reviews.get(event.reviewId);
     if (!review) {
@@ -28,8 +28,10 @@ export function recommendationComparisonsFromHistory(events: RecommendationHisto
   for (const review of [...reviews.values()].reverse()) {
     const preferred = [...review.saved];
     const removed = [...review.removed].filter(([, isRemoved]) => isRemoved).map(([itemId]) => itemId);
-    for (const preferredItemId of preferred) {
-      for (const removedItemId of removed) {
+    // Round-robin so the pair cap samples every saved title before any gets a second comparison.
+    for (let round = 0; round < removed.length; round++) {
+      for (const [index, preferredItemId] of preferred.entries()) {
+        const removedItemId = removed[(index + round) % removed.length];
         if (preferredItemId !== removedItemId) comparisons.push({ preferredItemId, removedItemId });
         if (comparisons.length >= 24) return comparisons;
       }
@@ -38,20 +40,46 @@ export function recommendationComparisonsFromHistory(events: RecommendationHisto
   return comparisons;
 }
 
-export function recommendationSignalsFromHistory(events: RecommendationHistoryEvent[], category?: string): RecommendationSignal[] {
-  const history = events.filter(event => (!category || event.category === category));
-  const withdrawn = new Set(history
-    .filter(event => event.eventType === "decision_undone")
-    .map(event => event.targetEventId)
-    .filter((id): id is string => Boolean(id)));
-  // Review removal changes the shortlist, but does not erase the original first-impression signal.
-  const decisions = history
-    .filter(event => event.eventType === "decision" && event.itemId && (event.decision === "keep" || event.decision === "pass" || event.decision === "seen") && !withdrawn.has(event.id))
-    .map(event => ({ itemId: event.itemId!, decision: event.decision as RecommendationDecision, rating: event.rating == null ? undefined : event.algorithmVersion === "content-v3" ? event.rating * 2 : event.rating }));
-  const savedItemIds = new Set(history.filter(event => event.eventType === "saved" && event.itemId).map(event => event.itemId!));
-  const retention = [...savedItemIds].map(itemId => ({ itemId, decision: "keep" as const, weight: 1.5 }));
-  return [...decisions, ...retention];
+/** Ratings recorded on the five-point v3 scale are read on the current ten-point scale. */
+export function normalizedRating(event: Pick<RecommendationHistoryEvent, "rating" | "algorithmVersion">): number | undefined {
+  if (event.rating == null) return undefined;
+  return event.algorithmVersion === "content-v3" ? event.rating * 2 : event.rating;
 }
+
+/**
+ * Apply corrections once so the ranker, retrieval seeds, and replay agree on what still counts:
+ * an undone decision is dropped, as is a save whose originating decision was undone or that was
+ * later withdrawn. The correction events themselves are removed. Safe to apply more than once.
+ */
+export function effectiveRecommendationEvents<T extends RecommendationHistoryEvent>(events: T[]): T[] {
+  const ordered = mergeRecommendationEvents(events);
+  const undone = new Set(ordered.flatMap(event => event.eventType === "decision_undone" && event.targetEventId ? [event.targetEventId] : []));
+  const lastWithdrawal = new Map<string, number>();
+  ordered.forEach((event, index) => { if (event.eventType === "save_withdrawn" && event.itemId) lastWithdrawal.set(event.itemId, index); });
+  return ordered.filter((event, index) => {
+    if (event.eventType === "decision_undone" || event.eventType === "save_withdrawn") return false;
+    if (event.eventType === "decision") return !undone.has(event.id);
+    if (event.eventType === "saved") return !(event.targetEventId && undone.has(event.targetEventId)) && !(event.itemId && (lastWithdrawal.get(event.itemId) ?? -1) > index);
+    return true;
+  });
+}
+
+export function recommendationSignalsFromHistory(events: RecommendationHistoryEvent[], category?: string): RecommendationSignal[] {
+  const history = effectiveRecommendationEvents(events.filter(event => (!category || event.category === category)));
+  // Review removal changes the shortlist, but does not erase the original first-impression signal.
+  // One title is one piece of evidence: the latest decision wins, and saving lifts it to the retention weight.
+  const latest = new Map<string, RecommendationSignal>();
+  for (const event of history) if (event.eventType === "decision" && event.itemId && (event.decision === "keep" || event.decision === "pass" || event.decision === "seen")) {
+    latest.delete(event.itemId);
+    latest.set(event.itemId, { itemId: event.itemId, decision: event.decision, rating: normalizedRating(event) });
+  }
+  const savedItemIds = new Set(history.filter(event => event.eventType === "saved" && event.itemId).map(event => event.itemId!));
+  for (const itemId of savedItemIds) if (!latest.has(itemId)) latest.set(itemId, { itemId, decision: "keep" });
+  return [...latest.values()].map(signal => savedItemIds.has(signal.itemId) ? { itemId: signal.itemId, decision: "keep" as const, weight: savedRetentionWeight } : signal);
+}
+
+/** A saved title survived the second look; it outweighs a first-impression keep but still counts once. */
+export const savedRetentionWeight = 1.5;
 
 export const recommendationWeights: Record<Exclude<RecommendationDecision, "seen">, number> = {
   keep: 1,
@@ -70,14 +98,39 @@ export interface RecommendationPreference {
   evidenceCount: number;
 }
 
-/** Summarize the same shrunken feature evidence used by the ranker. */
-export function recommendationPreferenceProfile(signals: RecommendationSignal[]): RecommendationPreference[] {
+function signalWeight(signal: RecommendationSignal): number | undefined {
+  const decisionWeight = signal.decision === "seen"
+    ? reviewRatingWeights[signal.rating ?? 0]
+    : recommendationWeights[signal.decision];
+  return decisionWeight === undefined ? undefined : signal.weight ?? decisionWeight;
+}
+
+const neutralPriorStrength = 2;
+const minimumBaselineSignals = 5;
+
+/**
+ * The user's average signal weight. Swipe decks are mostly passes, so scoring features against zero
+ * would rank every unseen genre above one the user keeps at their usual rate. Below a handful of
+ * signals the baseline is too noisy to trust and stays neutral.
+ */
+export function recommendationBaseline(signals: RecommendationSignal[]): number {
+  const weights = signals.map(signalWeight).filter((weight): weight is number => weight !== undefined);
+  return weights.length >= minimumBaselineSignals ? weights.reduce((sum, weight) => sum + weight, 0) / weights.length : 0;
+}
+
+function shrunkenScore(evidence: FeatureEvidence, baseline: number) {
+  return (evidence.total - evidence.count * baseline) / (evidence.count + neutralPriorStrength);
+}
+
+/**
+ * Summarize the same shrunken feature evidence used by the ranker. Retrieval passes no baseline,
+ * because it asks which features are liked at all; ranking passes the user's baseline, because it
+ * asks which features beat their usual rate.
+ */
+export function recommendationPreferenceProfile(signals: RecommendationSignal[], baseline = 0): RecommendationPreference[] {
   const evidenceByFeature = new Map<string, FeatureEvidence>();
   for (const signal of signals) {
-    const decisionWeight = signal.decision === "seen"
-      ? reviewRatingWeights[signal.rating ?? 0]
-      : recommendationWeights[signal.decision];
-    const weight = signal.weight ?? decisionWeight;
+    const weight = signalWeight(signal);
     if (weight === undefined) continue;
     for (const key of signal.featureKeys ?? []) {
       const evidence = evidenceByFeature.get(key) ?? { total: 0, count: 0 };
@@ -88,7 +141,7 @@ export function recommendationPreferenceProfile(signals: RecommendationSignal[])
   }
   return [...evidenceByFeature].map(([key, evidence]) => ({
     key,
-    score: evidence.total / (evidence.count + 2),
+    score: shrunkenScore(evidence, baseline),
     evidenceCount: evidence.count,
   })).sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
 }
@@ -140,19 +193,16 @@ export function rankRecommendations(
   relatedRanks: Record<string, number> = {},
 ) {
   const featureEvidence = new Map<string, FeatureEvidence>();
-  let signalCount = 0;
+  const countedSignals: RecommendationSignal[] = [];
 
   const itemById = new Map(items.map(item => [item.id, item]));
   for (const signal of historicalSignals) {
     const item = itemById.get(signal.itemId);
     const features = item ? featuresFor(item) : (signal.featureKeys ?? []).map(key => ({ key, weight: featureWeight(key) }));
     if (!features.length) continue;
-    const decisionWeight = signal.decision === "seen"
-      ? reviewRatingWeights[signal.rating ?? 0]
-      : recommendationWeights[signal.decision];
-    if (decisionWeight === undefined) continue;
-    const weight = signal.weight ?? decisionWeight;
-    signalCount += 1;
+    const weight = signalWeight(signal);
+    if (weight === undefined) continue;
+    countedSignals.push(signal);
     for (const feature of features) {
       const evidence = featureEvidence.get(feature.key) ?? { total: 0, count: 0 };
       evidence.total += weight;
@@ -161,12 +211,10 @@ export function rankRecommendations(
     }
   }
 
-  const credits = creditPreferences(historicalSignals);
-  const neutralPriorStrength = 2;
-  const featureScores = new Map([...featureEvidence].map(([feature, evidence]) => [
-    feature,
-    evidence.total / (evidence.count + neutralPriorStrength),
-  ]));
+  const signalCount = countedSignals.length;
+  const baseline = recommendationBaseline(countedSignals);
+  const credits = creditPreferences(historicalSignals, recommendationBaseline(historicalSignals));
+  const featureScores = new Map([...featureEvidence].map(([feature, evidence]) => [feature, shrunkenScore(evidence, baseline)]));
 
   const comparisons = historicalComparisons.map(comparison => ({
     preferred: itemById.has(comparison.preferredItemId)
@@ -192,9 +240,9 @@ export function rankRecommendations(
     .map((item, originalIndex) => {
       const features = featuresFor(item);
       const featureKeys = new Set(features.map(feature => feature.key));
-      const featureWeight = features.reduce((total, feature) => total + feature.weight, 0);
-      const preferenceScore = featureWeight
-        ? features.reduce((total, feature) => total + (featureScores.get(feature.key) ?? 0) * feature.weight, 0) / featureWeight
+      const featureWeightTotal = features.reduce((total, feature) => total + feature.weight, 0);
+      const preferenceScore = featureWeightTotal
+        ? features.reduce((total, feature) => total + (featureScores.get(feature.key) ?? 0) * feature.weight, 0) / featureWeightTotal
         : 0;
       const relativeReviewScore = comparisons.length
         ? comparisons.reduce((total, comparison) => total + similarity(featureKeys, comparison.preferred) - similarity(featureKeys, comparison.removed), 0) / comparisons.length
@@ -265,15 +313,14 @@ export function shownCandidateIds(itemId: string, remainingIds: string[]): strin
 
 
 export function relatedShowSeeds(events: RecommendationHistoryEvent[]) {
-  const rows = mergeRecommendationEvents(events).filter(event => event.category === "Shows");
-  const undone = new Set(rows.filter(event => event.eventType === "decision_undone").map(event => event.targetEventId));
+  const rows = effectiveRecommendationEvents(events.filter(event => event.category === "Shows"));
   const latestRating = new Map<string, number>();
-  for (const event of rows) if (event.itemId && event.eventType === "decision" && event.decision === "seen" && event.rating != null && !undone.has(event.id)) latestRating.set(event.itemId, event.algorithmVersion === "content-v3" ? event.rating * 2 : event.rating);
+  for (const event of rows) if (event.itemId && event.eventType === "decision" && event.decision === "seen" && event.rating != null) latestRating.set(event.itemId, normalizedRating(event)!);
   const rated: Array<{ itemId: string; eventId: string }> = [], saved: Array<{ itemId: string; eventId: string }> = [];
   for (const event of [...rows].reverse()) {
     if (!event.itemId || !/^tmdb-tv-[1-9]\d*$/.test(event.itemId) || (latestRating.get(event.itemId) ?? 10) <= 5) continue;
-    if (event.eventType === "decision" && event.decision === "seen" && !undone.has(event.id) && (latestRating.get(event.itemId) ?? 0) >= 8 && (event.algorithmVersion === "content-v3" ? (event.rating ?? 0) * 2 : event.rating ?? 0) === latestRating.get(event.itemId)) rated.push({ itemId: event.itemId, eventId: event.id });
-    if (event.eventType === "saved" && !(event.targetEventId && undone.has(event.targetEventId))) saved.push({ itemId: event.itemId, eventId: event.id });
+    if (event.eventType === "decision" && event.decision === "seen" && (latestRating.get(event.itemId) ?? 0) >= 8 && normalizedRating(event) === latestRating.get(event.itemId)) rated.push({ itemId: event.itemId, eventId: event.id });
+    if (event.eventType === "saved") saved.push({ itemId: event.itemId, eventId: event.id });
   }
   const selected: Array<{ itemId: string; eventId: string }> = [];
   const distinctSaved = saved.find(seed => seed.itemId !== rated[0]?.itemId);

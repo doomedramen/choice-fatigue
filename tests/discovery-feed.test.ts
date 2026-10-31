@@ -1,12 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceFeedStreams, interleaveItems, reconcileFeedStreams, type FeedStream } from "../src/lib/discovery-feed";
+import { advanceFeedStreams, deduplicateTitles, degradedFeedNotice, feedRetryDelay, interleaveItems, reconcileFeedStreams, type FeedStream } from "../src/lib/discovery-feed";
 import { retryAfterTime, requestProviderJson, ProviderRequestError } from "../src/lib/providers/request";
 import type { MediaItem } from "../src/data";
 const item = (id: string): MediaItem => ({ id, title: id, type: "Movie", runtime: "—", rating: "—", genre: [], synopsis: "", category: "Movies", palette: ["", "", ""], art: "mist", label: id });
 const stream = (source: FeedStream["source"], lane: FeedStream["lane"] = "popular"): FeedStream => ({ source, lane, page: 1, features: lane === "popular" ? [] : ["genre:drama"], done: false, retryAt: null, fingerprint: null });
 test("mixes lanes deterministically and deduplicates matching IDs/titles", () => {
   assert.deepEqual(interleaveItems([[item("a"), item("b")], [item("c"), item("a")]]).map(row => row.id), ["a", "c", "b"]);
+});
+test("title matching only merges cross-provider listings with a known year", () => {
+  const titled = (id: string, title: string, year?: number, category: MediaItem["category"] = "Movies"): MediaItem => ({ ...item(id), title, year, category });
+  assert.deepEqual(deduplicateTitles([titled("tmdb-movie-1", "Solaris", 2002), titled("tmdb-movie-2", "Solaris", 2002)]).map(row => row.id), ["tmdb-movie-1", "tmdb-movie-2"], "a provider's distinct IDs are distinct titles");
+  assert.deepEqual(deduplicateTitles([titled("stashdb-a", "Scene", undefined, "Adult"), titled("theporndb-b", "Scene", undefined, "Adult")]).length, 2, "an unknown year never matches");
+  assert.deepEqual(deduplicateTitles([titled("stashdb-a", "Scene", 2020, "Adult"), titled("theporndb-b", "Scene", 2020, "Adult")]).map(row => row.id), ["stashdb-a"]);
+  assert.deepEqual(deduplicateTitles([titled("tmdb-movie-1", "Solaris", 2002), titled("tmdb-movie-1", "Solaris", 2002)]).length, 1);
+});
+test("a failed page waits only for its own cooldown, and the deck shows one notice", () => {
+  const source = (outcome: "ready" | "unavailable", retryAt: number | null) => ({ source: "tmdb" as const, lane: "popular" as const, outcome, retryAt });
+  assert.equal(feedRetryDelay([source("ready", null)], 1000), null);
+  assert.equal(feedRetryDelay([source("unavailable", 5000), source("unavailable", 3000)], 1000), 2000);
+  assert.equal(feedRetryDelay([source("unavailable", 500)], 1000), 0, "an elapsed cooldown is due now");
+  assert.equal(degradedFeedNotice([source("ready", null)]), "");
+  assert.match(degradedFeedNotice([source("unavailable", 5000)]), /temporarily unavailable/);
+  assert.match(degradedFeedNotice([source("ready", null)], true), /temporarily unavailable/, "a failed page on a healthy-looking feed still explains itself");
+});
+test("a refresh that keeps every lane reports them as healthy rather than empty", async () => {
+  const result = await advanceFeedStreams([stream("tmdb")], async () => ({ items: [item("x")], hasMore: true }), ids => ids.join(","), Date.now(), () => false);
+  assert.equal(result.status.outcome, "ready");
+  assert.equal(result.status.successfulSources, 1);
 });
 test("refresh preserves unchanged lanes and restarts only changed queries", () => {
   const existing = [{ ...stream("tmdb"), page: 3, retryAt: 100 }, { ...stream("tmdb", "person"), features: ["actor:1"], page: 4 }];

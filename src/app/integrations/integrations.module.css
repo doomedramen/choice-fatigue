@@ -1,14 +1,14 @@
 .page { min-height:100vh; background:#0c101b; color:#f6f7fb; }
 .adminEmbedded { width:100%; margin:0; padding:0; color:#f6f7fb; }
 .header { display:flex; min-height:68px; align-items:center; justify-content:space-between; gap:16px; padding:0 20px; border-bottom:1px solid #303a50; background:#101624; }
-.brand { display:inline-flex; align-items:center; gap:9px; color:#fff; font-family:"Manrope",sans-serif; font-size:19px; font-weight:800; letter-spacing:-.7px; text-decoration:none; }
+.brand { display:inline-flex; align-items:center; gap:9px; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:19px; font-weight:800; letter-spacing:-.7px; text-decoration:none; }
 .brand span { display:grid; width:31px; height:31px; place-items:center; border-radius:10px; background:#754cf7; font-size:19px; }
 .back { color:#c8bbff; font-size:14px; font-weight:700; text-decoration:none; }
 .main { width:min(100% - 32px, 780px); margin:0 auto; padding:34px 0 72px; }
 .intro { margin-bottom:22px; }
 .eyebrow { margin:0 0 8px; color:#b9a5ff; font-size:11px; font-weight:800; letter-spacing:1.2px; }
-.intro h1 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:clamp(34px,7vw,46px); font-weight:800; line-height:1.08; letter-spacing:-1.4px; }
-.adminEmbedded .intro h2 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:clamp(27px,5vw,36px); font-weight:800; line-height:1.08; letter-spacing:-1px; }
+.intro h1 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:clamp(34px,7vw,46px); font-weight:800; line-height:1.08; letter-spacing:-1.4px; }
+.adminEmbedded .intro h2 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:clamp(27px,5vw,36px); font-weight:800; line-height:1.08; letter-spacing:-1px; }
 .intro>p:last-child { max-width:620px; margin:10px 0 0; color:#bac2d2; font-size:15px; line-height:1.5; }
 .noticePanel { display:grid; grid-template-columns:38px minmax(0,1fr); gap:12px; margin:20px 0 15px; padding:16px; border:1px solid #5a4c85; border-radius:12px; background:#211b36; }
 .lockIcon { display:grid; width:36px; height:36px; place-items:center; border:1px solid #645496; border-radius:10px; background:#30264e; color:#ded4ff; }
@@ -17,9 +17,9 @@
 .noticePanel p { margin:5px 0 0; color:#d3cbea; font-size:13px; line-height:1.5; }
 .panel,.connections { margin-top:15px; padding:20px; border:1px solid #354158; border-radius:13px; background:#151d2c; }
 .panelHead { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-.panelHead h2 { display:flex; align-items:center; gap:8px; margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:21px; font-weight:800; letter-spacing:-.4px; }
-.panelHead h3 { display:flex; align-items:center; gap:8px; margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:21px; font-weight:800; letter-spacing:-.4px; }
-.count { display:inline-grid; min-width:24px; height:24px; place-items:center; padding:0 5px; border-radius:7px; background:#302551; color:#d7cbff; font-family:"DM Sans",sans-serif; font-size:12px; }
+.panelHead h2 { display:flex; align-items:center; gap:8px; margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:21px; font-weight:800; letter-spacing:-.4px; }
+.panelHead h3 { display:flex; align-items:center; gap:8px; margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:21px; font-weight:800; letter-spacing:-.4px; }
+.count { display:inline-grid; min-width:24px; height:24px; place-items:center; padding:0 5px; border-radius:7px; background:#302551; color:#d7cbff; font-family:var(--font-dm-sans),sans-serif; font-size:12px; }
 .cancelButton { min-height:38px; padding:0 10px; border:1px solid #46536a; border-radius:8px; background:#202a3d; color:#e8eaf1; font-size:12px; font-weight:800; }
 .form { display:grid; gap:15px; margin-top:19px; }
 .field { display:grid; gap:7px; color:#eff2f8; font-size:14px; font-weight:800; }
@@ -41,7 +41,7 @@
 .connection { display:grid; gap:13px; padding:13px; border:1px solid #3b4760; border-radius:10px; background:#1a2333; }
 .connectionBody { min-width:0; }
 .connectionTitle { display:flex; min-width:0; align-items:center; gap:10px; }
-.serviceMark { display:grid; flex:0 0 auto; width:35px; height:35px; place-items:center; border-radius:9px; background:#302551; color:#d8ccff; font-family:"Manrope",sans-serif; font-size:16px; font-weight:900; }
+.serviceMark { display:grid; flex:0 0 auto; width:35px; height:35px; place-items:center; border-radius:9px; background:#302551; color:#d8ccff; font-family:var(--font-manrope),sans-serif; font-size:16px; font-weight:900; }
 .connectionTitle h3 { overflow:hidden; margin:0; color:#fff; font-size:15px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
 .connectionTitle h4 { overflow:hidden; margin:0; color:#fff; font-size:15px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
 .connectionTitle p { margin:4px 0 0; color:#b7c1d2; font-size:12px; }
@@ -56,7 +56,7 @@
 .status { min-height:20px; margin:12px 2px 0; color:#bce9c9; font-size:13px; }
 .nextStep { margin:0; padding:14px 2px 0; border-top:1px solid #2d374b; color:#8d9ab0; font-size:12px; line-height:1.5; }
 .futurePanel { margin-top:15px; padding:17px 20px; border:1px dashed #46536a; border-radius:12px; background:#121a29; }
-.futurePanel h2 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:18px; font-weight:800; }
+.futurePanel h2 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:18px; font-weight:800; }
 .futurePanel>p:last-child { max-width:620px; margin:7px 0 0; color:#aebbd0; font-size:13px; line-height:1.5; }
 
 @media (min-width:640px) {

@@ -1,17 +1,17 @@
 .account-page { min-height:100vh; background:#0c101b; color:#f6f7fb; }
 .account-header { display:flex; min-height:68px; align-items:center; justify-content:space-between; gap:16px; padding:0 20px; border-bottom:1px solid #303a50; background:#101624; }
-.account-brand { display:inline-flex; align-items:center; gap:9px; color:#fff; font-family:"Manrope",sans-serif; font-size:19px; font-weight:800; letter-spacing:-.7px; text-decoration:none; }
+.account-brand { display:inline-flex; align-items:center; gap:9px; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:19px; font-weight:800; letter-spacing:-.7px; text-decoration:none; }
 .account-brand span { display:grid; width:31px; height:31px; place-items:center; border-radius:10px; background:#754cf7; font-size:19px; }
 .account-back { color:#c8bbff; font-size:14px; font-weight:700; text-decoration:none; }
 .account-main { width:min(100% - 32px, 760px); margin:0 auto; padding:34px 0 72px; }
 .account-heading { margin-bottom:24px; }
 .account-eyebrow { margin:0 0 8px; color:#b9a5ff; font-size:11px; font-weight:800; letter-spacing:1.2px; }
-.account-heading h1 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:clamp(34px,7vw,46px); font-weight:800; line-height:1.08; letter-spacing:-1.4px; }
+.account-heading h1 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:clamp(34px,7vw,46px); font-weight:800; line-height:1.08; letter-spacing:-1.4px; }
 .account-heading>p:last-child,.account-panel-heading>div>p:last-child { margin:10px 0 0; color:#bac2d2; font-size:15px; line-height:1.5; }
 .account-panel,.account-danger { margin-top:14px; padding:20px; border:1px solid #354158; border-radius:13px; background:#151d2c; }
 .account-danger { border-color:#71434e; background:#211a25; }
 .account-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-.account-panel-heading h2 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:21px; font-weight:800; letter-spacing:-.4px; }
+.account-panel-heading h2 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:21px; font-weight:800; letter-spacing:-.4px; }
 .profile-details { display:grid; gap:0; margin:18px 0 0; border-top:1px solid #344056; }
 .profile-details>div { display:grid; grid-template-columns:120px minmax(0,1fr); gap:12px; padding:13px 0; border-bottom:1px solid #344056; }
 .profile-details dt { color:#aebbd0; font-size:14px; font-weight:700; }
@@ -20,7 +20,7 @@
 .taste-profile-categories { display:grid; gap:12px; margin-top:18px; }
 .taste-category { min-width:0; padding:16px; border:1px solid #344056; border-radius:10px; background:#111827; }
 .taste-category-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.taste-category-heading h3 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:17px; font-weight:800; }
+.taste-category-heading h3 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:17px; font-weight:800; }
 .taste-category-heading>span { color:#aebbd0; font-size:12px; }
 .taste-profile-groups { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:14px; }
 .preference-group { min-width:0; }

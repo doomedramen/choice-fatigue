@@ -7,21 +7,23 @@ import { getTmdbCreditFeatures, getTmdbRecommendationFeatures } from "@/lib/prov
 import { getThePornDBRecommendationFeatures } from "@/lib/providers/theporndb";
 import { getStashDbRecommendationMetadata } from "@/lib/providers/stashdb";
 import type { RecommendationCategory, RecommendationEventInput } from "@/lib/recommendation-event-validation";
+import { recommendationProfileQuery } from "@/lib/recommendation-profile-query";
 
-/** The caller must authorize Adult access before entering this function. */
-export async function loadRecommendationProfile(userId: string, category: RecommendationCategory, resolvedCreditIds: string[] = [], hydrate = true) {
-  const rows = await prisma.recommendationEvent.findMany({
-    where: { userId, category, algorithmVersion: { in: ["content-v3", "content-v4", "content-v5", "content-v6"] } },
-    orderBy: [{ occurredAt: "asc" }, { sessionId: "asc" }, { sequence: "asc" }, { id: "asc" }],
-  });
+/**
+ * The caller must authorize Adult access before entering this function.
+ * `knownFeatureIds` are titles whose features the caller already holds or already tried to fetch;
+ * they still count toward the recent-title budget but are not requested again.
+ */
+export async function loadRecommendationProfile(userId: string, category: RecommendationCategory, knownFeatureIds: string[] = [], hydrate = true) {
+  const rows = (await prisma.recommendationEvent.findMany(recommendationProfileQuery(userId, category))).reverse();
   const events: RecommendationEventInput[] = rows.map(row => ({
     id: row.id, sessionId: row.sessionId, reviewId: row.reviewId, sequence: row.sequence, itemId: row.itemId,
-    candidateIds: row.candidateIds as string[] | null, category, eventType: row.eventType as RecommendationEventInput["eventType"],
+    candidateIds: null, category, eventType: row.eventType as RecommendationEventInput["eventType"],
     decision: row.decision as RecommendationEventInput["decision"], rating: row.rating, targetEventId: row.targetEventId,
     algorithmVersion: row.algorithmVersion as RecommendationEventInput["algorithmVersion"], occurredAt: row.occurredAt.toISOString(),
-    provenance: row.provenance as RecommendationEventInput["provenance"], retrievalId: row.retrievalId, source: row.source as RecommendationEventInput["source"], lane: row.lane as RecommendationEventInput["lane"],
+    provenance: null, retrievalId: null, source: null, lane: null,
   }));
-  const known = new Set(resolvedCreditIds);
+  const known = new Set(knownFeatureIds);
   const eligibleIds = recommendationFeatureItemIds(events, category);
   const unresolvedIds = eligibleIds.filter(id => !known.has(id));
   // Reuse only within the same recent-history window; cached titles must not expand the budget.
@@ -57,6 +59,8 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
     events, featuresByItemId,
     coverage: { eligible: unresolvedIds.length, requested: requestedIds.length, resolved: Object.keys(featuresByItemId).length, omittedByLimit: Math.max(0, unresolvedIds.length - requestedIds.length) },
     creditCoverage: { requested: creditRequested, resolved: creditResolved }, resolvedCreditItemIds, requestedCreditItemIds,
+    // Successful or not, these were tried; callers pass them back so a failing title is not refetched on every read.
+    attemptedFeatureItemIds: requestedIds,
     creditFeatures: creditPreferences(profile.signals).filter(feature => feature.positiveTitles >= 2 && feature.score > 0),
     retrievalFeatures, stashTagIds: retrievalFeatures.flatMap(key => stashTags[key] ? [stashTags[key]] : []),
   };

@@ -6,14 +6,14 @@
   --line: #303a50;
   --ink: #f6f7fb;
   --muted: #bac2d2;
-  --quiet: #8d9ab0;
+  --quiet: #9aa6ba;
   --purple: #8a67ff;
   --purple-strong: #754cf7;
   --purple-wash: #2b2150;
   --coral: #ff917e;
   --ease-out: cubic-bezier(.23, 1, .32, 1);
-  --serif: "Manrope", "DM Sans", sans-serif;
-  font-family: "DM Sans", sans-serif;
+  --serif: var(--font-manrope), var(--font-dm-sans), sans-serif;
+  font-family: var(--font-dm-sans), sans-serif;
   background: var(--bg);
   color: var(--ink);
   font-synthesis: none;
@@ -42,7 +42,7 @@ button:active:not(:disabled) { transform: scale(.98); }
   background: #101624;
   border-bottom: 1px solid #252f43;
 }
-.brand { grid-area: brand; display: inline-flex; align-items: center; gap: 10px; width: max-content; color: #fff; text-decoration: none; font-family: "Manrope", sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -.8px; }
+.brand { grid-area: brand; display: inline-flex; align-items: center; gap: 10px; width: max-content; color: #fff; text-decoration: none; font-family: var(--font-manrope), sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -.8px; }
 .brand-symbol { position: relative; display: grid; width: 32px; height: 32px; place-items: center; border-radius: 11px; background: var(--purple-strong); color: #fff; font-size: 20px; }
 .brand-symbol span { position: absolute; top: -7px; right: -7px; color: #c9bbff; font-size: 13px; }
 .category-nav { grid-area: nav; display: flex; gap: 5px; width: calc(100% + 32px); margin: 0 -16px; padding: 0 12px 10px; overflow-x: auto; scrollbar-width: none; }
@@ -77,12 +77,12 @@ button:active:not(:disabled) { transform: scale(.98); }
 .discover-intro { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
 .eyebrow { display: flex; align-items: center; gap: 8px; color: #b3bfd2; font-size: 11px; font-weight: 800; letter-spacing: 1.1px; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #9df0b4; box-shadow: 0 0 0 3px #9df0b42c; }
-.discover-intro h1, .review-head h1 { margin: 0; color: #fff; font-family: "Manrope", sans-serif; font-size: clamp(34px, 9vw, 46px); font-weight: 800; line-height: 1.02; letter-spacing: -1.8px; }
+.discover-intro h1, .review-head h1 { margin: 0; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: clamp(34px, 9vw, 46px); font-weight: 800; line-height: 1.02; letter-spacing: -1.8px; }
 .discover-intro h1 em, .review-head h1 em { color: #b8a4ff; font-style: normal; }
 .discover-intro p, .review-head p { margin: 0; color: #bac2d2; font-size: 15px; line-height: 1.5; }
 .deck-wrap { position: relative; width: 100%; max-width: 402px; margin: 0 auto; }
 .deck-meta { display: flex; justify-content: flex-end; margin: 0 2px 10px; color: #c0c9d8; font-size: 12px; font-weight: 800; letter-spacing: .7px; }
-.deck-meta i { padding: 0 4px; color: #75839c; font-style: normal; }
+.deck-meta i { padding: 0 4px; color: #8794aa; font-style: normal; }
 .deck-meta small { color: #8794aa; font-size: 12px; }
 .card-stack { position: relative; isolation: isolate; display: grid; padding: 0 11px 10px; touch-action: pan-y; }
 .stack-shadow { position: absolute; z-index: 0; top: 0; bottom: 10px; left: 50%; width: min(calc(100% - 22px), 450px); border: 1px solid #38445c; border-radius: 16px; box-shadow: 0 14px 30px #0005; pointer-events: none; transform-origin: center; }
@@ -107,7 +107,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .poster-mark::after { inset: -10% 22%; transform: rotate(38deg); }
 .poster-copy { position: absolute; z-index: 1; right: 7%; bottom: 10%; left: 7%; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .poster-kicker { font-size: 10px; font-weight: 800; letter-spacing: 1.4px; opacity: .9; }
-.poster-copy strong { max-width: 100%; font-family: "Manrope", sans-serif; font-size: clamp(20px, 6vw, 32px); font-weight: 800; line-height: 1; letter-spacing: -1px; text-wrap: balance; }
+.poster-copy strong { max-width: 100%; font-family: var(--font-manrope), sans-serif; font-size: clamp(20px, 6vw, 32px); font-weight: 800; line-height: 1; letter-spacing: -1px; text-wrap: balance; }
 .poster-copy small { font-size: 12px; font-weight: 600; opacity: .9; }
 .poster-year { position: absolute; z-index: 1; top: 7%; right: 7%; font-size: 12px; font-weight: 800; }
 .art-mist .poster-mark { top: 10%; left: 34%; width: 52%; height: 72%; border-radius: 48% 55% 30% 40%; background: linear-gradient(135deg, #ffffff15, #182b3a66); transform: rotate(-25deg); }
@@ -131,8 +131,8 @@ button:active:not(:disabled) { transform: scale(.98); }
 .card-overline { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #bac4d5; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
 .card-overline svg { width: 15px; height: 15px; margin-right: 3px; color: #b8a4ff; vertical-align: middle; }
 .card-content .card-overline { font-size: 10px; }
-.card-content h2 { margin: 3px 0 8px; color: #fff; font-family: "Manrope", sans-serif; font-size: clamp(18px, 5.4vw, 24px); font-weight: 800; line-height: 1.2; letter-spacing: -.5px; overflow-wrap: anywhere; }
-.card-content h2 span { margin-left: 5px; color: #bac2d2; font-family: "DM Sans", sans-serif; font-size: 14px; font-weight: 600; letter-spacing: 0; vertical-align: middle; }
+.card-content h2 { margin: 3px 0 8px; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: clamp(18px, 5.4vw, 24px); font-weight: 800; line-height: 1.2; letter-spacing: -.5px; overflow-wrap: anywhere; }
+.card-content h2 span { margin-left: 5px; color: #bac2d2; font-family: var(--font-dm-sans), sans-serif; font-size: 14px; font-weight: 600; letter-spacing: 0; vertical-align: middle; }
 .card-footer { display: flex; min-width: 0; flex-direction: column; align-items: stretch; gap: 7px; }
 .card-footer .tag-row { min-width: 0; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; overflow: hidden; }
 .card-footer .tag-row span { overflow: hidden; padding: 4px 6px; font-size: 10px; text-overflow: ellipsis; }
@@ -184,8 +184,8 @@ button:active:not(:disabled) { transform: scale(.98); }
 
 .shortlist-panel { order: 2; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 0 10px; margin: 0 -16px; padding: 15px 16px 18px; border-top: 1px solid #313c52; background: #121927; }
 .panel-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; }
-.panel-heading h2 { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; color: #fff; font-family: "Manrope", sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -.5px; line-height: 1.2; }
-.panel-heading h2 span { display: inline-grid; flex: none; min-width: 24px; height: 24px; place-items: center; padding: 0 5px; border-radius: 7px; background: var(--purple-wash); color: #d1c3ff; font-family: "DM Sans", sans-serif; font-size: 13px; }
+.panel-heading h2 { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -.5px; line-height: 1.2; }
+.panel-heading h2 span { display: inline-grid; flex: none; min-width: 24px; height: 24px; place-items: center; padding: 0 5px; border-radius: 7px; background: var(--purple-wash); color: #d1c3ff; font-family: var(--font-dm-sans), sans-serif; font-size: 13px; }
 .panel-heading .eyebrow { font-size: 10px; }
 .panel-copy { display: none; }
 .tray-list { display: flex; grid-column: 1 / -1; gap: 8px; min-height: 0; padding: 11px 0 4px; overflow-x: auto; scrollbar-width: thin; }
@@ -216,7 +216,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .empty-state, .review-empty { display: flex; flex-direction: column; align-items: center; margin: auto; padding: 45px 15px; text-align: center; }
 .empty-orbit { display: grid; width: 58px; height: 58px; place-items: center; margin-bottom: 18px; border: 1px solid #594991; border-radius: 16px; background: #292149; color: #c3b2ff; }
 .empty-orbit svg { width: 25px; height: 25px; }
-.empty-state h2, .review-empty h2 { margin: 0 0 9px; color: #fff; font-family: "Manrope", sans-serif; font-size: 24px; font-weight: 800; }
+.empty-state h2, .review-empty h2 { margin: 0 0 9px; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: 24px; font-weight: 800; }
 .empty-state p, .review-empty p { margin: 0 0 19px; color: #bac2d2; font-size: 15px; line-height: 1.5; }
 
 .review-page { width: 100%; max-width: 980px; margin: 0 auto; padding: 0 0 20px; }
@@ -235,7 +235,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .review-card-info { min-width: 0; padding: 13px; }
 .review-card-info .card-overline { font-size: 10px; }
 .review-card-info .card-overline svg { width: 13px; height: 13px; }
-.review-card-info h3 { margin: 8px 0; color: #fff; font-family: "Manrope", sans-serif; font-size: 21px; font-weight: 800; line-height: 1.1; }
+.review-card-info h3 { margin: 8px 0; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: 21px; font-weight: 800; line-height: 1.1; }
 .review-card-info .tag-row { gap: 5px; }
 .review-card-info .tag-row span { padding: 4px 7px; font-size: 11px; }
 .review-card-info p { margin: 9px 0 11px; font-size: 13px; line-height: 1.45; }
@@ -263,15 +263,15 @@ button:active:not(:disabled) { transform: scale(.98); }
 .modal-backdrop-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; -webkit-user-drag: none; }
 .modal-backdrop-art img.poster-fallback { object-fit: contain; background: #0b111c; }
 .modal-info { min-height: 0; overflow-y: auto; overscroll-behavior: contain; align-self: start; padding: 20px; }
-.modal-info h2 { margin: 9px 0 12px; color: #fff; font-family: "Manrope", sans-serif; font-size: 30px; font-weight: 800; }
+.modal-info h2 { margin: 9px 0 12px; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: 30px; font-weight: 800; }
 .modal-info p { font-size: 15px; }
 .modal-info .button { width: 100%; margin-top: 17px; }
 .details-people { margin-top: 22px; }
-.details-people h3 { margin: 0 0 12px; color: #e8ebf3; font-family: "Manrope", sans-serif; font-size: 15px; font-weight: 800; }
+.details-people h3 { margin: 0 0 12px; color: #e8ebf3; font-family: var(--font-manrope), sans-serif; font-size: 15px; font-weight: 800; }
 .details-people .details-people-status { margin: 0; color: #aeb8ca; font-size: 13px; }
 .people-list { display: flex; gap: 12px; margin: 0 -2px; padding: 2px 2px 9px; overflow-x: auto; overscroll-behavior-x: contain; list-style: none; scrollbar-width: thin; scrollbar-color: #58647a transparent; }
 .person-card { flex: 0 0 104px; min-width: 0; }
-.person-portrait { display: grid; width: 100%; aspect-ratio: 4 / 5; overflow: hidden; place-items: center; border: 1px solid #46536a; border-radius: 10px; background: #273246; color: #c4b8e7; font-family: "Manrope", sans-serif; font-size: 24px; font-weight: 800; }
+.person-portrait { display: grid; width: 100%; aspect-ratio: 4 / 5; overflow: hidden; place-items: center; border: 1px solid #46536a; border-radius: 10px; background: #273246; color: #c4b8e7; font-family: var(--font-manrope), sans-serif; font-size: 24px; font-weight: 800; }
 .person-portrait img { width: 100%; height: 100%; object-fit: cover; }
 .person-card strong, .person-card small { display: block; overflow-wrap: anywhere; }
 .person-card strong { margin-top: 8px; color: #eef0f7; font-size: 12px; line-height: 1.3; }
@@ -285,7 +285,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .age-icon { display: grid; width: 50px; height: 50px; place-items: center; margin: 0 auto 16px; border: 1px solid #574990; border-radius: 14px; background: #2b214e; color: #c9baff; }
 .age-icon svg { width: 20px; height: 20px; }
 .age-modal .eyebrow { justify-content: center; }
-.age-modal h2, .saved-modal h2 { margin: 12px 0 7px; color: #fff; font-family: "Manrope", sans-serif; font-size: 27px; font-weight: 800; line-height: 1.1; }
+.age-modal h2, .saved-modal h2 { margin: 12px 0 7px; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: 27px; font-weight: 800; line-height: 1.1; }
 .age-modal p, .saved-modal > p { max-width: 420px; margin: 0 auto 20px; color: #c1cada; font-size: 15px; line-height: 1.55; }
 .age-actions { display: flex; gap: 9px; }
 .age-actions .button { flex: 1; }
@@ -299,7 +299,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .saved-poster .poster-copy strong { font-size: 8px; }
 .saved-poster .poster-copy small, .saved-poster .poster-kicker, .saved-poster .poster-year { display: none; }
 .saved-item-copy { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
-.saved-item strong { overflow: hidden; color: #fff; font-family: "Manrope", sans-serif; font-size: 15px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.saved-item strong { overflow: hidden; color: #fff; font-family: var(--font-manrope), sans-serif; font-size: 15px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .saved-item small { color: #b8c3d5; font-size: 12px; }
 .saved-actions { display:grid; gap:5px; }
 .saved-availability-button,.saved-request-button { width:100%; min-height:34px; padding:0 5px; border:1px solid #68758e; border-radius:7px; background:#28344a; color:#fff; font-size:10px; font-weight:800; }
@@ -414,7 +414,14 @@ button:active:not(:disabled) { transform: scale(.98); }
 .media-card { transition: transform 150ms ease-out, opacity 110ms ease-out; cursor: pointer; }
 .media-card.control-exit { transition: transform 230ms var(--ease-out), opacity 170ms ease-out; }
 .media-card.dragging { transition: none; }
+/* Drag feedback is an overlay whose opacity tracks the drag distance (--drag, -1…1), so it composites without repainting the shadow. */
 .media-card.drag-keep, .media-card.drag-pass { box-shadow: 0 18px 40px #0005; }
+.media-card.card-active::after { content: ""; position: absolute; z-index: 1; inset: 0; border-radius: inherit; opacity: 0; pointer-events: none; transition: opacity 150ms ease-out; }
+.media-card.dragging::after { transition: none; }
+.media-card.drag-keep::after { opacity: calc(var(--drag, 0) * .55); background: linear-gradient(90deg, transparent 40%, #7151e9aa); box-shadow: inset 0 0 0 2px #9b84ff; }
+.media-card.drag-pass::after { opacity: calc(var(--drag, 0) * -.55); background: linear-gradient(270deg, transparent 40%, #f06e5eaa); box-shadow: inset 0 0 0 2px #ff917e; }
+.media-card.drag-keep .stamp-keep { opacity: calc(.35 + var(--drag, 0) * .6); }
+.media-card.drag-pass .stamp-pass { opacity: calc(.35 + var(--drag, 0) * -.6); }
 .card-poster-tags { position: absolute; z-index: 2; top: 12px; left: 12px; right: 12px; pointer-events: none; }
 .card-poster-tags span { background: #101827e8; border-color: #ffffff50; }
 .card-seen-button { width: 100%; min-height: 48px; justify-content: center; border-color: #625a7f; background: #2c2940; color: #e9e1ff; font-size: 14px; }
@@ -423,3 +430,32 @@ button:active:not(:disabled) { transform: scale(.98); }
 .decision-button { flex: 1 1 0; min-width: 0; justify-content: center; }
 .decision-button small { line-height: 1.15; }
 .undo-swipe-button { flex: 0 0 auto; }
+
+/* Touch targets: every control is at least 44px, and no control text is below 12px. */
+.undo-button, .restore-row button, .saved-availability-button, .saved-request-button { min-height: 44px; }
+.saved-availability-button, .saved-request-button { font-size: 12px; }
+.tray-item { grid-template-columns: 40px minmax(0,1fr) 44px; }
+.tray-item button { width: 44px; height: 44px; }
+.tray-item small, .panel-heading .eyebrow, .saved-request-note, .rating-cancel { font-size: 12px; }
+.rating-cancel { min-height: 44px; }
+.card-actions .card-details-button { flex: 0 0 auto; min-width: 48px; min-height: 48px; font-size: 13px; }
+.card-actions .card-seen-button { flex: 1 1 auto; width: auto; }
+@media (min-width: 720px) { .tray-item { grid-template-columns: 48px minmax(0,1fr) 44px; } }
+/* On phones the heading column is narrow; let Undo wrap under the title instead of sliding beneath "Review & compare". */
+@media (max-width: 719px) { .panel-heading { flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; } }
+
+/* First-visit swipe hint; dismissed after the first decision. */
+.swipe-hint { margin: 10px 0 0; color: #c0c9d8; font-size: 13px; text-align: center; }
+.swipe-hint kbd { display: inline-grid; min-width: 24px; height: 22px; place-items: center; padding: 0 5px; border: 1px solid #56647e; border-radius: 5px; background: #1a2333; color: #fff; font: inherit; font-size: 12px; font-weight: 800; }
+
+/* Actionable toast: the Undo button must be reachable, so the toast takes pointer events while shown. */
+.toast.show { pointer-events: auto; }
+.toast { display: flex; align-items: center; gap: 12px; }
+.toast-action { min-height: 44px; padding: 0 12px; border: 1px solid #8a67ff; border-radius: 8px; background: #2b2150; color: #e3dbff; font-size: 14px; font-weight: 800; }
+.toast-action:hover { background: #3a2c6b; }
+
+.saved-remove-button { align-self: flex-start; min-height: 44px; padding: 0; border: 0; background: none; color: #c4b4ff; font-size: 13px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.details-status { margin: 0; color: #c0c9d8; font-size: 14px; font-weight: 700; }
+.button-danger { border: 1px solid #ff917e; background: #5a2620; color: #ffe1db; }
+.button-danger:hover { background: #6d2e27; }
+.confirm-modal p { margin-bottom: 22px; }

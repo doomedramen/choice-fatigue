@@ -1,6 +1,6 @@
 import type { MediaItem } from "@/data";
 import { isRelatedProvenance, type RecommendationEventInput, type RelatedProvenance } from "@/lib/recommendation-event-validation";
-import { buildRecommendationProfile, mergeRecommendationEvents, rankRecommendations, recommendationFeatureItemIds, recommendationFeatureKeys, relatedShowSeeds } from "@/lib/recommendations";
+import { buildRecommendationProfile, effectiveRecommendationEvents, mergeRecommendationEvents, rankRecommendations, recommendationFeatureItemIds, recommendationFeatureKeys, relatedShowSeeds } from "@/lib/recommendations";
 import { deduplicateTitles, interleaveItems } from "@/lib/discovery-feed";
 
 export type RankingMetrics = { traces: number; labeledTraces: number; relevantItems: number; meanReciprocalRank: number | null; recallAt5: number | null; recallAt10: number | null };
@@ -45,17 +45,109 @@ function metrics(rankings: string[][], relevantBySession: string[][]): RankingMe
   };
 }
 
-/** Compare two fixed rankings against observed shortlist/save labels within each traced candidate set. */
-export function compareRankings(input: Array<{ providerOrder: string[]; rankerOrder: string[]; shortlisted: string[]; saved: string[] }>) {
+/** Deterministic PRNG (mulberry32) so replay reports, baselines, and intervals are reproducible. */
+export function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffled(ids: string[], random: () => number) {
+  const result = [...ids];
+  for (let index = result.length - 1; index > 0; index--) {
+    const swap = Math.floor(random() * (index + 1));
+    [result[index], result[swap]] = [result[swap], result[index]];
+  }
+  return result;
+}
+
+const round4 = (value: number) => Number(value.toFixed(4));
+
+/** Share of (kept, passed) pairs in the same window where the kept title ranks first. */
+function pairwiseAccuracy(rankings: string[][], positives: string[][], negatives: string[][]) {
+  let correct = 0, total = 0;
+  rankings.forEach((ranking, index) => {
+    const position = new Map(ranking.map((id, rank) => [id, rank]));
+    for (const positive of positives[index]) for (const negative of negatives[index] ?? []) {
+      if (!position.has(positive) || !position.has(negative)) continue;
+      total += 1;
+      if (position.get(positive)! < position.get(negative)!) correct += 1;
+    }
+  });
+  return total ? round4(correct / total) : null;
+}
+
+/**
+ * Recall@10 where each relevant title is weighted by the inverse of an approximate exposure
+ * propensity, 1/log2(shown position + 2). Titles the production order showed late were less likely
+ * to be chosen at all, so recovering them counts for more. This is a rough position-bias model.
+ */
+function exposureWeightedRecallAt10(rankings: string[][], relevant: string[][], shownOrders: string[][]) {
+  let found = 0, total = 0;
+  rankings.forEach((ranking, index) => {
+    for (const id of relevant[index]) {
+      const shown = shownOrders[index].indexOf(id);
+      if (shown < 0 || !ranking.includes(id)) continue;
+      const weight = Math.log2(shown + 2);
+      total += weight;
+      if (ranking.indexOf(id) < 10) found += weight;
+    }
+  });
+  return total ? round4(found / total) : null;
+}
+
+/** Session-level bootstrap: traces from one session are correlated, so sessions are the resampling unit. */
+function bootstrapMeanReciprocalRank(rankings: string[][], relevant: string[][], sessionIds: string[], seed: number, resamples = 1000): [number, number] | null {
+  const bySession = new Map<string, number[]>();
+  rankings.forEach((ranking, index) => {
+    const ranks = relevant[index].map(id => ranking.indexOf(id)).filter(rank => rank >= 0);
+    if (!ranks.length) return;
+    const values = bySession.get(sessionIds[index]) ?? [];
+    values.push(1 / (Math.min(...ranks) + 1));
+    bySession.set(sessionIds[index], values);
+  });
+  const sessions = [...bySession.values()];
+  if (sessions.length < 2) return null;
+  const random = seededRandom(seed);
+  const means: number[] = [];
+  for (let sample = 0; sample < resamples; sample++) {
+    let sum = 0, count = 0;
+    for (let draw = 0; draw < sessions.length; draw++) {
+      const values = sessions[Math.floor(random() * sessions.length)];
+      for (const value of values) { sum += value; count += 1; }
+    }
+    means.push(sum / count);
+  }
+  means.sort((a, b) => a - b);
+  return [round4(means[Math.floor(resamples * 0.025)]), round4(means[Math.ceil(resamples * 0.975) - 1])];
+}
+
+export type RankingComparisonRow = { providerOrder: string[]; rankerOrder: string[]; shortlisted: string[]; saved: string[]; passed?: string[]; sessionId?: string };
+
+/**
+ * Compare fixed rankings against observed shortlist/save labels within each traced candidate set.
+ * A seeded random order is the floor any ranker must beat; intervals resample whole sessions.
+ */
+export function compareRankings(input: RankingComparisonRow[], seed = 1) {
+  const random = seededRandom(seed);
+  const orders = {
+    providerOrder: input.map(row => row.providerOrder),
+    currentRanker: input.map(row => row.rankerOrder),
+    randomOrder: input.map(row => shuffled(row.providerOrder, random)),
+  };
+  const shortlisted = input.map(row => row.shortlisted), saved = input.map(row => row.saved), passed = input.map(row => row.passed ?? []);
+  const sessionIds = input.map((row, index) => row.sessionId ?? String(index));
+  const report = <T>(score: (rankings: string[][]) => T) => ({ providerOrder: score(orders.providerOrder), currentRanker: score(orders.currentRanker), randomOrder: score(orders.randomOrder) });
   return {
-    providerOrder: {
-      shortlisted: metrics(input.map(row => row.providerOrder), input.map(row => row.shortlisted)),
-      saved: metrics(input.map(row => row.providerOrder), input.map(row => row.saved)),
-    },
-    currentRanker: {
-      shortlisted: metrics(input.map(row => row.rankerOrder), input.map(row => row.shortlisted)),
-      saved: metrics(input.map(row => row.rankerOrder), input.map(row => row.saved)),
-    },
+    ...report(rankings => ({ shortlisted: metrics(rankings, shortlisted), saved: metrics(rankings, saved) })),
+    keptOverPassedAccuracy: report(rankings => pairwiseAccuracy(rankings, shortlisted, passed)),
+    exposureWeightedShortlistRecallAt10: report(rankings => exposureWeightedRecallAt10(rankings, shortlisted, orders.providerOrder)),
+    shortlistedMeanReciprocalRank95: report(rankings => bootstrapMeanReciprocalRank(rankings, shortlisted, sessionIds, seed)),
   };
 }
 
@@ -76,18 +168,20 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
     let relatedSeedBatches = 0, matchingRelatedSeedBatches = 0;
     const creditRequested = new Set<string>(), recordedCreditRequested = new Set<string>(), recordedCreditResolved = new Set<string>();
     const lanes = new Map<string, { candidateIds: Set<string>; shownIds: Set<string>; shortlistedIds: Set<string>; savedIds: Set<string> }>();
-    const outcomes = new Map<string, { shortlisted: Set<string>; saved: Set<string> }>();
-    const undone = new Set(categoryEvents.filter(row => row.eventType === "decision_undone").map(row => row.targetEventId));
-    const decisionsById = new Map(categoryEvents.filter(event => event.eventType === "decision").map(event => [event.id, event]));
-    for (const event of categoryEvents) {
-      const result = outcomes.get(event.sessionId) ?? { shortlisted: new Set(), saved: new Set() };
-      if (event.itemId && event.eventType === "decision" && event.decision === "keep" && !undone.has(event.id)) result.shortlisted.add(event.itemId);
+    const outcomes = new Map<string, { shortlisted: Set<string>; saved: Set<string>; passed: Set<string> }>();
+    // Labels come from the same corrected history the ranker trains on.
+    const effective = effectiveRecommendationEvents(categoryEvents);
+    const decisionsById = new Map(effective.filter(event => event.eventType === "decision").map(event => [event.id, event]));
+    for (const event of categoryEvents) outcomes.set(event.sessionId, outcomes.get(event.sessionId) ?? { shortlisted: new Set(), saved: new Set(), passed: new Set() });
+    for (const event of effective) {
+      const result = outcomes.get(event.sessionId)!;
+      if (event.itemId && event.eventType === "decision" && event.decision === "keep") result.shortlisted.add(event.itemId);
+      if (event.itemId && event.eventType === "decision" && event.decision === "pass") result.passed.add(event.itemId);
       if (event.itemId && event.eventType === "saved") result.saved.add(event.itemId);
-      outcomes.set(event.sessionId, result);
       if (event.eventType === "saved" && event.itemId && event.targetEventId) {
         const consideration = decisionsById.get(event.targetEventId);
-        if (consideration?.itemId === event.itemId && !undone.has(consideration.id)) {
-          const original = outcomes.get(consideration.sessionId) ?? { shortlisted: new Set<string>(), saved: new Set<string>() };
+        if (consideration?.itemId === event.itemId) {
+          const original = outcomes.get(consideration.sessionId) ?? { shortlisted: new Set<string>(), saved: new Set<string>(), passed: new Set<string>() };
           original.saved.add(event.itemId);
           outcomes.set(consideration.sessionId, original);
         }
@@ -143,7 +237,7 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
         const selected = missing.slice(0, 12);
         const featureItems = [...available, ...selected.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])];
         const resolved = creditsBySession.get(event.sessionId) ?? new Set<string>();
-        const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type }), ...((event.algorithmVersion === "content-v6" ? resolved.has(item.id) : !availableIds.has(item.id) || creditRequested.has(item.id)) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
+        const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type }), ...((["content-v6", "content-v7"].includes(event.algorithmVersion) ? resolved.has(item.id) : !availableIds.has(item.id) || creditRequested.has(item.id)) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
         featureEligible += missing.length; featureRequested += selected.length; featureResolved += selected.filter(id => metadata.has(id)).length;
         const profile = buildRecommendationProfile(prior, features, category);
         const window = new Set(event.candidateIds);
@@ -157,7 +251,7 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
         const contentOrder = rankRecommendations(candidates, profile.signals, profile.comparisons).items.map(item => item.id);
         const rankerOrder = rankRecommendations(candidates, profile.signals, profile.comparisons, features, relatedRanks).items.map(item => item.id);
         const labels = outcomes.get(event.sessionId)!;
-        const comparison = { providerOrder: candidates.map(item => item.id), rankerOrder, shortlisted: [...labels.shortlisted], saved: [...labels.saved] };
+        const comparison = { providerOrder: candidates.map(item => item.id), rankerOrder, shortlisted: [...labels.shortlisted], saved: [...labels.saved], passed: [...labels.passed], sessionId: event.sessionId };
         if (candidates.length) { traces.push(comparison); contentTraces.push({ ...comparison, providerOrder: contentOrder }); }
         const popularIds = new Set(runGroups.flatMap(group => group.filter(batch => batch.lane === "popular").flatMap(batch => batch.ids)));
         const popularOrder = comparison.providerOrder.filter(id => popularIds.has(id));
@@ -190,7 +284,7 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
       reviewRetention: keeps ? retained / keeps : null, medianObservedCardsToFirstSave: median,
       relatedSeedBatches, matchingRelatedSeedBatches, snapshotCoverage: { snapshots: snapshotCount, incompleteImpressions },
       recordedCreditCoverage: summarizeMetadataCoverage(recordedCreditRequested.size, recordedCreditRequested.size, recordedCreditResolved.size),
-      replayLimitations: "Older traces lack retrieval snapshots; current provider metadata may differ from the original session.",
+      replayLimitations: "Older traces lack retrieval snapshots. Features come from provider metadata fetched today, which may differ from what the user saw; storing the original metadata would break the provider-transient rule. Users could only choose among titles the production order showed, so the exposure-weighted metric uses an approximate 1/log2(position+2) propensity model rather than logged propensities. Intervals resample whole sessions.",
       retrievalLanes: Object.fromEntries([...lanes].map(([key, lane]) => [key, { candidates: lane.candidateIds.size, shown: lane.shownIds.size, shortlisted: lane.shortlistedIds.size, saved: lane.savedIds.size }])),
     };
   });

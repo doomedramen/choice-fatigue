@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { integrationServices, type IntegrationService } from "@/lib/integrations/registry";
 import styles from "../integrations/integrations.module.css";
+import { ConfirmDialog } from "@/app/modal";
 
 interface Integration {
   id: string;
@@ -30,6 +31,7 @@ export default function ServiceIntegrations({ adultSectionEnabled, allowPrivateN
   const [form, setForm] = useState<FormFields>(blankForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState<Integration | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [connectionChecks, setConnectionChecks] = useState<Record<string, { message: string; ok: boolean }>>({});
   const [loadError, setLoadError] = useState("");
@@ -101,7 +103,8 @@ export default function ServiceIntegrations({ adultSectionEnabled, allowPrivateN
   }
 
   async function removeConnection(connection: Integration) {
-    if (pending || !window.confirm(`Remove the shared ${serviceName(connection.service)} connection “${connection.name}”?`)) return;
+    setConfirmingRemoval(null);
+    if (pending) return;
     setPending(true);
     setError("");
     setNotice("");
@@ -167,10 +170,11 @@ export default function ServiceIntegrations({ adultSectionEnabled, allowPrivateN
       {connections?.length === 0 && <p className={styles.empty}>No shared services configured yet.</p>}
       {connections && connections.length > 0 && <ul className={styles.list}>{connections.map(connection => <li key={connection.id} className={styles.connection}>
         <div className={styles.connectionBody}><div className={styles.connectionTitle}><span className={styles.serviceMark} aria-hidden="true">{serviceName(connection.service).slice(0, 1)}</span><div><h4>{connection.name}</h4><p>{serviceName(connection.service)} · Credential saved · {connectionChecks[connection.id]?.message ?? "Not checked"}</p></div></div><p className={styles.url}>{connection.baseUrl ?? "Server address hidden while secure storage is unavailable"}</p>{connectionChecks[connection.id] && <p className={connectionChecks[connection.id].ok ? styles.checkSuccess : styles.checkError} role="status">{connectionChecks[connection.id].message}</p>}</div>
-        <div className={styles.connectionActions}>{["seerr", "plex", "radarr", "sonarr", "whisparr-v2", "whisparr-v3"].includes(connection.service) && <button type="button" onClick={() => void checkConnection(connection)} disabled={pending || checkingId !== null || !encryptionConfigured || (connection.service.startsWith("whisparr") && !adultSectionEnabled)}>{checkingId === connection.id ? "Checking…" : "Test"}</button>}<button type="button" onClick={() => beginEdit(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>Edit</button><button type="button" onClick={() => void removeConnection(connection)} disabled={pending || checkingId !== null}>Remove</button></div>
+        <div className={styles.connectionActions}>{["seerr", "plex", "radarr", "sonarr", "whisparr-v2", "whisparr-v3"].includes(connection.service) && <button type="button" onClick={() => void checkConnection(connection)} disabled={pending || checkingId !== null || !encryptionConfigured || (connection.service.startsWith("whisparr") && !adultSectionEnabled)}>{checkingId === connection.id ? "Checking…" : "Test"}</button>}<button type="button" onClick={() => beginEdit(connection)} disabled={pending || checkingId !== null || !encryptionConfigured}>Edit</button><button type="button" onClick={() => setConfirmingRemoval(connection)} disabled={pending || checkingId !== null}>Remove</button></div>
       </li>)}</ul>}
     </section>
     <p className={styles.status} role="status" aria-live="polite">{notice}</p>
+    {confirmingRemoval && <ConfirmDialog title={`Remove ${serviceName(confirmingRemoval.service)}?`} body={`The shared connection “${confirmingRemoval.name}” will be removed for everyone using this instance.`} confirmLabel="Remove connection" onConfirm={() => void removeConnection(confirmingRemoval)} onCancel={() => setConfirmingRemoval(null)} />}
     <p className={styles.nextStep}>Members can check a saved title against configured Plex or Seerr services, or send eligible titles to Seerr. Connection tests are available here for Seerr, Plex, Radarr, Sonarr, and Whisparr.</p>
   </div>;
 }

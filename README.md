@@ -109,8 +109,9 @@ To compare matched provider order with the current ranker at each impression on 
 
 ## What works
 
-- Mouse, touch, and keyboard swipes with pass, shortlist, and undo.
-- Details overlays, a review-and-prune flow, restore, keep browsing, and final save.
+- Mouse, touch, and keyboard swipes with pass, shortlist, and undo. Removing a pick, removing it in review, and saving all offer an Undo in the notice; saved titles can be removed from the Saved list.
+- Details overlays, a review-and-prune flow, restore, keep browsing, and final save. Dialogs keep keyboard focus inside and return it when closed.
+- The interface is dark-only by design; there is no light theme. Fonts are self-hosted at build time, so pages make no requests to Google Fonts.
 - Temporary shortlists stay separate from permanently saved titles.
 - Discovery state is saved to PostgreSQL per account. Existing browser prototype data is imported once when the account has no saved server session.
 - `/account` downloads a JSON copy of the profile and discovery state. Permanent deletion requires the current password and typed confirmation.

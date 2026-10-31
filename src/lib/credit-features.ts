@@ -22,7 +22,8 @@ export function creditFeatureKeys(metadata: Metadata, mediaType: "movie" | "tv")
   ];
 }
 
-export function creditPreferences(signals: RecommendationSignal[]) {
+/** Pass the ranking baseline when scoring candidates; retrieval leaves it at zero to find liked credits. */
+export function creditPreferences(signals: RecommendationSignal[], baseline = 0) {
   const positiveTitles = new Map<string, Set<string>>();
   for (const signal of signals) {
     if (!(signal.decision === "keep" || signal.decision === "seen" && (signal.rating ?? 0) >= 8)) continue;
@@ -31,7 +32,7 @@ export function creditPreferences(signals: RecommendationSignal[]) {
       const ids = positiveTitles.get(feature) ?? new Set<string>(); ids.add(signal.itemId); positiveTitles.set(feature, ids);
     }
   }
-  return recommendationPreferenceProfile(signals).filter(entry => /^(actor|director|writer|creator|company):[1-9]\d*$/.test(entry.key))
+  return recommendationPreferenceProfile(signals, baseline).filter(entry => /^(actor|director|writer|creator|company):[1-9]\d*$/.test(entry.key))
     .map(entry => ({ ...entry, positiveTitles: positiveTitles.get(entry.key)?.size ?? 0 }));
 }
 

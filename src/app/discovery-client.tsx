@@ -2,20 +2,21 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
+import { Modal } from "@/app/modal";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 import { rankRecommendations, buildRecommendationProfile, mergeRecommendationEvents, recommendationFeatureKeys, shownCandidateIds, type RecommendationFeatures } from "@/lib/recommendations";
-import { isValidRecommendationEvent, isRelatedProvenance, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
+import { currentRecommendationAlgorithmVersion, isValidRecommendationEvent, isRelatedProvenance, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
 import { recommendationEventBatch, settleRecommendationBatch } from "@/lib/recommendation-outbox";
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
 import { createClientUuid } from "@/lib/client-uuid";
-import { deduplicateTitles, type DiscoveryFeed, type CandidateBatch } from "@/lib/discovery-feed";
+import { deduplicateTitles, degradedFeedNotice, feedRetryDelay, type DiscoveryFeed, type CandidateBatch } from "@/lib/discovery-feed";
 import type { MediaPerson } from "@/lib/media-people";
 
 type Decision = "keep" | "pass" | "seen";
 type DiscoveryPageState = Record<Category, { feed: DiscoveryFeed; loading: boolean; error: string }>;
 function discoveryPageState(feed: DiscoveryFeed) {
-  return { feed, loading: false, error: feed.status.outcome === "unavailable" ? "A metadata source could not load. Try again to request more titles." : "" };
+  return { feed, loading: false, error: feed.status.outcome === "unavailable" ? "A metadata source could not load." : "" };
 }
 interface SessionState {
   sessionId: string;
@@ -33,6 +34,7 @@ interface SessionState {
   ageVerified: boolean;
 }
 type LearningEvent = RecommendationEventInput;
+type NoticeAction = { label: string; run: () => void };
 const initialState = (): SessionState => ({ sessionId:"", eventSequence:0, reviewId:null, category:"Movies", lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
 const seerrAvailabilityLabels: Record<string, string> = {
   "not-listed": "No matching result in Seerr",
@@ -193,9 +195,22 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const [availabilityResults, setAvailabilityResults] = useState<Record<string, { status: string | null; message: string; ok: boolean }>>({});
   const [plexAvailabilityCheckingKey, setPlexAvailabilityCheckingKey] = useState("");
   const [plexAvailabilityResults, setPlexAvailabilityResults] = useState<Record<string, { inLibrary: boolean; message: string }>>({});
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ message: string; action?: NoticeAction } | null>(null);
+  const noticeTimer = useRef<number | null>(null);
   const [cardExiting, setCardExiting] = useState(false);
+  // The swipe hint shows until this account's first decision in this browser.
+  const swipeHintKey = `choice-fatigue-swipe-hint-${userId}`;
+  const [showSwipeHint, setShowSwipeHint] = useState(false);
+  useEffect(() => {
+    try { setShowSwipeHint(localStorage.getItem(swipeHintKey) !== "dismissed"); } catch { setShowSwipeHint(true); }
+  }, [swipeHintKey]);
+  function dismissSwipeHint() {
+    if (!showSwipeHint) return;
+    setShowSwipeHint(false);
+    try { localStorage.setItem(swipeHintKey, "dismissed"); } catch { /* The hint simply returns next visit. */ }
+  }
   const drag = useRef<{ x:number; y:number }|null>(null);
+  const lockedNextItemId = useRef<string | null>(null);
   const swipeExit = useRef(false);
   const dragFrame = useRef<number | null>(null);
   const dragOffset = useRef(0);
@@ -215,6 +230,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
   const [featuresByItemId, setFeaturesByItemId] = useState<RecommendationFeatures>(() => Object.assign({}, ...Object.values(initialFeeds).map(feed => feed.candidateFeatures ?? {})));
   const resolvedCreditIds = useRef(new Set(Object.values(initialFeeds).flatMap(feed => Object.keys(feed.candidateFeatures ?? {}))));
+  const lastHistoricalSnapshot = useRef("");
   const [learningError, setLearningError] = useState("");
   const [loadedProfileCategories, setLoadedProfileCategories] = useState<Set<Category>>(() => new Set());
   const activeCategory = useRef(session.category);
@@ -236,9 +252,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const retainedIds = new Set([...session.saved, ...session.shortlisted]);
   const remainingItems = items.filter(candidate => !session.decisions[candidate.id] && !retainedIds.has(candidate.id) && !previouslyConsideredIds.has(candidate.id));
   const categoryOutcomes = Object.fromEntries(categories.map(category => [category, discoveryPages[category].feed.status])) as Record<Category, DiscoveryFeed["status"]>;
-  const catalogueNotice = discoveryPages[session.category].feed.sources.some(source => source.outcome === "unavailable") ? "A metadata source is temporarily unavailable. Available titles are still shown." : "";
   const item = loadedProfileCategories.has(session.category) ? remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0] : undefined;
-  const nextItem = remainingItems.find(candidate => candidate.id !== item?.id);
+  // Keep the card underneath stable while background refreshes re-rank the rest of the deck.
+  const nextItem = remainingItems.find(candidate => candidate.id === lockedNextItemId.current && candidate.id !== item?.id) ?? remainingItems.find(candidate => candidate.id !== item?.id);
+  lockedNextItemId.current = nextItem?.id ?? null;
+  // Shown only while the deck still has cards; an empty deck explains the failure itself.
+  const catalogueNotice = item ? degradedFeedNotice(discoveryPages[session.category].feed.sources, Boolean(discoveryPages[session.category].error)) : "";
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
@@ -254,6 +273,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       if (cursor) query.set("cursor", cursor);
       if (refresh) query.set("refresh", "1");
       for (const event of learningQueue.current.filter(event => event.category === category && event.eventType === "decision").slice(-100)) if (event.itemId) query.append("excludeId", event.itemId);
+      for (const id of [...resolvedCreditIds.current].filter(id => categoryForId(id) === category).slice(-100)) query.append("knownFeatureId", id);
       const response = await fetch(`/api/discovery-feed?${query}`, { cache: "no-store" });
       if (response.status === 401) { window.location.replace("/sign-in"); return; }
       const result = await response.json() as DiscoveryFeed & { error?: string };
@@ -266,10 +286,11 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       const previousItems = catalogueItemsRef.current;
       const mergedItems = deduplicateTitles([...previousItems, ...result.items.filter(candidate => candidate.category === category)]);
       catalogueItemsRef.current = mergedItems;
-      recordFeedSnapshot(category, result, retrievalId, mergedItems.slice(previousItems.length).map(candidate => candidate.id));
+      const previousIds = new Set(previousItems.map(candidate => candidate.id));
+      recordFeedSnapshot(category, result, retrievalId, mergedItems.filter(candidate => !previousIds.has(candidate.id)).map(candidate => candidate.id));
       setCatalogueItems(mergedItems);
       const failed = result.status.outcome === "unavailable";
-      setDiscoveryPages(current => ({ ...current, [category]: { feed: { ...result, status: current[category].feed.status.hasTitles ? { ...result.status, outcome: "ready", hasTitles: true } : result.status }, loading: false, error: failed ? "A metadata source could not load. Available titles are still shown." : "" } }));
+      setDiscoveryPages(current => ({ ...current, [category]: { feed: { ...result, status: current[category].feed.status.hasTitles ? { ...result.status, outcome: "ready", hasTitles: true } : result.status }, loading: false, error: failed ? "A metadata source could not load." : "" } }));
       return !failed;
     } catch (error) {
       setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], error: error instanceof Error ? error.message : "More titles could not be loaded." } }));
@@ -300,14 +321,27 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (categories.some(category => refreshGeneration.current[category] !== refreshedGeneration.current[category])) setRefreshRevision(value => value + 1);
-      setDiscoveryPages(current => {
-        const next = { ...current };
-        for (const category of categories) if (current[category].error && current[category].feed.sources.some(source => source.retryAt !== null && source.retryAt <= Date.now())) next[category] = { ...current[category], error: "" };
-        return next;
-      });
     }, 15_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // A failed page blocks prefetch only until its sources' cooldown ends, not until a fixed sweep.
+  useEffect(() => {
+    const waits = categories.flatMap(category => {
+      const page = discoveryPages[category];
+      const delay = page.error ? feedRetryDelay(page.feed.sources) : null;
+      return delay === null ? [] : [{ category, delay }];
+    });
+    if (!waits.length) return;
+    const timer = window.setTimeout(() => setDiscoveryPages(current => {
+      const due = waits.filter(wait => current[wait.category].error && (feedRetryDelay(current[wait.category].feed.sources) ?? 0) <= 0);
+      if (!due.length) return current;
+      const next = { ...current };
+      for (const { category } of due) next[category] = { ...current[category], error: "" };
+      return next;
+    }), Math.min(...waits.map(wait => wait.delay)) + 50);
+    return () => window.clearTimeout(timer);
+  }, [discoveryPages]);
 
   useEffect(() => {
     const category = session.category;
@@ -350,15 +384,19 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   }, [adultSectionEnabled, loadAttempt]);
 
   const loadedOutbox = useRef(false);
+  const heldOutboxKey = `choice-fatigue-learning-held-${userId}`;
   useEffect(() => {
     if (!ready) return;
     if (!loadedOutbox.current) {
       loadedOutbox.current = true;
       try {
         const stored = JSON.parse(localStorage.getItem(`choice-fatigue-learning-v3-${userId}`) ?? "[]") as unknown;
-        if (Array.isArray(stored)) {
-          learningQueue.current = mergeRecommendationEvents(learningQueue.current, stored.filter(isValidRecommendationEvent));
+        // Adult events held while access was off are offered again once it is back on.
+        const held = adultSectionEnabled ? JSON.parse(localStorage.getItem(heldOutboxKey) ?? "[]") as unknown : [];
+        if (Array.isArray(stored) || Array.isArray(held) && held.length) {
+          learningQueue.current = mergeRecommendationEvents(learningQueue.current, Array.isArray(stored) ? stored.filter(isValidRecommendationEvent) : [], Array.isArray(held) ? held.filter(isValidRecommendationEvent) : []);
           setLearningEvents(current => mergeRecommendationEvents(current, learningQueue.current));
+          if (Array.isArray(held) && held.length) { localStorage.removeItem(heldOutboxKey); persistOutbox(); }
         }
       } catch { /* The outbox still works in memory when storage is unavailable. */ }
     }
@@ -423,10 +461,16 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
         if (!response.ok) { setLearningError("Couldn’t sync recommendation learning. Your choices will retry automatically."); return; }
         const data = await response.json() as { acceptedIds: string[]; rejected: RejectedRecommendationEvent[] };
         const result = settleRecommendationBatch(batch, data.acceptedIds, data.rejected);
-        const settledIds = new Set([...result.confirmed, ...result.quarantined].map(event => event.id));
+        const settledIds = new Set([...result.confirmed, ...result.quarantined, ...result.held].map(event => event.id));
         if (!settledIds.size) return;
         learningQueue.current = learningQueue.current.filter(event => !settledIds.has(event.id));
         persistOutbox();
+        if (result.held.length) {
+          try {
+            const stored = JSON.parse(localStorage.getItem(heldOutboxKey) ?? "[]");
+            localStorage.setItem(heldOutboxKey, JSON.stringify([...(Array.isArray(stored) ? stored : []), ...result.held].slice(-2000)));
+          } catch { /* Held Adult events are dropped only when this browser cannot store them. */ }
+        }
         if (result.quarantined.length) {
           try {
             const key = `choice-fatigue-learning-quarantine-${userId}`;
@@ -443,14 +487,21 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   async function refreshHistoricalProfile(category = activeCategory.current) {
     try {
       const query = new URLSearchParams({ category });
-      for (const id of [...resolvedCreditIds.current].filter(id => categoryForId(id) === category).slice(0, 100)) query.append("resolvedCreditId", id);
+      // Most recently learned first, so the server's recent-title window sees what this tab already holds.
+      for (const id of [...resolvedCreditIds.current].filter(id => categoryForId(id) === category).slice(-200)) query.append("knownFeatureId", id);
       const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures; resolvedCreditItemIds?: string[]; requestedCreditItemIds?: string[] };
+      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures; resolvedCreditItemIds?: string[]; requestedCreditItemIds?: string[]; attemptedFeatureItemIds?: string[] };
       data.resolvedCreditItemIds?.forEach(id => resolvedCreditIds.current.add(id));
+      // A failed lookup is retried on the next page load, not on every refresh.
+      data.attemptedFeatureItemIds?.forEach(id => resolvedCreditIds.current.add(id));
       setLearningEvents(current => mergeRecommendationEvents(current, data.events, learningQueue.current));
       setFeaturesByItemId(current => ({ ...current, ...data.featuresByItemId }));
-      if (data.requestedCreditItemIds?.length) enqueueLearningEvent("retrieval_snapshot", null, category, null, null, null, null, [], null, null, createClientUuid(), { candidateRequestedIds: [], candidateResolvedIds: [], historicalRequestedIds: data.requestedCreditItemIds, historicalResolvedIds: data.resolvedCreditItemIds ?? [] });
+      const snapshotKey = `${category}:${(data.requestedCreditItemIds ?? []).join(",")}`;
+      if (data.requestedCreditItemIds?.length && lastHistoricalSnapshot.current !== snapshotKey) {
+        lastHistoricalSnapshot.current = snapshotKey;
+        enqueueLearningEvent("retrieval_snapshot", null, category, null, null, null, null, [], null, null, createClientUuid(), { candidateRequestedIds: [], candidateResolvedIds: [], historicalRequestedIds: data.requestedCreditItemIds, historicalResolvedIds: data.resolvedCreditItemIds ?? [] });
+      }
     } catch { /* Local decisions remain usable while profile resolution is unavailable. */ }
     finally { setLoadedProfileCategories(current => new Set([...current, category])); }
   }
@@ -458,7 +509,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null, source: LearningEvent["source"] = null, lane: LearningEvent["lane"] = null, retrievalId: string | null = null, provenance: LearningEvent["provenance"] = null) {
     const event: LearningEvent = {
       id: createClientUuid(), sessionId: runId.current, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
-      eventType, decision, rating, targetEventId, algorithmVersion: "content-v6", occurredAt: new Date().toISOString(), retrievalId, source, lane, provenance,
+      eventType, decision, rating, targetEventId, algorithmVersion: currentRecommendationAlgorithmVersion, occurredAt: new Date().toISOString(), retrievalId, source, lane, provenance,
     };
     learningQueue.current = [...learningQueue.current, event];
     if (["decision", "decision_undone", "saved"].includes(eventType)) {
@@ -559,7 +610,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
     }
     function closeAccountMenuOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && accountMenu.current?.open) accountMenu.current.open = false;
+      if (event.key !== "Escape" || !accountMenu.current?.open) return;
+      const focusWasInMenu = accountMenu.current.contains(document.activeElement);
+      accountMenu.current.open = false;
+      if (focusWasInMenu) accountMenu.current.querySelector("summary")?.focus();
     }
     document.addEventListener("pointerdown", closeAccountMenu);
     document.addEventListener("keydown", closeAccountMenuOnEscape);
@@ -569,9 +623,18 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     };
   }, []);
 
-  function showNotice(message:string) {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 2100);
+  /** One toast at a time; a new notice replaces the old one and restarts its timer. */
+  function showNotice(message:string, action?:NoticeAction) {
+    setNotice({ message, action });
+    scheduleNoticeDismissal(action ? 6000 : 4000);
+  }
+  function scheduleNoticeDismissal(delay:number) {
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => { noticeTimer.current = null; setNotice(null); }, delay);
+  }
+  function pauseNotice() {
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = null;
   }
   function categoryForId(id: string): Category {
     return catalogue.find(candidate => candidate.id === id)?.category ?? resolvedSavedItems[id]?.category ?? unavailableSavedItem(id).category;
@@ -655,6 +718,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   function decide(decision:Decision, rating?:number) {
     if (!item) return;
     if (decision === "seen" && (!rating || rating < 1 || rating > 10 || !Number.isInteger(rating))) return;
+    dismissSwipeHint();
     const currentItem = item;
     const nextItemId = nextItem?.id ?? null;
     const event = enqueueLearningEvent("decision", currentItem.id, currentItem.category, decision, decision === "seen" ? rating! : null, null, null);
@@ -673,7 +737,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     if (decision === "seen" && (!rating || rating < 1 || rating > 10 || !Number.isInteger(rating))) return;
     setRatingSelectorOpen(false);
     const element=mediaCard.current;
-    if (!element) { decide(decision, rating); return; }
+    // Reduced motion skips the exit animation entirely rather than running it at zero duration.
+    if (!element || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (element) { element.style.transform=""; element.style.removeProperty("--drag"); element.classList.remove("drag-keep","drag-pass"); }
+      decide(decision, rating);
+      return;
+    }
     swipeExit.current=true;
     setCardExiting(true);
     element.style.transform=decision === "seen" ? "translateY(-10px) scale(.98)" : `translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
@@ -681,7 +750,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     element.style.pointerEvents="none";
     if (source==="control") element.classList.add("control-exit");
     element.classList.remove("drag-keep","drag-pass");
-    const handoffDelay=window.matchMedia("(prefers-reduced-motion: reduce)").matches?0:source==="control"?230:150;
+    const handoffDelay=source==="control"?230:150;
     window.setTimeout(()=>{
       swipeExit.current=false;
       setCardExiting(false);
@@ -708,7 +777,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
     enqueueLearningEvent("shortlist_withdrawn", id, categoryForId(id), null, null, targetEventId);
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions}; });
-    showNotice("Back in discovery — your first impression still counts.");
+    showNotice("Back in discovery — your first impression still counts.", { label: "Undo", run: () => {
+      enqueueLearningEvent("review_restored", id, categoryForId(id), null, null, targetEventId);
+      setSession(current=>({...current, shortlisted:[...new Set([...current.shortlisted,id])], decisions:{...current.decisions,[id]:"keep"}}));
+    } });
   }
   function beginReview() {
     const reviewId = createClientUuid();
@@ -723,13 +795,30 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
     enqueueLearningEvent("review_removed", id, categoryForId(id), null, null, targetEventId);
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions, reviewRemoved:[...new Set([...current.reviewRemoved,id])]}; });
-    showNotice("Removed for now — you can restore it below.");
+    showNotice("Removed for now — you can restore it below.", { label: "Undo", run: () => restorePick(id, false) });
   }
-  function restorePick(id:string) {
+  function restorePick(id:string, announce = true) {
     const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
     enqueueLearningEvent("review_restored", id, categoryForId(id), null, null, targetEventId);
     setSession(current=>({...current, shortlisted:[...new Set([...current.shortlisted,id])], decisions:{...current.decisions,[id]:"keep"}, reviewRemoved:current.reviewRemoved.filter(value=>value!==id)}));
-    showNotice("Restored to your shortlist");
+    if (announce) showNotice("Restored to your shortlist");
+  }
+  /** Withdraw saves; the titles go back to the shortlist when undoing a save, or leave entirely from the Saved list. */
+  function withdrawSaved(ids:string[], backToShortlist:boolean, restoredHistory:SessionState["history"] = []) {
+    for (const id of ids) enqueueLearningEvent("save_withdrawn", id, categoryForId(id));
+    setSession(current=>({...current,
+      saved:current.saved.filter(id=>!ids.includes(id)),
+      shortlisted:backToShortlist ? [...new Set([...current.shortlisted,...ids])] : current.shortlisted,
+      decisions:backToShortlist ? {...current.decisions, ...Object.fromEntries(ids.map(id=>[id,"keep" as const]))} : current.decisions,
+      history:backToShortlist ? [...current.history, ...restoredHistory.filter(entry=>!current.history.some(existing=>existing.eventId===entry.eventId))] : current.history,
+    }));
+  }
+  function removeSaved(pick:MediaItem) {
+    withdrawSaved([pick.id], false);
+    showNotice(`${pick.title} removed from saved`, { label: "Undo", run: () => {
+      enqueueLearningEvent("saved", pick.id, pick.category);
+      setSession(current=>({...current, saved:[...new Set([...current.saved,pick.id])]}));
+    } });
   }
   function savePicks() {
     if (!picks.length) return;
@@ -740,8 +829,11 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       enqueueLearningEvent("review_kept", pick.id, pick.category, null, null, targetEventId);
       enqueueLearningEvent("saved", pick.id, pick.category, null, null, targetEventId);
     }
-    setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), view:"discover"}));
-    setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
+    // Saved titles leave the swipe history: undoing a save is a separate, explicit action, not a swipe undo.
+    const savedHistory = session.history.filter(entry=>visiblePickIds.includes(entry.id));
+    setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), history:current.history.filter(entry=>!visiblePickIds.includes(entry.id)), view:"discover"}));
+    setSavedOpen(true);
+    showNotice(`${count} ${count===1?"title":"titles"} saved for later`, { label: "Undo", run: () => { withdrawSaved(visiblePickIds, true, savedHistory); setSavedOpen(false); } });
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;
@@ -758,6 +850,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       dragFrame.current = null;
       const offset = dragOffset.current;
       card.style.transform = `translate(${offset}px,${Math.max(-16,Math.abs(offset)*-.025)}px) rotate(${offset*.035}deg)`;
+      // -1…1 of the way to the swipe threshold; CSS fades the keep/pass tint and stamp in with it.
+      card.style.setProperty("--drag", String(Math.max(-1, Math.min(1, offset / Math.max(80, card.clientWidth * .24)))));
       card.classList.toggle("drag-keep", offset > 20);
       card.classList.toggle("drag-pass", offset < -20);
     });
@@ -774,6 +868,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     else {
       card.style.transform="";
       card.style.opacity="";
+      card.style.removeProperty("--drag");
       card.classList.remove("drag-keep","drag-pass");
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && item && !ratingSelectorOpen) setDetails(item);
     }
@@ -788,6 +883,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     card.classList.remove("dragging");
     card.style.transform="";
     card.style.opacity="";
+    card.style.removeProperty("--drag");
     card.classList.remove("drag-keep","drag-pass");
   }
 
@@ -798,7 +894,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       className={`media-card ${active ? "card-active" : "card-under"}`}
       tabIndex={active ? 0 : -1}
       aria-hidden={active ? undefined : true}
-      aria-label={active ? `${candidate.title}, ${candidate.year}. Press Enter for details, use left and right arrow keys to pass or shortlist, or rate it out of 10.` : undefined}
+      aria-label={active ? [candidate.title, candidate.year].filter(Boolean).join(", ") : undefined}
+      aria-describedby={active ? "card-controls-hint" : undefined}
       role={active ? "group" : undefined}
       onKeyDown={active ? event => { if ((event.key === "Enter" || event.key === " ") && !ratingSelectorOpen && event.target === event.currentTarget) { event.preventDefault(); setDetails(candidate); } } : undefined}
       onPointerDown={active ? onCardPointerDown : undefined}
@@ -820,7 +917,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
                   <input ref={stars===1?ratingInput:undefined} type="radio" name={`seen-rating-${candidate.id}`} value={stars} aria-label={`${stars} out of 10`} onChange={()=>transitionDecision("seen","control",stars)}/>
                   <span aria-hidden="true">{stars}</span>
                 </label>)}</div>
-              </fieldset> : <button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button>)}
+              </fieldset> : <><button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`Details for ${candidate.title}`}><Icon name="info"/><span>Details</span></button><button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button></>)}
             </div>
           </div>
         </div>
@@ -858,13 +955,14 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     {loadError && <button className="button button-dark" onClick={() => setLoadAttempt(value => value + 1)}>Try again <Icon name="rewind"/></button>}
   </div></section></main></div>;
 
+  const modalOpen = Boolean(details) || ageOpen || savedOpen;
   return <div className="shell">
-    <header className="topbar">
+    <header className="topbar" inert={modalOpen}>
       <a className="brand" href="/" aria-label={`${appName} home`}><span className="brand-symbol">✳</span><span>{appName.toLowerCase()}</span></a>
       <nav className="category-nav" aria-label="Media categories">{categories.filter(category=>adultSectionEnabled || category!=="Adult").map(category=>{const index=categories.indexOf(category); return <button key={category} className={`nav-item ${session.category===category?"active":""} ${category==="Adult"?"adult-nav":""}`} onClick={()=>changeCategory(category)} aria-pressed={session.category===category}>{category==="Adult"?<><Icon name="lock"/><span>Adult</span></>:<><span className={`nav-dot dot-${index}`}/><span>{category}</span></>}</button>;})}</nav>
-      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details ref={accountMenu} className="account-menu"><summary className="avatar" title={userName} aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
+      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details ref={accountMenu} className="account-menu"><summary className="avatar" aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
     </header>
-    <main className={`main ${session.view==="review"?"review-mode":""}`}>
+    <main className={`main ${session.view==="review"?"review-mode":""}`} inert={modalOpen}>
       <section className="content-area">
         {session.view === "review" ? <div className="review-page">
           <div className="review-head"><button className="back-button" onClick={leaveReview}><Icon name="left"/> Back to exploring</button><div className="eyebrow"><span className="live-dot"/> THE SECOND LOOK</div><h1>Review your<br/><em>shortlist.</em></h1><p>Compare your picks, remove any you’re unsure about, then save the ones you want to keep.</p></div>
@@ -878,17 +976,18 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
           </> : <div className="review-empty"><div className="empty-orbit"><Icon name="spark"/></div><h2>No picks in the maybe pile.</h2><p>Keep browsing and shortlist anything that catches your eye.</p><button className="button button-dark" onClick={leaveReview}>Keep browsing <Icon name="arrow"/></button></div>}
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
-          {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
+          {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}{discoveryPages[session.category].error && <> <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try now</button></>}</p>}
           <div className="discover-intro"><h1>{session.category}</h1></div>
-          {item ? <div className="deck-wrap"><div className="deck-meta"><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
+          {item ? <div className="deck-wrap"><div className="deck-meta"><span>{seenCount} reviewed <small>· {picks.length} shortlisted</small></span></div>
             <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
               {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/></>}
               {nextItem && renderMediaCard(nextItem, false)}
               {renderMediaCard(item, true)}
             </div>
-            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Don’t want to see it, left arrow key"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last swipe" title="Undo last swipe"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Want to see it, right arrow key"><small>Want to see</small><span><Icon name="right"/></span></button></div>
-            {discoveryPages[session.category].error && <p className="feed-load-error" role="alert">{discoveryPages[session.category].error} <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again</button></p>}
-          </div> : <div className="empty-state"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
+            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-keyshortcuts="ArrowLeft"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last swipe" title="Undo last swipe"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-keyshortcuts="ArrowRight"><small>Want to see</small><span><Icon name="right"/></span></button></div>
+            <p id="card-controls-hint" className="sr-only">Press Enter for details. Use the left and right arrow keys to pass or shortlist.</p>
+            {showSwipeHint && <p className="swipe-hint" aria-hidden="true">Drag the card, or use <kbd>←</kbd> <kbd>→</kbd></p>}
+          </div> : <div className="empty-state" role="status"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
             {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}
           </div>}
           {learningError && <p className="sync-error" role="alert">{learningError}</p>}
@@ -901,10 +1000,13 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
         <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in the maybe pile</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
       </aside>}
     </main>
-    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{displayMetadata(details, true)}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}{details.rating !== "—" && <span>★ {details.rating}</span>}</div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(item?.id===details.id&&!session.shortlisted.includes(details.id))decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
-    {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes and may display explicit artwork.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
-    {savedOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
-      <section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title">
+    {details&&<Modal className="details-modal" labelledBy="modal-title" onClose={()=>setDetails(null)}><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{displayMetadata(details, true)}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}{details.rating !== "—" && <span>★ {details.rating}</span>}</div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}{
+      item?.id===details.id&&!session.shortlisted.includes(details.id)&&!session.saved.includes(details.id)
+        ? <button className="button button-accent" onClick={()=>{decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button>
+        : <p className="details-status" role="status">{session.saved.includes(details.id) ? "Saved for later." : session.shortlisted.includes(details.id) ? "Already in your shortlist." : ""}</p>
+    }</div></Modal>}
+    {ageOpen&&<Modal className="age-modal" labelledBy="age-title" onClose={()=>setAgeOpen(false)}><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes and may display explicit artwork.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></Modal>}
+    {savedOpen && <Modal className="saved-modal" labelledBy="saved-title" onClose={() => setSavedOpen(false)}>
         <button className="modal-close" onClick={() => setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close" /></button>
         <div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div>
         <h2 id="saved-title">Saved for later</h2>
@@ -932,6 +1034,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
             <div className="saved-item-copy"><strong>{pick.title}</strong><small>{pick.year ?? "Details pending"} · {pick.category}</small>{pick.title === "Title details unavailable" && <small role="status">Your provider ID remains saved. Details will reappear when the source is available.</small>}
               {message && <small className={messageIsPositive ? "request-success" : "request-feedback"} role="status">{message}</small>}
               {plexAvailability && <small className={plexAvailability.inLibrary ? "request-success" : plexAvailability.message.startsWith("Not in your Plex") || plexAvailability.message.startsWith("Checking Plex") ? "request-neutral" : "request-feedback"} role="status">{plexAvailability.message}</small>}
+              <button className="saved-remove-button" type="button" onClick={() => removeSaved(pick)} aria-label={`Remove ${pick.title} from saved`}>Remove</button>
             </div>
             {pick.requestable && (seerrConnections.length > 0 || plexConnections.length > 0) ? <div className="saved-actions">
               {seerrConnections.length > 0 && <>
@@ -943,8 +1046,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
           </div>;
         })}</div> : <div className="saved-empty">Your saved list is empty. Review a shortlist to keep your favourites here.</div>}
         <button className="button button-dark saved-done" onClick={() => setSavedOpen(false)}>Done</button>
-      </section>
-    </div>}
-    <div className={`toast ${notice?"show":""}`} role="status" aria-live="polite">{notice}</div>
+    </Modal>}
+    <div className={`toast ${notice?"show":""}`} role="status" aria-live="polite" onMouseEnter={pauseNotice} onMouseLeave={() => { if (notice) scheduleNoticeDismissal(3000); }} onFocus={pauseNotice} onBlur={() => { if (notice) scheduleNoticeDismissal(3000); }}>
+      {notice?.message}
+      {notice?.action && <button className="toast-action" type="button" onClick={() => { const action = notice.action!; pauseNotice(); setNotice(null); action.run(); }}>{notice.action.label}</button>}
+    </div>
   </div>;
 }

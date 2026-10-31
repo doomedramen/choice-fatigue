@@ -96,13 +96,13 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(page.getByRole("dialog").getByText("Mock Actor")).toBeVisible();
   await expect(page.getByRole("dialog").getByText("The Lead")).toBeVisible();
   await page.getByRole("button", { name: "Close details" }).click();
-  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
   await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.getByRole("button", { name: "Undo last choice" }).first().click();
   await expect(page.getByText("0 titles in the maybe pile")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 0, decisionCount: 0 });
-  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
   await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.reload();
@@ -165,8 +165,9 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(memberPage.getByRole("button", { name: "Adult", exact: true })).toBeVisible();
 
   await page.goto("/account");
-  page.on("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Clear recommendation history" }).click();
+  await expect(page.getByRole("dialog", { name: "Clear recommendation history?" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Clear history" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Saved recommendation history cleared" })).toBeVisible();
 
   const controlResponse = await request.post("http://127.0.0.1:4199/__control", { data: { failTmdb: true } });
@@ -242,7 +243,7 @@ async function setupRecommendationAdmin(page: import("@playwright/test").Page) {
 }
 
 function learningDecision(itemId: string, index: number, decision: "keep" | "pass" = "keep", category: "Movies" | "Adult" = "Movies") {
-  return { id: `seed-${category}-${index}`, sessionId: "seed", sequence: index, occurredAt: new Date(Date.UTC(2026, 9, 31, 8, 0, index)).toISOString(), itemId, category, eventType: "decision", decision, rating: null, reviewId: null, targetEventId: null, candidateIds: null, algorithmVersion: "content-v3", retrievalId: null, source: null, lane: null };
+  return { id: `seed-${category}-${index}`, sessionId: "seed", sequence: index, occurredAt: new Date(Date.now() - 10 * 60_000 + index * 1000).toISOString(), itemId, category, eventType: "decision", decision, rating: null, reviewId: null, targetEventId: null, candidateIds: null, algorithmVersion: "content-v7", retrievalId: null, source: null, lane: null };
 }
 
 test("reranking preserves actual shown order and invalid events do not block valid choices", async ({ page, request }) => {
@@ -259,8 +260,8 @@ test("reranking preserves actual shown order and invalid events do not block val
   await page.mouse.up();
   await expect(page.locator(".card-active h2")).toHaveText("Paged Movie 102");
   await expect.poll(async () => page.evaluate(async () => {
-    const data = await (await fetch("/api/recommendation-events?category=Movies")).json();
-    return data.events.some((event: { eventType: string; itemId: string; candidateIds: string[] }) => event.eventType === "item_shown" && event.itemId === "tmdb-movie-102" && event.candidateIds[0] === "tmdb-movie-102");
+    const data = await (await fetch("/api/account/export")).json();
+    return data.recommendationHistory.some((event: { eventType: string; itemId: string; candidateIds: string[] }) => event.eventType === "item_shown" && event.itemId === "tmdb-movie-102" && event.candidateIds[0] === "tmdb-movie-102");
   })).toBe(true);
   const valid = learningDecision("tmdb-movie-900", 0);
   const posted = await page.evaluate(async valid => {
@@ -269,7 +270,7 @@ test("reranking preserves actual shown order and invalid events do not block val
   }, valid);
   expect(posted.acceptedIds).toEqual([valid.id]);
   expect(posted.rejected).toMatchObject([{ id: "invalid-trace", code: "invalid" }]);
-  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/account/export")).json();
     return data.recommendationHistory.some((event: { eventType: string; itemId: string; decision: string }) => event.eventType === "decision" && event.itemId === "tmdb-movie-102" && event.decision === "keep");
@@ -286,7 +287,7 @@ test("paging past 100 accumulated candidates keeps traces bounded and learning u
   expect(accepted.acceptedIds).toHaveLength(105);
   await page.goto("/");
   await expect(page.locator(".card-active h2")).toContainText(/Paged Movie 2\d\d/, { timeout: 30_000 });
-  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/account/export")).json();
     return data.recommendationHistory.filter((event: { eventType: string; decision: string }) => event.eventType === "decision" && event.decision === "keep").length;
@@ -359,7 +360,7 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
 test("related shows and credit lanes preserve provenance and category boundaries", async ({ page }) => {
   test.setTimeout(90_000);
   await setupRecommendationAdmin(page);
-  const events = [201, 202].map((id, index) => ({ ...learningDecision(`tmdb-tv-${id}`, index), id: `show-seed-${index}`, category: "Shows", decision: "seen", rating: 9, algorithmVersion: "content-v4" }));
+  const events = [201, 202].map((id, index) => ({ ...learningDecision(`tmdb-tv-${id}`, index), id: `show-seed-${index}`, category: "Shows", decision: "seen", rating: 9 }));
   const seeded = await page.evaluate(async events => (await fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) })).json(), events);
   expect(seeded.acceptedIds).toHaveLength(2);
   const feed = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
@@ -375,7 +376,7 @@ test("related shows and credit lanes preserve provenance and category boundaries
   expect(next.items.some((item: { id: string }) => item.id === "tmdb-tv-9904")).toBe(true);
   await page.goto("/");
   await expect.poll(async () => page.evaluate(async () => {
-    const history = (await (await fetch("/api/recommendation-events?category=Shows")).json()).events;
+    const history = (await (await fetch("/api/account/export")).json()).recommendationHistory;
     return history.filter((row: { lane: string; provenance?: { endpoint: string } }) => row.lane === "related" && row.provenance?.endpoint === "recommendations").length;
   })).toBe(2);
   const rejected = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status);
@@ -392,18 +393,18 @@ test("a high show rating refreshes related discovery without moving the locked c
   await page.getByRole("radio", { name: "9 out of 10" }).click({ force: true });
   await expect(page.locator(".card-active h2")).toHaveText("Mock Show Two");
   await expect.poll(async () => page.evaluate(async () => {
-    const { events } = await (await fetch("/api/recommendation-events?category=Shows")).json();
+    const events = (await (await fetch("/api/account/export")).json()).recommendationHistory;
     return events.some((event: { lane: string; eventType: string }) => event.lane === "related" && event.eventType === "candidate_batch");
   }), { timeout: 30_000 }).toBe(true);
   await expect(page.locator(".card-active h2")).toHaveText("Mock Show Two");
   await page.getByRole("button", { name: "Seen it: rate Mock Show Two" }).click();
   await page.getByRole("radio", { name: "9 out of 10" }).click({ force: true });
   await expect.poll(async () => page.evaluate(async () => {
-    const { events } = await (await fetch("/api/recommendation-events?category=Shows")).json();
+    const events = (await (await fetch("/api/account/export")).json()).recommendationHistory;
     return events.some((event: { lane: string }) => event.lane === "person") && events.some((event: { lane: string }) => event.lane === "company");
   }), { timeout: 30_000 }).toBe(true);
-  const events = await page.evaluate(async () => (await (await fetch("/api/recommendation-events?category=Shows")).json()).events);
-  expect(events.some((event: { eventType: string; algorithmVersion: string }) => event.eventType === "retrieval_snapshot" && event.algorithmVersion === "content-v6")).toBe(true);
+  const events = await page.evaluate(async () => (await (await fetch("/api/account/export")).json()).recommendationHistory);
+  expect(events.some((event: { eventType: string; algorithmVersion: string }) => event.eventType === "retrieval_snapshot" && event.algorithmVersion === "content-v7")).toBe(true);
 });
 
 test("credit hydration skips considered titles and missing credits stay neutral", async ({ page, request }) => {
@@ -437,7 +438,7 @@ test("a failed related lane does not prevent popular pagination", async ({ page,
   test.setTimeout(90_000);
   await setupRecommendationAdmin(page);
   await request.post("http://127.0.0.1:4199/__control", { data: { extended: true, failRelated: true } });
-  const seed = { ...learningDecision("tmdb-tv-201", 0), id: "related-seed", category: "Shows", decision: "seen", rating: 9, algorithmVersion: "content-v4" };
+  const seed = { ...learningDecision("tmdb-tv-201", 0), id: "related-seed", category: "Shows", decision: "seen", rating: 9 };
   await page.evaluate(async event => fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events: [event] }) }), seed);
   const first = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
   expect(first.sources).toContainEqual(expect.objectContaining({ lane: "related", outcome: "unavailable" }));
@@ -445,4 +446,52 @@ test("a failed related lane does not prevent popular pagination", async ({ page,
   const next = await page.evaluate(async cursor => (await fetch(`/api/discovery-feed?category=Shows&cursor=${encodeURIComponent(cursor)}`)).json(), first.cursor);
   expect(next.sources).toContainEqual(expect.objectContaining({ lane: "popular", outcome: "ready" }));
   expect(next.items.some((item: { id: string }) => item.id === "tmdb-tv-121")).toBe(true);
+});
+
+test("dialogs hold keyboard focus, and saves and removals can be undone on a phone-sized screen", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 375, height: 812 });
+  const shortlistCount = page.locator(".panel-heading h2 span");
+  await setupRecommendationAdmin(page);
+  await page.goto("/");
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
+  await expect(page.getByText(/Drag the card, or use/)).toBeVisible();
+
+  const details = page.getByRole("button", { name: "Details for Mock Movie One" });
+  await details.click();
+  const dialog = page.getByRole("dialog", { name: "Mock Movie One" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close details" })).toBeFocused();
+  for (let index = 0; index < 8; index++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest("[role=dialog]")))).toBe(true);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(details).toBeFocused();
+
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await expect(page.getByText(/Drag the card, or use/)).toHaveCount(0);
+  await expect(shortlistCount).toHaveText("1");
+  await page.getByRole("button", { name: "Remove Mock Movie One from shortlist" }).click();
+  await expect(shortlistCount).toHaveText("0");
+  await page.locator(".toast").getByRole("button", { name: "Undo" }).click();
+  await expect(shortlistCount).toHaveText("1");
+
+  await page.getByRole("button", { name: "Review & compare" }).click();
+  await page.getByRole("button", { name: "Save 1 pick" }).click();
+  await expect(page.getByRole("dialog", { name: "Saved for later" })).toBeVisible();
+  await page.locator(".toast").getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByRole("dialog", { name: "Saved for later" })).toHaveCount(0);
+  await expect(shortlistCount).toHaveText("1");
+
+  await page.getByRole("button", { name: "Review & compare" }).click();
+  await page.getByRole("button", { name: "Save 1 pick" }).click();
+  await page.getByRole("button", { name: "Remove Mock Movie One from saved" }).click();
+  await expect(page.getByText("Your saved list is empty.", { exact: false })).toBeVisible();
+  await expect.poll(async () => page.evaluate(async () => {
+    const history = (await (await fetch("/api/account/export")).json()).recommendationHistory as Array<{ eventType: string }>;
+    return history.filter(event => event.eventType === "save_withdrawn").length;
+  })).toBe(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

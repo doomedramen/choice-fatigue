@@ -1,12 +1,12 @@
 .auth-page { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; background: #0c101b; color: #f6f7fb; }
 .auth-header { display:flex; align-items:center; justify-content:space-between; min-height:68px; padding:0 20px; border-bottom:1px solid #303a50; background:#101624; }
-.auth-brand { display:inline-flex; align-items:center; gap:9px; color:#fff; font-family:"Manrope",sans-serif; font-size:19px; font-weight:800; letter-spacing:-.7px; text-decoration:none; }
+.auth-brand { display:inline-flex; align-items:center; gap:9px; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:19px; font-weight:800; letter-spacing:-.7px; text-decoration:none; }
 .auth-brand-mark { display:grid; width:31px; height:31px; place-items:center; border-radius:10px; background:#754cf7; color:#fff; font-size:19px; }
 .auth-back { color:#c8bbff; font-size:14px; font-weight:700; text-decoration:none; }
 .auth-main { display:grid; place-items:center; padding:28px 16px 48px; }
 .auth-card { width:min(100%,440px); padding:26px 22px; border:1px solid #354158; border-radius:16px; background:#151d2c; box-shadow:0 22px 65px #0004; }
 .auth-eyebrow { margin:0 0 10px; color:#b9a5ff; font-size:11px; font-weight:800; letter-spacing:1.25px; text-transform:uppercase; }
-.auth-card h1 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:clamp(30px,8vw,39px); font-weight:800; line-height:1.06; letter-spacing:-1.15px; }
+.auth-card h1 { margin:0; color:#fff; font-family:var(--font-manrope),sans-serif; font-size:clamp(30px,8vw,39px); font-weight:800; line-height:1.06; letter-spacing:-1.15px; }
 .auth-intro { margin:12px 0 24px; color:#bac2d2; font-size:15px; line-height:1.55; }
 .auth-invite-note { margin:0 0 20px; padding:12px 13px; border:1px solid #4b416f; border-radius:9px; background:#211b36; color:#ded6fa; font-size:13px; line-height:1.5; }
 .auth-form { display:grid; gap:16px; }
