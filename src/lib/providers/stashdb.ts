@@ -1,6 +1,7 @@
 import "server-only";
 import { requestProviderJson } from "@/lib/providers/request";
 import { providerArtworkUrl } from "@/lib/provider-artwork";
+import { stashDbPeople } from "@/lib/media-people";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
@@ -98,6 +99,17 @@ const findQuery = `query FindSceneById($id: ID!) {
     images { url }
   }
 }`;
+
+const peopleQuery = `query ScenePeople($id: ID!) {
+  findScene(id: $id) { id performers { as performer { name images { url } } } }
+}`;
+
+export async function getStashDbPeople(sourceId: string) {
+  if (!sourceId || sourceId.length > 160 || !/^[A-Za-z0-9_-]+$/.test(sourceId)) throw new StashDbMissingSceneError();
+  const response = await graphql<FindSceneResponse>(peopleQuery, { id: sourceId }, await getApiKey());
+  if (!response.findScene || response.findScene.id !== sourceId) throw new StashDbMissingSceneError();
+  return stashDbPeople(response.findScene);
+}
 
 const popularQuery = `query PopularScenes($input: SceneQueryInput!) {
   queryScenes(input: $input) {

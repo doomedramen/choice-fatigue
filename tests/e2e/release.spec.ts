@@ -92,6 +92,9 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(page.getByRole("heading", { name: "Mock Movie One" })).toBeVisible();
   await page.locator(".card-active .card-poster").click();
   await expect(page.getByRole("dialog", { name: "Mock Movie One" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Cast" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText("Mock Actor")).toBeVisible();
+  await expect(page.getByRole("dialog").getByText("The Lead")).toBeVisible();
   await page.getByRole("button", { name: "Close details" }).click();
   await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
   await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
@@ -223,6 +226,7 @@ test("first run, account access, provider discovery, saved state and account con
 test("private account APIs reject anonymous access", async ({ request }) => {
   const response = await request.get("/api/discovery-state");
   expect(response.status()).toBe(401);
+  expect((await request.get("/api/media/people?id=tmdb-movie-101")).status()).toBe(401);
 });
 
 async function setupRecommendationAdmin(page: import("@playwright/test").Page) {
@@ -309,6 +313,7 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "company")).toBe(true);
   expect(await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status)).toBe(403);
   expect(await page.evaluate(async () => (await fetch("/api/recommendation-events?category=Adult")).status)).toBe(403);
+  expect(await page.evaluate(async () => (await fetch("/api/media/people?id=stashdb-stash-scene-1")).status)).toBe(403);
   const beforeGrant = await (await request.get("http://127.0.0.1:4199/__control")).json();
   expect(beforeGrant.requests.some((entry: { path: string }) => entry.path === "/graphql" || entry.path.startsWith("/theporndb"))).toBe(false);
   await page.evaluate(async () => {
@@ -323,12 +328,24 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   expect(adult.items.some((item: { id: string }) => item.id === "stashdb-stash-personalized")).toBe(true);
   expect(adult.items.some((item: { id: string; artworkUrl?: string }) => item.id.startsWith("stashdb-") && item.artworkUrl === "https://images.example.test/stash.jpg")).toBe(true);
   expect(adult.items.some((item: { id: string; artworkUrl?: string }) => item.id.startsWith("theporndb-") && item.artworkUrl === "https://images.example.test/poster.jpg")).toBe(true);
+  const people = await page.evaluate(async () => Promise.all(["tmdb-tv-201", "stashdb-stash-scene-1", "theporndb-scene-adult-scene-1"].map(async id => (await (await fetch(`/api/media/people?id=${id}`)).json()).people)));
+  expect(people.map((group: Array<{ name: string }>) => group[0]?.name)).toEqual(["Mock Actor", "Mock Stash Performer", "Mock Adult Performer"]);
   expect(adult.cursor).toBeTruthy();
   const next = await page.evaluate(async cursor => (await fetch(`/api/discovery-feed?category=Adult&cursor=${encodeURIComponent(cursor)}`)).json(), adult.cursor);
   expect(next.items.some((item: { id: string }) => item.id === "theporndb-scene-adult-scene-26")).toBe(true);
   expect(next.items.some((item: { id: string }) => item.id === "stashdb-stash-scene-26")).toBe(true);
   const sources = await (await request.get("http://127.0.0.1:4199/__control")).json();
   expect(sources.requests.some((entry: { input?: { input?: { tags?: { modifier: string; value: string[] } } } }) => entry.input?.input?.tags?.modifier === "INCLUDES" && entry.input.input.tags.value.includes("tag-drama"))).toBe(true);
+  await page.route("https://images.example.test/**", route => route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZ8AAAAASUVORK5CYII=", "base64") }));
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Media categories" }).getByRole("button", { name: "Adult" }).click();
+  await page.getByRole("button", { name: "I’m 18 or older" }).click();
+  await expect(page.locator(".card-active h2")).toBeVisible();
+  await page.locator(".card-active .card-poster").click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Performers" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText("Mock Adult Performer")).toBeVisible();
+  await expect(page.getByRole("dialog").locator(".person-portrait img")).toHaveAttribute("src", "https://images.example.test/person.jpg");
+  await page.getByRole("button", { name: "Close details" }).click();
   await request.post("http://127.0.0.1:4199/__control", { data: { failMovies: true } });
   const shows = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
   const movies = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());

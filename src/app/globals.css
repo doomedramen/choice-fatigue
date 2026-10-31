@@ -265,6 +265,16 @@ button:active:not(:disabled) { transform: scale(.98); }
 .modal-info h2 { margin: 9px 0 12px; color: #fff; font-family: "Manrope", sans-serif; font-size: 30px; font-weight: 800; }
 .modal-info p { font-size: 15px; }
 .modal-info .button { width: 100%; margin-top: 17px; }
+.details-people { margin-top: 22px; }
+.details-people h3 { margin: 0 0 12px; color: #e8ebf3; font-family: "Manrope", sans-serif; font-size: 15px; font-weight: 800; }
+.details-people .details-people-status { margin: 0; color: #aeb8ca; font-size: 13px; }
+.people-list { display: flex; gap: 12px; margin: 0 -2px; padding: 2px 2px 9px; overflow-x: auto; overscroll-behavior-x: contain; list-style: none; scrollbar-width: thin; scrollbar-color: #58647a transparent; }
+.person-card { flex: 0 0 104px; min-width: 0; }
+.person-portrait { display: grid; width: 100%; aspect-ratio: 4 / 5; overflow: hidden; place-items: center; border: 1px solid #46536a; border-radius: 10px; background: #273246; color: #c4b8e7; font-family: "Manrope", sans-serif; font-size: 24px; font-weight: 800; }
+.person-portrait img { width: 100%; height: 100%; object-fit: cover; }
+.person-card strong, .person-card small { display: block; overflow-wrap: anywhere; }
+.person-card strong { margin-top: 8px; color: #eef0f7; font-size: 12px; line-height: 1.3; }
+.person-card small { margin-top: 3px; color: #aeb8ca; font-size: 11px; line-height: 1.3; }
 .modal-close { position: absolute; z-index: 2; top: 10px; right: 10px; display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #66718a; border-radius: 10px; background: #111827e8; color: #fff; }
 .modal-close svg { width: 18px; height: 18px; }
 .age-note { display: flex; align-items: center; gap: 7px; margin-top: 13px; color: #ffc1b5; font-size: 13px; font-weight: 700; }

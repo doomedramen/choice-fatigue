@@ -1,6 +1,7 @@
 import "server-only";
 import { requestProviderJson } from "@/lib/providers/request";
 import { providerArtworkUrl } from "@/lib/provider-artwork";
+import { thePornDbPeople } from "@/lib/media-people";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
@@ -151,6 +152,14 @@ export async function getThePornDBMediaItem(kind: ThePornDBKind, sourceId: strin
   const item = record ? popularItem(record, kind) : null;
   if (!item || recordId(record!) !== sourceId) throw new ThePornDBInvalidRecordError();
   return item;
+}
+
+export async function getThePornDBPeople(kind: ThePornDBKind, sourceId: string) {
+  if (!idPattern.test(sourceId)) throw new ThePornDBInvalidRecordError();
+  const payload = await requestThePornDB<ThePornDBPayload>(apiPath(kind, sourceId), await accessToken());
+  const record = recordsFrom(payload)[0];
+  if (!record || recordId(record) !== sourceId) throw new ThePornDBInvalidRecordError();
+  return thePornDbPeople(record);
 }
 
 function apiPath(kind: ThePornDBKind, id?: string) {

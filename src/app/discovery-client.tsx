@@ -10,6 +10,7 @@ import { recommendationEventBatch, settleRecommendationBatch } from "@/lib/recom
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
 import { createClientUuid } from "@/lib/client-uuid";
 import { deduplicateTitles, type DiscoveryFeed, type CandidateBatch } from "@/lib/discovery-feed";
+import type { MediaPerson } from "@/lib/media-people";
 
 type Decision = "keep" | "pass" | "seen";
 type DiscoveryPageState = Record<Category, { feed: DiscoveryFeed; loading: boolean; error: string }>;
@@ -105,6 +106,42 @@ function DetailsBackdrop({ item }: { item: MediaItem }) {
       onError={() => setFailedSource(source)}
     />}
   </div>;
+}
+
+function PersonCard({ person }: { person: MediaPerson }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const initials = person.name.split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] ?? "").join("").toLocaleUpperCase();
+  return <li className="person-card">
+    <div className="person-portrait">
+      {person.imageUrl && !imageFailed ? <img src={person.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setImageFailed(true)}/> : <span aria-hidden="true">{initials}</span>}
+    </div>
+    <strong>{person.name}</strong>
+    {person.role && <small>{person.role}</small>}
+  </li>;
+}
+
+function DetailsPeople({ item }: { item: MediaItem }) {
+  const [people, setPeople] = useState<MediaPerson[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
+  const label = item.category === "Adult" ? "Performers" : "Cast";
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/media/people?${new URLSearchParams({ id: item.id })}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error();
+        const result = await response.json() as { people?: MediaPerson[] };
+        setPeople(Array.isArray(result.people) ? result.people : []);
+        setStatus("ready");
+      }).catch(() => { if (!controller.signal.aborted) setStatus("unavailable"); });
+    return () => controller.abort();
+  }, [item.id]);
+  return <section className="details-people" aria-label={label} aria-busy={status === "loading"}>
+    <h3>{label}</h3>
+    {status === "loading" ? <p className="details-people-status" role="status">Loading {label.toLowerCase()}…</p>
+      : status === "unavailable" ? <p className="details-people-status">{label} information isn’t available right now.</p>
+      : people.length ? <ul className="people-list">{people.map((person, index) => <PersonCard key={`${person.name}-${index}`} person={person}/>)}</ul>
+      : <p className="details-people-status">No {label.toLowerCase()} information available.</p>}
+  </section>;
 }
 
 interface DiscoveryClientProps {
@@ -859,7 +896,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
         <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in the maybe pile</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
       </aside>}
     </main>
-    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(item?.id===details.id&&!session.shortlisted.includes(details.id))decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
+    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(item?.id===details.id&&!session.shortlisted.includes(details.id))decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
     {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes and may display explicit artwork.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
     {savedOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
       <section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title">

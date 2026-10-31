@@ -1,6 +1,7 @@
 import "server-only";
 import { requestProviderJson } from "@/lib/providers/request";
 import { creditFeatureKeys } from "@/lib/credit-features";
+import { tmdbPeople } from "@/lib/media-people";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
@@ -239,6 +240,15 @@ export async function getTmdbCreditFeatures(mediaType: TmdbMediaType, id: number
   if (record.id !== id || record.adult === true) throw new TmdbRequestError();
   if (!(mediaType === "tv" ? record.aggregate_credits : record.credits)) throw new TmdbRequestError();
   return [...recommendationFeatureKeys({ genres: Array.isArray(record.genres) ? record.genres.map(genre => text(genre.name)).filter(Boolean) : [], year: yearFrom(mediaType === "tv" ? record.first_air_date : record.release_date), type: mediaType === "tv" ? "Series" : "Movie" }), ...creditFeatureKeys(record, mediaType)];
+}
+
+export async function getTmdbPeople(mediaType: TmdbMediaType, id: number) {
+  if (!Number.isSafeInteger(id) || id < 1) throw new TmdbRequestError();
+  const token = await getEnabledTmdbToken();
+  const append = mediaType === "tv" ? "aggregate_credits" : "credits";
+  const record = await requestTmdb<TmdbRecord>(`/${mediaType}/${id}?language=en-US&append_to_response=${append}`, token);
+  if (record.id !== id || record.adult === true) throw new TmdbRequestError();
+  return tmdbPeople(record, mediaType);
 }
 
 /** Relationship lists are TV-only and are explicitly filtered to non-Adult records. */
