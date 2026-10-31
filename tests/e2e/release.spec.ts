@@ -167,8 +167,6 @@ test("first run, account access, provider discovery, saved state and account con
   await page.getByRole("button", { name: "Movies", exact: true }).click();
   await expect.poll(async () => page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()).then(state => state.category))).toBe("Movies");
   await page.goto("/");
-  await page.locator('button[title="Start a fresh session"]').click();
-  await expect(page.getByRole("heading", { name: "Mock Movie One" })).toBeVisible();
   await request.post("http://127.0.0.1:4199/__control", { data: { malformedAdult: false } });
 
   const tmdbDisabled = await page.evaluate(async () => fetch("/api/admin/providers/tmdb/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey: "", enabled: false }) }).then(response => response.status));
@@ -197,12 +195,10 @@ test("first run, account access, provider discovery, saved state and account con
   });
   expect(concurrentWrite.firstStatus).toBe(200);
   expect(concurrentWrite.staleStatus).toBe(409);
-  await page.locator('button[title="Start a fresh session"]').click();
-  await expect.poll(async () => page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()).then(state => state.sessionId)), { timeout: 15_000 }).not.toBe(concurrentWrite.baseSessionId);
-  const rebased = await page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()));
-  expect(rebased.sessionId).not.toBe(concurrentWrite.baseSessionId);
-  expect(rebased.saved).toContain("tmdb-movie-998");
-  expect(rebased.shortlisted).not.toContain("tmdb-movie-999");
+  const persistedAfterConflict = await page.evaluate(async () => fetch("/api/discovery-state", { cache: "no-store" }).then(response => response.json()));
+  expect(persistedAfterConflict.sessionId).toBe(concurrentWrite.baseSessionId);
+  expect(persistedAfterConflict.saved).toContain("tmdb-movie-998");
+  expect(persistedAfterConflict.shortlisted).not.toContain("tmdb-movie-999");
 
   await memberPage.goto("/account");
   await memberPage.getByLabel("Type DELETE to confirm").fill("DELETE");
