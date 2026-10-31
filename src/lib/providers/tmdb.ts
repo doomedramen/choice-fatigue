@@ -25,7 +25,7 @@ type TmdbRecord = {
   genres?: Array<{ name?: unknown }>;
 };
 
-type TmdbSearchPayload = { results?: TmdbRecord[] };
+type TmdbSearchPayload = { results?: TmdbRecord[]; total_pages?: number };
 type TmdbGenrePayload = { genres?: Array<{ id?: unknown; name?: unknown }> };
 
 export class TmdbRequestError extends Error {}
@@ -171,6 +171,54 @@ function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder
   };
 }
 
+function catalogueItemsFromRecords(records: TmdbRecord[], category: TmdbCategory, genresById: Map<number, string>): MediaItem[] {
+  return records.flatMap(record => {
+    const entry = discoveryEntry(record, category, 0, genresById);
+    if (!entry) return [];
+    const mediaType = mediaTypeFor(record, category)!;
+    return [{
+      id: entry.id,
+      title: entry.title,
+      ...(entry.year === null ? {} : { year: entry.year }),
+      type: entry.type,
+      runtime: entry.runtime,
+      rating: entry.rating === null ? "—" : entry.rating.toFixed(1),
+      genre: entry.genres,
+      synopsis: entry.synopsis,
+      ...(entry.artworkUrl ? { artworkUrl: entry.artworkUrl } : {}),
+      ...(entry.backdropUrl ? { backdropUrl: entry.backdropUrl } : {}),
+      palette: ["#344255", "#263244", "#151d2c"],
+      art: "mist",
+      label: entry.label,
+      category,
+      requestable: { provider: "tmdb" as const, mediaType, id: Number(record.id) },
+    }];
+  });
+}
+
+async function getCatalogueGenres(category: TmdbCategory, token: string) {
+  const payload = await requestTmdb<TmdbGenrePayload>(`/genre/${category === "Movies" ? "movie" : "tv"}/list?language=en-US`, token);
+  return new Map<number, string>((payload.genres ?? [])
+    .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
+    .map(genre => [genre.id as number, text(genre.name)]));
+}
+
+/** Load one further page of popular titles after the initial discovery batch. */
+export async function getPopularTmdbCataloguePage(category: TmdbCategory, page: number) {
+  if (!Number.isSafeInteger(page) || page < 1 || page > 500) throw new TmdbRequestError();
+  const token = await getEnabledTmdbToken();
+  const mediaType = category === "Movies" ? "movie" : "tv";
+  const [genres, payload] = await Promise.all([
+    getCatalogueGenres(category, token),
+    requestTmdb<TmdbSearchPayload>(`/discover/${mediaType}?include_adult=false&${mediaType === "movie" ? "include_video=false&" : "include_null_first_air_dates=false&"}language=en-US&page=${page}&sort_by=popularity.desc`, token),
+  ]);
+  const records = Array.isArray(payload.results) ? payload.results : [];
+  const totalPages = typeof payload.total_pages === "number" && Number.isFinite(payload.total_pages)
+    ? Math.min(500, Math.max(1, Math.floor(payload.total_pages)))
+    : 500;
+  return { items: catalogueItemsFromRecords(records, category, genres), hasMore: records.length > 0 && page < totalPages };
+}
+
 /** Fetch the current popular feed on demand without caching or persisting provider metadata. */
 export async function getPopularTmdbCatalogue(): Promise<MediaItem[]> {
   const token = await getEnabledTmdbToken();
@@ -188,32 +236,10 @@ export async function getPopularTmdbCatalogue(): Promise<MediaItem[]> {
     .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
     .map(genre => [genre.id as number, text(genre.name)]));
 
-  const toMediaItem = (record: TmdbRecord, category: TmdbCategory, genresById: Map<number, string>): MediaItem | null => {
-    const entry = discoveryEntry(record, category, 0, genresById);
-    if (!entry) return null;
-    const mediaType = mediaTypeFor(record, category)!;
-    return {
-      id: entry.id,
-      title: entry.title,
-      ...(entry.year === null ? {} : { year: entry.year }),
-      type: entry.type,
-      runtime: entry.runtime,
-      rating: entry.rating === null ? "—" : entry.rating.toFixed(1),
-      genre: entry.genres,
-      synopsis: entry.synopsis,
-      ...(entry.artworkUrl ? { artworkUrl: entry.artworkUrl } : {}),
-      ...(entry.backdropUrl ? { backdropUrl: entry.backdropUrl } : {}),
-      palette: ["#344255", "#263244", "#151d2c"],
-      art: "mist",
-      label: entry.label,
-      category,
-      requestable: { provider: "tmdb", mediaType, id: Number(record.id) },
-    };
-  };
   return [
-    ...moviePages.flatMap(payload => (Array.isArray(payload.results) ? payload.results : []).map(record => toMediaItem(record, "Movies", movieGenreMap))),
-    ...tvPages.flatMap(payload => (Array.isArray(payload.results) ? payload.results : []).map(record => toMediaItem(record, "Shows", tvGenreMap))),
-  ].filter((item): item is MediaItem => item !== null);
+    ...moviePages.flatMap(payload => catalogueItemsFromRecords(Array.isArray(payload.results) ? payload.results : [], "Movies", movieGenreMap)),
+    ...tvPages.flatMap(payload => catalogueItemsFromRecords(Array.isArray(payload.results) ? payload.results : [], "Shows", tvGenreMap)),
+  ];
 }
 
 function formatMinutes(value: unknown) {

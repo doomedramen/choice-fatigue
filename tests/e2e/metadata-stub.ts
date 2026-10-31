@@ -42,8 +42,8 @@ const server = createServer(async (request, response) => {
   if ((url.pathname.startsWith("/theporndb/") || url.pathname === "/graphql") && malformedAdult) { response.end(JSON.stringify({ data: "invalid provider shape" })); return; }
   if (url.pathname === "/3/genre/movie/list") response.end(JSON.stringify({ genres: [{ id: 18, name: "Drama" }, { id: 35, name: "Comedy" }] }));
   else if (url.pathname === "/3/genre/tv/list") response.end(JSON.stringify({ genres: [{ id: 18, name: "Drama" }, { id: 35, name: "Comedy" }] }));
-  else if (url.pathname === "/3/discover/movie") response.end(JSON.stringify({ results: emptyTmdb ? [] : [movie(101, "Mock Movie One", 18), movie(102, "Mock Movie Two", 35)] }));
-  else if (url.pathname === "/3/discover/tv") response.end(JSON.stringify({ results: emptyTmdb ? [] : [show(201, "Mock Show One", 18), show(202, "Mock Show Two", 35)] }));
+  else if (url.pathname === "/3/discover/movie") response.end(JSON.stringify({ results: emptyTmdb || Number(url.searchParams.get("page")) > 2 ? [] : [movie(101, "Mock Movie One", 18), movie(102, "Mock Movie Two", 35)], total_pages: 2 }));
+  else if (url.pathname === "/3/discover/tv") response.end(JSON.stringify({ results: emptyTmdb || Number(url.searchParams.get("page")) > 2 ? [] : [show(201, "Mock Show One", 18), show(202, "Mock Show Two", 35)], total_pages: 2 }));
   else if (url.pathname === "/3/movie/101") response.end(JSON.stringify({ ...movie(101, "Mock Movie One", 18), runtime: 110, genres: [{ name: "Drama" }] }));
   else if (url.pathname === "/3/tv/201") response.end(JSON.stringify({ ...show(201, "Mock Show One", 18), episode_run_time: [42], genres: [{ name: "Drama" }] }));
   else if (url.pathname === "/theporndb/scenes") response.end(JSON.stringify({ data: emptyAdult ? [] : [{ _id: "adult-scene-1", title: "Mock Adult Scene", date: "2024-01-01", description: "Fictional adult metadata for automated testing.", tags: [{ name: "Drama" }] }] }));

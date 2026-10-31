@@ -86,13 +86,15 @@ button:active:not(:disabled) { transform: scale(.98); }
 .deck-meta { display: flex; justify-content: space-between; margin: 0 2px 10px; color: #c0c9d8; font-size: 12px; font-weight: 800; letter-spacing: .7px; }
 .deck-meta i { padding: 0 4px; color: #75839c; font-style: normal; }
 .deck-meta small { color: #8794aa; font-size: 12px; }
-.card-stack { --card-inset: 11px; position: relative; isolation: isolate; display: grid; padding: 0 11px 10px; touch-action: pan-y; }
-.card-stack.has-next-card::before, .card-stack.has-next-card::after { position: absolute; z-index: 0; top: 4px; right: calc(var(--card-inset) - 5px); bottom: 0; left: calc(var(--card-inset) + 5px); border: 1px solid #38445c; border-radius: 16px; content: ""; pointer-events: none; }
-.card-stack.has-next-card::before { background: #202a3d; box-shadow: 0 12px 26px #0004; transform: translate(7px, 6px) rotate(1.4deg); }
-.card-stack.has-next-card::after { top: 2px; right: calc(var(--card-inset) - 9px); bottom: -1px; left: calc(var(--card-inset) + 9px); background: #192234; box-shadow: 0 14px 30px #0005; transform: translate(14px, 12px) rotate(2.8deg); }
+.card-stack { position: relative; isolation: isolate; display: grid; padding: 0 11px 10px; touch-action: pan-y; }
+.stack-shadow { position: absolute; z-index: 0; top: 0; bottom: 10px; left: 50%; width: min(calc(100% - 22px), 380px); border: 1px solid #38445c; border-radius: 16px; box-shadow: 0 14px 30px #0005; pointer-events: none; transform-origin: center; }
+.stack-shadow-one { background: #192234; transform: translateX(-50%) translateY(10px) rotate(-2.2deg); }
+.stack-shadow-two { background: #1b2537; transform: translateX(-50%) translateY(8px) rotate(1.8deg); }
+.stack-shadow-three { background: #202a3d; transform: translateX(-50%) translateY(6px) rotate(-1.2deg); }
+.stack-shadow-four { background: #222d41; transform: translateX(-50%) translateY(4px) rotate(.7deg); }
 .media-card { position: relative; z-index: 2; display: grid; width: min(100%, 380px); justify-self: center; grid-area: 1 / 1; grid-template-rows: auto minmax(170px, max-content); aspect-ratio: auto; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
 .media-card.control-exit { transition: box-shadow 160ms ease-out, transform 230ms var(--ease-out), opacity 170ms ease-out; }
-.media-card.card-under { z-index: 1; box-shadow: 0 12px 26px #0004; pointer-events: none; transform: translate(6px, 5px) rotate(1deg); }
+.media-card.card-under { z-index: 1; box-shadow: 0 12px 26px #0004; pointer-events: none; transform: translateY(4px); }
 .media-card.card-under .card-poster, .media-card.card-under .card-content { pointer-events: none; }
 .media-card.drag-keep { box-shadow: 0 18px 42px #7151e966; }
 .media-card.drag-pass { box-shadow: 0 18px 42px #f06e5e66; }

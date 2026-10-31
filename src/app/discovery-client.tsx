@@ -10,6 +10,8 @@ import { createClientUuid } from "@/lib/client-uuid";
 import type { CategoryFeedStatus } from "@/lib/catalogue";
 
 type Decision = "keep" | "pass" | "seen";
+type TmdbCategory = "Movies" | "Shows";
+type DiscoveryPageState = Record<TmdbCategory, { hasMore: boolean; loading: boolean; error: string }>;
 interface SessionState {
   sessionId: string;
   eventSequence: number;
@@ -123,6 +125,13 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const [ageOpen, setAgeOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [resolvedSavedItems, setResolvedSavedItems] = useState<Record<string, MediaItem>>({});
+  const [catalogueItems, setCatalogueItems] = useState(mediaItems);
+  const [discoveryPages, setDiscoveryPages] = useState<DiscoveryPageState>(() => ({
+    Movies: { hasMore: categoryOutcomes.Movies.outcome === "ready", loading: false, error: "" },
+    Shows: { hasMore: categoryOutcomes.Shows.outcome === "ready", loading: false, error: "" },
+  }));
+  const nextDiscoveryPage = useRef<Record<TmdbCategory, number>>({ Movies: 3, Shows: 3 });
+  const discoveryPagesInFlight = useRef(new Set<TmdbCategory>());
   const resolvingSavedIds = useRef(new Set<string>());
   const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
   const [selectedPlexId, setSelectedPlexId] = useState(plexConnections[0]?.id ?? "");
@@ -151,7 +160,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const [historicalProfile, setHistoricalProfile] = useState<{ category: Category; sessionId: string; signals: RecommendationSignal[]; comparisons: RecommendationComparison[] }>({ category: "Movies", sessionId: "", signals: [], comparisons: [] });
   const activeRecommendationContext = useRef({ category: session.category, sessionId: session.sessionId });
   activeRecommendationContext.current = { category: session.category, sessionId: session.sessionId };
-  const catalogue = mediaItems.filter(item => adultSectionEnabled || item.category !== "Adult");
+  const catalogue = catalogueItems.filter(item => adultSectionEnabled || item.category !== "Adult");
   const categoryItems = catalogue.filter(item => item.category === session.category);
   const categoryItemSignature = categoryItems.map(item => item.id).join(",");
   const historicalSignals = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.signals : [];
@@ -170,6 +179,44 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const seenCount = categoryItems.length - categoryItems.filter(candidate => !session.decisions[candidate.id]).length;
+
+  useEffect(() => setCatalogueItems(mediaItems), [mediaItems]);
+
+  async function loadMoreDiscoveries(category: TmdbCategory) {
+    if (discoveryPagesInFlight.current.has(category) || !discoveryPages[category].hasMore) return;
+    discoveryPagesInFlight.current.add(category);
+    setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], loading: true, error: "" } }));
+    const page = nextDiscoveryPage.current[category];
+    try {
+      const response = await fetch(`/api/discovery-feed?category=${category}&page=${page}`, { cache: "no-store" });
+      if (response.status === 401) { window.location.replace("/sign-in"); return; }
+      const result = await response.json() as { items?: MediaItem[]; hasMore?: boolean; error?: string };
+      if (!response.ok || !Array.isArray(result.items) || typeof result.hasMore !== "boolean") throw new Error(result.error || "More titles could not be loaded.");
+      nextDiscoveryPage.current[category] = page + 1;
+      setCatalogueItems(current => {
+        const knownIds = new Set(current.map(candidate => candidate.id));
+        const additions = result.items!.filter(candidate => {
+          if (candidate.category !== category || knownIds.has(candidate.id)) return false;
+          knownIds.add(candidate.id);
+          return true;
+        });
+        return [...current, ...additions];
+      });
+      setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], hasMore: result.hasMore === true } }));
+    } catch (error) {
+      setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], error: error instanceof Error ? error.message : "More titles could not be loaded." } }));
+    } finally {
+      discoveryPagesInFlight.current.delete(category);
+      setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], loading: false } }));
+    }
+  }
+
+  useEffect(() => {
+    const category = session.category;
+    if ((category === "Movies" || category === "Shows") && session.view === "discover" && remainingItems.length <= 5 && discoveryPages[category].hasMore && !discoveryPages[category].loading && !discoveryPages[category].error) {
+      void loadMoreDiscoveries(category);
+    }
+  }, [session.category, session.view, remainingItems.length, discoveryPages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -692,14 +739,16 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
           <div className="discover-intro"><div><div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div><h1>{session.category}</h1><p>{session.category==="Adult"?"A private space, for grown-ups only.":recommendations.signalCount?"Shortlists, passes, and your star ratings shape what appears next.":"Pass, shortlist, or mark a title as seen and rate it to shape what comes next."}</p></div><button className="session-chip" onClick={startFresh} title="Start a fresh session"><Icon name="spark"/><span>Current session</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
-            <div className={`card-stack ${nextItem ? "has-next-card" : ""}`} aria-label="Media discovery card">
+            <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
+              {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/><span className="stack-shadow stack-shadow-three" aria-hidden="true"/><span className="stack-shadow stack-shadow-four" aria-hidden="true"/></>}
               {nextItem && renderMediaCard(nextItem, false)}
               {renderMediaCard(item, true)}
             </div>
             <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Pass, left arrow key"><span><Icon name="close"/></span><small>PASS <kbd>←</kbd></small></button><button className="undo-inline" onClick={undo} disabled={!session.history.length} aria-label="Undo last choice"><Icon name="rewind"/></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Shortlist, right arrow key"><span><Icon name="check"/></span><small>SHORTLIST <kbd>→</kbd></small></button></div>
             <div className="progress-track"><span style={{width:`${Math.min(100,seenCount/items.length*100)}%`}}/></div>
+            {(session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].error && <p className="feed-load-error" role="alert">{discoveryPages[session.category].error} <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as TmdbCategory)}>Try again</button></p>}
           </div> : <div className="empty-state"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
-            {categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve seen all the {session.category.toLowerCase()} in this little collection.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}
+            {(session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : (session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].error ? <><h2>More titles couldn’t load.</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as TmdbCategory)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}
           </div>}
           <div className="bottom-note"><Icon name="spark"/><span role="status">{saveStatus === "error" ? "Couldn’t sync your choices. They’ll retry automatically." : saveStatus === "saving" ? "Syncing your choices…" : "Your choices sync to your account."}</span><button onClick={beginReview}>Review picks <b>{picks.length}</b> <Icon name="arrow"/></button></div>
         </div>}
