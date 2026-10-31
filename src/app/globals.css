@@ -80,8 +80,6 @@ button:active:not(:disabled) { transform: scale(.98); }
 .discover-intro h1, .review-head h1 { margin: 0; color: #fff; font-family: "Manrope", sans-serif; font-size: clamp(34px, 9vw, 46px); font-weight: 800; line-height: 1.02; letter-spacing: -1.8px; }
 .discover-intro h1 em, .review-head h1 em { color: #b8a4ff; font-style: normal; }
 .discover-intro p, .review-head p { margin: 0; color: #bac2d2; font-size: 15px; line-height: 1.5; }
-.session-chip { display: inline-flex; flex: 0 0 auto; min-height: 36px; align-items: center; gap: 7px; margin-top: 1px; padding: 0 11px; border: 1px solid #3a4560; border-radius: 9px; background: #171f30; color: #dae0eb; font-size: 12px; font-weight: 700; }
-.session-chip svg { width: 15px; height: 15px; color: #b9a5ff; }
 .deck-wrap { position: relative; width: 100%; max-width: 402px; margin: 0 auto; }
 .deck-meta { display: flex; justify-content: space-between; margin: 0 2px 10px; color: #c0c9d8; font-size: 12px; font-weight: 800; letter-spacing: .7px; }
 .deck-meta i { padding: 0 4px; color: #75839c; font-style: normal; }
@@ -390,7 +388,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 }
 
 /* Clear feedback for touch and keyboard controls. */
-@media (hover: hover) { .nav-item:hover, .saved-link:hover, .session-chip:hover { border-color: #7860bd; color: #fff; } }
+@media (hover: hover) { .nav-item:hover, .saved-link:hover { border-color: #7860bd; color: #fff; } }
 .decision-button:hover { border-color: #7860bd; background: #202941; }
 .decision-button:active > span, .button:active:not(:disabled) { transform: scale(.97); }
 

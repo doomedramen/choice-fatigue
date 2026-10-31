@@ -612,12 +612,6 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
     void flushLearningQueue().then(refreshHistoricalProfile);
   }
-  function startFresh() {
-    enqueueLearningEvent("session_ended", null, session.category);
-    setSession(current=>({...current, sessionId:createClientUuid(), eventSequence:0, reviewId:null, lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
-    setRatingSelectorOpen(false);
-    showNotice("Fresh session started");
-  }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;
     if (!mediaCard.current) return;
@@ -739,7 +733,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
-          <div className="discover-intro"><h1>{session.category}</h1><button className="session-chip" onClick={startFresh} title="Clears this session’s passes, ratings, and shortlist. Saved titles and learned preferences stay."><Icon name="spark"/><span>Clear choices</span></button></div>
+          <div className="discover-intro"><h1>{session.category}</h1></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
               {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/><span className="stack-shadow stack-shadow-three" aria-hidden="true"/><span className="stack-shadow stack-shadow-four" aria-hidden="true"/></>}
