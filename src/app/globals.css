@@ -349,11 +349,11 @@ button:active:not(:disabled) { transform: scale(.98); }
   .tray-empty br { display: initial; }
   .tray-spark { font-size: 26px; }
   .more-picks { display: block; padding: 11px 5px; color: #b9c3d4; font-size: 13px; }
-  .panel-bottom { margin-top: auto; padding-top: 20px; }
-  .panel-count { display: flex; align-items: center; gap: 8px; padding: 13px 0 16px; border-top: 1px solid #303a50; color: #bdc7d7; font-size: 13px; }
+  .panel-bottom { width: 100%; margin-top: auto; padding-top: 24px; }
+  .panel-count { display: flex; align-items: center; gap: 8px; padding: 18px 0; border-top: 1px solid #303a50; color: #bdc7d7; font-size: 14px; }
   .count-dot { width: 8px; height: 8px; border-radius: 50%; background: #b5a2ff; }
-  .review-button { width: 100%; min-height: 50px; font-size: 14px; }
-  .privacy-note { display: flex; align-items: center; gap: 7px; margin-top: 14px; color: #a8b4c8; font-size: 12px; }
+  .review-button { width: 100%; min-height: 56px; font-size: 14px; }
+  .privacy-note { display: flex; width: 100%; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #303a50; color: #a8b4c8; font-size: 12px; }
   .privacy-note svg { width: 15px; height: 15px; color: #b7a3ff; }
   .review-page { padding-bottom: 25px; }
   .review-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
