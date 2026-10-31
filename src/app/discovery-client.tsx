@@ -771,12 +771,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
             <div className="card-actions">
               {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`}>
                 <legend className="sr-only">Rate {candidate.title} with 1 to 10 to continue.</legend>
+                <div className="seen-rating-header"><span>Your rating <small>/ 10</small></span><button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button></div>
                 <div className="seen-rating-options">{[1,2,3,4,5,6,7,8,9,10].map(stars=><label key={stars}>
                   <input ref={stars===1?ratingInput:undefined} type="radio" name={`seen-rating-${candidate.id}`} value={stars} aria-label={`${stars} out of 10`} onChange={()=>transitionDecision("seen","control",stars)}/>
                   <span aria-hidden="true">{stars}</span>
                 </label>)}</div>
-                <button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button>
-              </fieldset> : <button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it · Rate /10</span></button>)}
+              </fieldset> : <button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button>)}
             </div>
           </div>
         </div>
