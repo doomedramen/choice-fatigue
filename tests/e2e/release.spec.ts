@@ -96,18 +96,18 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(page.getByRole("dialog").getByText("Mock Actor")).toBeVisible();
   await expect(page.getByRole("dialog").getByText("The Lead")).toBeVisible();
   await page.getByRole("button", { name: "Close details" }).click();
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
-  await expect(page.getByText("1 title in your shortlist")).toBeVisible();
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Shortlist, 1 title" })).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.getByRole("button", { name: "Undo last choice" }).first().click();
-  await expect(page.getByText("0 titles in your shortlist")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Shortlist, 0 titles" })).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 0, decisionCount: 0 });
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
-  await expect(page.getByText("1 title in your shortlist")).toBeVisible();
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Shortlist, 1 title" })).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.reload();
-  await expect(page.getByText("1 title in your shortlist")).toBeVisible();
-  await page.getByRole("button", { name: "Review & compare" }).click();
+  await expect(page.getByRole("button", { name: "Shortlist, 1 title" })).toBeVisible();
+  await openReview(page);
   await page.getByRole("button", { name: "Remove from shortlist" }).click();
   await expect(page.getByText("Removed for now")).toBeVisible();
   await page.getByRole("button", { name: "Restore" }).click();
@@ -129,7 +129,8 @@ test("first run, account access, provider discovery, saved state and account con
   await request.post("http://127.0.0.1:4199/__control", { data: { emptyTmdb: true } });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "No popular titles are available right now." })).toBeVisible();
-  await page.getByRole("button", { name: /^Saved/ }).click();
+  await page.getByRole("button", { name: /^Shortlist, / }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^Saved/ }).click();
   await expect(page.getByRole("dialog").getByText("Mock Movie One").first()).toBeVisible();
   await page.getByRole("button", { name: "Close saved titles" }).click();
   await request.post("http://127.0.0.1:4199/__control", { data: { emptyTmdb: false } });
@@ -242,6 +243,12 @@ async function setupRecommendationAdmin(page: import("@playwright/test").Page) {
   await configure(page);
 }
 
+/** The shortlist lives behind the header bookmark; review starts from its sheet. */
+async function openReview(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: /^Shortlist, / }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Review & compare" }).click();
+}
+
 function learningDecision(itemId: string, index: number, decision: "keep" | "pass" = "keep", category: "Movies" | "Adult" = "Movies") {
   return { id: `seed-${category}-${index}`, sessionId: "seed", sequence: index, occurredAt: new Date(Date.now() - 10 * 60_000 + index * 1000).toISOString(), itemId, category, eventType: "decision", decision, rating: null, reviewId: null, targetEventId: null, candidateIds: null, algorithmVersion: "content-v7", retrievalId: null, source: null, lane: null };
 }
@@ -270,7 +277,7 @@ test("reranking preserves actual shown order and invalid events do not block val
   }, valid);
   expect(posted.acceptedIds).toEqual([valid.id]);
   expect(posted.rejected).toMatchObject([{ id: "invalid-trace", code: "invalid" }]);
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/account/export")).json();
     return data.recommendationHistory.some((event: { eventType: string; itemId: string; decision: string }) => event.eventType === "decision" && event.itemId === "tmdb-movie-102" && event.decision === "keep");
@@ -287,7 +294,7 @@ test("paging past 100 accumulated candidates keeps traces bounded and learning u
   expect(accepted.acceptedIds).toHaveLength(105);
   await page.goto("/");
   await expect(page.locator(".card-active h2")).toContainText(/Paged Movie 2\d\d/, { timeout: 30_000 });
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/account/export")).json();
     return data.recommendationHistory.filter((event: { eventType: string; decision: string }) => event.eventType === "decision" && event.decision === "keep").length;
@@ -451,12 +458,12 @@ test("a failed related lane does not prevent popular pagination", async ({ page,
 test("dialogs hold keyboard focus, and saves and removals can be undone on a phone-sized screen", async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 375, height: 812 });
-  const shortlistCount = page.locator(".panel-heading h2 span");
+  const shortlistBadge = page.locator(".shortlist-badge");
   await setupRecommendationAdmin(page);
   await page.goto("/");
   await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
-  await expect(page.getByText(/Drag the card, or use/)).toBeVisible();
-  expect(await page.locator(".decision-row").evaluate(row => row.getBoundingClientRect().bottom <= window.innerHeight), "Pass and Keep fit above the fold").toBe(true);
+  await expect(page.locator(".deck-controls.coach"), "first visit labels the controls").toBeVisible();
+  expect(await page.locator(".deck-controls").evaluate(row => row.getBoundingClientRect().bottom <= window.innerHeight), "the controls fit above the fold").toBe(true);
 
   const details = page.getByRole("button", { name: "Details for Mock Movie One" });
   await details.click();
@@ -471,15 +478,16 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
   await expect(dialog).toHaveCount(0);
   await expect(details).toBeFocused();
 
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
-  await expect(page.getByText(/Drag the card, or use/)).toHaveCount(0);
-  await expect(shortlistCount).toHaveText("1");
-  await page.getByRole("button", { name: "Remove Mock Movie One from shortlist" }).click();
-  await expect(shortlistCount).toHaveText("0");
-  await page.locator(".toast").getByRole("button", { name: "Undo" }).click();
-  await expect(shortlistCount).toHaveText("1");
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
+  await expect(shortlistBadge).toHaveAttribute("aria-label", "Shortlist, 1 title");
+  await shortlistBadge.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove Mock Movie One from shortlist" }).click();
+  await expect(shortlistBadge).toHaveAttribute("aria-label", "Shortlist, 0 titles");
+  await page.getByRole("dialog").getByRole("button", { name: "Undo removing Mock Movie One" }).click();
+  await expect(shortlistBadge).toHaveAttribute("aria-label", "Shortlist, 1 title");
+  await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Review & compare" }).click();
+  await openReview(page);
   await page.getByRole("button", { name: "Save 1 title" }).click();
   await expect(page.getByRole("dialog", { name: "Saved for later" })).toBeVisible();
   const undoSave = page.getByRole("dialog").getByRole("button", { name: "Undo" });
@@ -487,9 +495,9 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
   await expect(undoSave).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "Saved for later" })).toHaveCount(0);
-  await expect(shortlistCount).toHaveText("1");
+  await expect(shortlistBadge).toHaveAttribute("aria-label", "Shortlist, 1 title");
 
-  await page.getByRole("button", { name: "Review & compare" }).click();
+  await openReview(page);
   await page.getByRole("button", { name: "Save 1 title" }).click();
   await page.getByRole("button", { name: "Remove Mock Movie One from saved" }).click();
   await expect(page.getByText("Your saved list is empty.", { exact: false })).toBeVisible();
@@ -507,7 +515,7 @@ test("arrow keys decide from the first card, and rating keys move focus without 
   await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
   await page.keyboard.press("ArrowRight");
   await expect(page.locator(".card-active h2")).toHaveText("Mock Movie Two");
-  await expect(page.locator(".panel-heading h2 span")).toHaveText("1");
+  await expect(page.getByRole("button", { name: "Shortlist, 1 title" })).toBeVisible();
   await page.getByRole("button", { name: "Seen it: rate Mock Movie Two" }).click();
   await expect(page.getByRole("button", { name: "1 out of 10", exact: true })).toBeFocused();
   for (let index = 0; index < 4; index++) await page.keyboard.press("ArrowRight");
@@ -526,15 +534,15 @@ test("review removals survive leaving review, and swipes are announced to screen
   await setupRecommendationAdmin(page);
   await page.goto("/");
   const announcer = page.locator("p.sr-only[aria-live=polite]");
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
   await expect(announcer).toHaveText("Shortlisted Mock Movie One");
-  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await page.getByRole("button", { name: "Shortlist", exact: true }).click();
   await expect(announcer).toHaveText("Shortlisted Mock Movie Two");
-  await page.getByRole("button", { name: "Review & compare" }).click();
+  await openReview(page);
   await page.getByRole("button", { name: "Remove from shortlist" }).first().click();
   await expect(page.getByText("Removed for now", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Back to exploring" }).click();
-  await page.getByRole("button", { name: "Review & compare" }).click();
+  await openReview(page);
   await expect(page.getByText("Removed for now", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
 });
@@ -593,18 +601,18 @@ test("Seen it: press and slide rates in one gesture, a number key rates the focu
 
   await page.getByRole("button", { name: /Seen it: rate Mock Movie One/ }).click();
   await expect(page.getByRole("button", { name: "1 out of 10", exact: true })).toBeVisible();
-  await page.getByRole("heading", { name: "Movies", exact: true }).click();
+  await page.locator(".topbar").click({ position: { x: 4, y: 4 } });
   await expect(page.getByRole("button", { name: "1 out of 10", exact: true })).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
 
   const seen = (await page.getByRole("button", { name: /Seen it: rate Mock Movie One/ }).boundingBox())!;
-  const row = (await page.locator(".card-active .card-actions").boundingBox())!;
+  const row = (await page.locator(".deck-controls").boundingBox())!;
   await page.mouse.move(seen.x + seen.width / 2, seen.y + seen.height / 2);
   await page.mouse.down();
   await page.mouse.move(row.x + row.width * 0.72, seen.y + seen.height / 2, { steps: 8 });
-  await expect(page.locator(".card-active .seen-bubble strong")).toHaveText("8");
-  await expect(page.locator(".card-active .seen-bubble small")).toHaveText("Great");
+  await expect(page.locator(".deck-controls .seen-bubble strong")).toHaveText("8");
+  await expect(page.locator(".deck-controls .seen-bubble small")).toHaveText("Great");
   await page.mouse.up();
   await expect(page.locator(".card-active h2")).toHaveText("Mock Movie Two");
 

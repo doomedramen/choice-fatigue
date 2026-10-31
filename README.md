@@ -109,7 +109,7 @@ To compare matched provider order with the current ranker at each impression on 
 
 ## What works
 
-- Mouse, touch, and keyboard swipes with pass, shortlist, and undo. "Seen it" rates in one gesture: press, slide along the 1–10 rail, and release (a tap opens the 1–10 buttons instead, and a press elsewhere closes them); with the card focused, 1–9 and 0 rate directly. Removing a pick, removing it in review, and saving all offer an Undo in the notice; saved titles can be removed from the Saved list.
+- A mobile-first card stack: the poster fills the card, the next titles wait behind it, and four round controls (undo, pass, seen, shortlist) float over its lower edge with instant labels. Mouse, touch, and keyboard swipes pass or shortlist; shortlisted cards fly into the header bookmark, which opens the shortlist (a bottom sheet on phones, a drawer on wider screens) with review and saved titles. "Seen it" rates in one gesture: press, slide along the 1–10 rail, and release (a tap opens the 1–10 buttons instead, and a press elsewhere closes them); with the card focused, 1–9 and 0 rate directly. Removing a pick, removing it in review, and saving all offer an Undo in the notice; saved titles can be removed from the Saved list.
 - Details overlays, a review-and-prune flow, restore, keep browsing, and final save. Dialogs keep keyboard focus inside and return it when closed.
 - The interface is dark-only by design; there is no light theme. Fonts are self-hosted at build time, so pages make no requests to Google Fonts.
 - Temporary shortlists stay separate from permanently saved titles.

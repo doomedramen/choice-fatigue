@@ -42,6 +42,8 @@ Package manager is pnpm (pinned 12.16.1, Node 22+); the README/hooks run it thro
 
 **Schema/migrations** live in `prisma/` (config in `prisma.config.ts`; `prisma.e2e.config.ts` targets the e2e DB). Deployment: `Dockerfile`, `docker-compose*.yml`, `ct/` + `install/` (Proxmox LXC community-scripts), documented in `docs/self-hosting.md`.
 
-UI: dialogs use `Modal` / `ConfirmDialog` from `src/app/modal.tsx` (portalled to body; focus in, Tab trapped, focus restored, the rest of the page made `inert` automatically), not `window.confirm` or hand-rolled `role="dialog"` markup. Fonts come from `next/font` via the `--font-dm-sans` / `--font-manrope` CSS variables; don't reference the family names directly. The UI is dark-only.
+UI: dialogs use `Modal` / `ConfirmDialog` from `src/app/modal.tsx` (portalled to body; focus in, Tab trapped, focus restored, the rest of the page made `inert` automatically), not `window.confirm` or hand-rolled `role="dialog"` markup. Fonts come from `next/font` via the `--font-dm-sans` / `--font-manrope` CSS variables; don't reference the family names directly. The UI is dark-only and designed mobile-first: the shortlist and details open as bottom sheets on phones.
+
+To preview UI changes, `.claude/launch.json` has `metadata-stub` and `dev-e2e` (the dev server on the disposable `choice_fatigue_e2e` database with the provider stub, port 4173). Stop both before `pnpm test:e2e`, which starts its own on the same ports and wipes that database.
 
 Path alias `@/*` → `src/*`. `.agents/` and `.claude/skills/` contain vendored Prisma skills, not project code.

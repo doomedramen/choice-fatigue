@@ -177,6 +177,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const [ratingSelectorOpen, setRatingSelectorOpen] = useState(false);
   const [ageOpen, setAgeOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
+  const [shortlistOpen, setShortlistOpen] = useState(false);
+  // Titles removed while the shortlist sheet is open stay listed with an inline undo until it closes.
+  const [sheetRemoved, setSheetRemoved] = useState<Array<{ pick: MediaItem; restore: () => void }>>([]);
+  useEffect(() => { if (!shortlistOpen) setSheetRemoved([]); }, [shortlistOpen]);
+  // First-visit labels: shown, then fading (they keep their above/below positions until the fade ends), then gone.
+  const [coachLabels, setCoachLabels] = useState<"" | "coach" | "coach coach-fading">("");
   const [justSaved, setJustSaved] = useState<{ ids: string[]; history: SessionState["history"] } | null>(null);
   useEffect(() => { if (!savedOpen) setJustSaved(null); }, [savedOpen]);
   const [resolvedSavedItems, setResolvedSavedItems] = useState<Record<string, MediaItem>>({});
@@ -210,6 +216,13 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   useEffect(() => {
     try { setShowSwipeHint(localStorage.getItem(swipeHintKey) !== "dismissed"); } catch { setShowSwipeHint(true); }
   }, [swipeHintKey]);
+  useEffect(() => {
+    if (!showSwipeHint) return;
+    setCoachLabels("coach");
+    const fade = window.setTimeout(() => setCoachLabels("coach coach-fading"), 3500);
+    const done = window.setTimeout(() => setCoachLabels(""), 3800);
+    return () => { window.clearTimeout(fade); window.clearTimeout(done); };
+  }, [showSwipeHint]);
   function dismissSwipeHint() {
     if (!showSwipeHint) return;
     setShowSwipeHint(false);
@@ -217,6 +230,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   }
   const drag = useRef<{ x:number; y:number }|null>(null);
   const lockedNextItemId = useRef<string | null>(null);
+  const cardStack = useRef<HTMLDivElement | null>(null);
+  const shortlistBadge = useRef<HTMLButtonElement | null>(null);
   const swipeExit = useRef(false);
   const dragFrame = useRef<number | null>(null);
   const dragOffset = useRef(0);
@@ -268,6 +283,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   // Keep the card underneath stable while background refreshes re-rank the rest of the deck.
   const nextItem = remainingItems.find(candidate => candidate.id === lockedNextItemId.current && candidate.id !== item?.id) ?? remainingItems.find(candidate => candidate.id !== item?.id);
   lockedNextItemId.current = nextItem?.id ?? null;
+  const thirdItem = remainingItems.find(candidate => candidate.id !== item?.id && candidate.id !== nextItem?.id);
   // Shown only while the deck still has cards; an empty deck explains the failure itself.
   const catalogueNotice = item ? degradedFeedNotice(discoveryPages[session.category].feed.sources, Boolean(discoveryPages[session.category].error)) : "";
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
@@ -818,12 +834,21 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       element.style.setProperty("--seen-color", seenRatingColor(rating!));
       element.classList.add("seen-exit");
     }
+    // A shortlisted card flies into the header bookmark, so you see where it went.
+    const badge = decision === "keep" ? shortlistBadge.current : null;
+    const stack = cardStack.current;
     window.setTimeout(() => {
-      element.style.transform=decision === "seen" ? "translateY(-24px) scale(.96)" : `translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
+      stack?.style.setProperty("--lift", "1");
+      if (badge && stack) {
+        const from = stack.getBoundingClientRect(), to = badge.getBoundingClientRect();
+        element.classList.add("fly-exit");
+        element.style.transform = `translate(${to.left + to.width / 2 - (from.left + from.width / 2)}px, ${to.top + to.height / 2 - (from.top + from.height / 2)}px) scale(.06) rotate(10deg)`;
+        window.setTimeout(() => { badge.classList.add("bump"); window.setTimeout(() => badge.classList.remove("bump"), 260); }, 300);
+      } else element.style.transform=decision === "seen" ? "translateY(-24px) scale(.96)" : `translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
       element.style.opacity="0";
       if (source==="control") element.classList.add("control-exit");
     }, stampHold);
-    const handoffDelay=stampHold+(source==="control"?230:150);
+    const handoffDelay=stampHold+(badge ? 340 : source==="control"?230:150);
     window.setTimeout(()=>{
       swipeExit.current=false;
       setCardExiting(false);
@@ -848,14 +873,17 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     if (category === "Adult" && !session.ageVerified) { setAgeOpen(true); return; }
     setSession(current=>({...current, category, lockedItemId:category === current.category ? current.lockedItemId : null, view:"discover"})); setDetails(null); setRatingSelectorOpen(false);
   }
-  function removePick(id:string) {
+  /** Removes a title from the shortlist and returns its undo. The sheet shows that undo inline instead of as a toast behind it. */
+  function removePick(id:string, notify = true) {
     const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
     enqueueLearningEvent("shortlist_withdrawn", id, categoryForId(id), null, null, targetEventId);
     setSession(current=>{ const decisions={...current.decisions}; delete decisions[id]; return {...current, shortlisted:current.shortlisted.filter(value=>value!==id), decisions}; });
-    showNotice("Back in discovery — your first impression still counts.", { label: "Undo", run: () => {
+    const restore = () => {
       enqueueLearningEvent("review_restored", id, categoryForId(id), null, null, targetEventId);
       setSession(current=>({...current, shortlisted:[...new Set([...current.shortlisted,id])], decisions:{...current.decisions,[id]:"keep"}}));
-    } });
+    };
+    if (notify) showNotice("Back in discovery — your first impression still counts.", { label: "Undo", run: restore });
+    return restore;
   }
   function beginReview() {
     const reviewId = createClientUuid();
@@ -931,6 +959,9 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       card.style.setProperty("--drag", String(Math.max(-1, Math.min(1, offset / Math.max(80, card.clientWidth * .24)))));
       card.classList.toggle("drag-keep", offset > 20);
       card.classList.toggle("drag-pass", offset < -20);
+      // The cards behind rise toward the front as this one leaves.
+      cardStack.current?.classList.add("lifting");
+      cardStack.current?.style.setProperty("--lift", String(Math.min(1, Math.abs(offset) / Math.max(80, card.clientWidth * .24))));
     });
   }
   function onCardPointerUp(event:PointerEvent<HTMLElement>) {
@@ -940,9 +971,11 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
     dragFrame.current = null;
     card.classList.remove("dragging");
+    cardStack.current?.classList.remove("lifting");
     const swipeThreshold=Math.max(80,card.clientWidth*.24);
     if (Math.abs(dx)>swipeThreshold) transitionDecision(dx>0?"keep":"pass","drag");
     else {
+      cardStack.current?.style.removeProperty("--lift");
       card.style.transform="";
       card.style.opacity="";
       card.style.removeProperty("--drag");
@@ -956,6 +989,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     drag.current=null;
     if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
     dragFrame.current = null;
+    cardStack.current?.classList.remove("lifting");
+    cardStack.current?.style.removeProperty("--lift");
     if (!card) return;
     card.classList.remove("dragging");
     card.style.transform="";
@@ -1023,11 +1058,13 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     buttons[Math.max(0, Math.min(buttons.length - 1, index + step))].focus();
   }
 
-  function renderMediaCard(candidate: MediaItem, active: boolean) {
+  /** The poster is the card: genres on top, one quiet band with title and year below. Cards behind sit at `--depth` 1 and 2. */
+  function renderMediaCard(candidate: MediaItem, active: boolean, depth = 0) {
     return <article
       key={candidate.id}
       ref={active ? mediaCard : null}
-      className={`media-card ${active ? "card-active" : "card-under"}`}
+      className={`media-card ${active ? "card-active" : "card-under"} ${active && showSwipeHint ? "nudge" : ""}`}
+      style={active ? undefined : { "--depth": depth } as CSSProperties}
       tabIndex={active ? 0 : -1}
       aria-hidden={active ? undefined : true}
       aria-label={active ? [candidate.title, candidate.year].filter(Boolean).join(", ") : undefined}
@@ -1041,39 +1078,57 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     >
       <Poster item={candidate} className="card-poster" loading="eager"/>
       <div className="card-poster-tags tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}</div>
-      <div className="card-content">
-          <div className="card-overline"><span>{displayMetadata(candidate) || "Details unavailable"}</span>{candidate.rating !== "—" && <span><Icon name="spark"/> {candidate.rating}</span>}</div>
+      <div className="card-band">
+        <div>
           <h2>{candidate.title}</h2>
-          <div className="card-footer">
-            <div className="card-actions" ref={active ? seenScrubRoot : undefined}>
-              {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`} onBlur={event=>{ if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setRatingSelectorOpen(false); }}>
-                <legend className="sr-only">Rate {candidate.title} with 1 to 10 to continue.</legend>
-                <div className="seen-rating-header"><span>Your rating <small>/ 10</small></span><button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button></div>
-                {/* Buttons, not radios: arrow keys only move focus here, and a rating is saved only on click, Enter, or Space. */}
-                <div className="seen-rating-options" onKeyDown={moveRatingFocus}>{[1,2,3,4,5,6,7,8,9,10].map(stars=>
-                  <button key={stars} ref={stars===1?ratingInput:undefined} type="button" aria-label={`${stars} out of 10`} onClick={()=>transitionDecision("seen","control",stars)}>{stars}</button>
-                )}</div>
-              </fieldset> : <><button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`Details for ${candidate.title}`}><Icon name="info"/><span>Details</span></button><button ref={seenButton} className="card-seen-button" type="button"
-                  onPointerDown={onSeenPointerDown} onPointerMove={onSeenPointerMove} onPointerUp={onSeenPointerUp} onPointerCancel={onSeenPointerCancel}
-                  // Pointer presses are handled above; a keyboard Enter or Space (detail 0) opens the 1–10 buttons.
-                  onClick={event=>{ if (event.detail === 0) setRatingSelectorOpen(true); }}
-                  aria-label={`Seen it: rate ${candidate.title}. Press and slide to rate, or choose a rating`}><Icon name="eye"/><span>Seen it</span></button>
-                {/* The hold-and-slide rail: drawn over the action row while a press is live, driven directly from pointer events. */}
-                <div className="seen-rail" aria-hidden="true"><div className="seen-rail-fill"/>{[1,2,3,4,5,6,7,8,9,10].map(stars=><span key={stars} data-value={stars}>{stars}</span>)}</div>
-                <div className="seen-bubble" aria-hidden="true"><strong/><small/></div></>)}
-            </div>
-          </div>
+          <p><span>{displayMetadata(candidate) || "Details unavailable"}</span>{candidate.rating !== "—" && <span className="card-band-rating"><Icon name="spark"/> {candidate.rating}</span>}</p>
         </div>
-      {active && <><div className="swipe-stamp stamp-keep">SHORTLIST</div><div className="swipe-stamp stamp-pass">PASS</div><div className="swipe-stamp stamp-seen" aria-hidden="true"/></>}
+        {active && <button className="card-info" type="button" onClick={()=>setDetails(candidate)} aria-label={`Details for ${candidate.title}`}><Icon name="info"/></button>}
+      </div>
+      {active && <><div className="swipe-glyph glyph-keep" aria-hidden="true"><Icon name="bookmark"/></div><div className="swipe-glyph glyph-pass" aria-hidden="true"><Icon name="close"/></div><div className="swipe-stamp stamp-seen" aria-hidden="true"/></>}
     </article>;
+  }
+
+  // Touch has no hover, so a control shows its label while pressed; the action still happens on release.
+  const peekLabel = {
+    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => { if (event.pointerType !== "mouse") event.currentTarget.classList.add("pressed"); },
+    onPointerUp: (event: PointerEvent<HTMLButtonElement>) => event.currentTarget.classList.remove("pressed"),
+    onPointerCancel: (event: PointerEvent<HTMLButtonElement>) => event.currentTarget.classList.remove("pressed"),
+    onPointerLeave: (event: PointerEvent<HTMLButtonElement>) => event.currentTarget.classList.remove("pressed"),
+  };
+
+  /** One row of round controls under the deck. The Seen it rail and the 1–10 buttons open above it. */
+  function renderDeckControls(current: MediaItem) {
+    return <div className={`deck-controls ${coachLabels}`} ref={seenScrubRoot}>
+      {ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${current.title}`} onBlur={event=>{ if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setRatingSelectorOpen(false); }}>
+        <legend className="sr-only">Rate {current.title} with 1 to 10 to continue.</legend>
+        <div className="seen-rating-header"><span>Your rating <small>/ 10</small></span><button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button></div>
+        {/* Buttons, not radios: arrow keys only move focus here, and a rating is saved only on click, Enter, or Space. */}
+        <div className="seen-rating-options" onKeyDown={moveRatingFocus}>{[1,2,3,4,5,6,7,8,9,10].map(stars=>
+          <button key={stars} ref={stars===1?ratingInput:undefined} type="button" aria-label={`${stars} out of 10`} onClick={()=>transitionDecision("seen","control",stars)}>{stars}</button>
+        )}</div>
+      </fieldset> : <>
+        {/* The hold-and-slide rail: drawn above the row while a press is live, driven directly from pointer events. */}
+        <div className="seen-rail" aria-hidden="true"><div className="seen-rail-fill"/>{[1,2,3,4,5,6,7,8,9,10].map(stars=><span key={stars} data-value={stars}>{stars}</span>)}</div>
+        <div className="seen-bubble" aria-hidden="true"><strong/><small/></div>
+      </>}
+      <button className="deck-control small" type="button" data-tip="Undo" aria-label="Undo last choice" onClick={undo} disabled={!session.history.length || cardExiting} {...peekLabel}><Icon name="rewind"/></button>
+      <button className="deck-control pass" type="button" data-tip="Pass  ←" aria-label="Pass" aria-keyshortcuts="ArrowLeft" onClick={()=>transitionDecision("pass")} disabled={cardExiting} {...peekLabel}><Icon name="close"/></button>
+      <button ref={seenButton} className="deck-control seen card-seen-button" type="button" data-tip="Seen it · hold and slide"
+        onPointerDown={onSeenPointerDown} onPointerMove={onSeenPointerMove} onPointerUp={onSeenPointerUp} onPointerCancel={onSeenPointerCancel}
+        // Pointer presses are handled above; a keyboard Enter or Space (detail 0) opens the 1–10 buttons.
+        onClick={event=>{ if (event.detail === 0) setRatingSelectorOpen(true); }}
+        aria-label={`Seen it: rate ${current.title}. Press and slide to rate, or choose a rating`}><Icon name="eye"/></button>
+      <button className="deck-control keep" type="button" data-tip="Shortlist  →" aria-label="Shortlist" aria-keyshortcuts="ArrowRight" onClick={()=>transitionDecision("keep")} disabled={cardExiting} {...peekLabel}><Icon name="bookmark"/></button>
+    </div>;
   }
 
   // Reassigned every render, so the listener always sees the current card rather than the one from when it was attached.
   windowKeyHandler.current = (event:KeyboardEvent) => {
-    if (event.key === "Escape") { if(ratingSelectorOpen)cancelRatingSelector(); else if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
-    if (!ready || session.view !== "discover" || details || savedOpen || ageOpen || cardExiting) return;
+    if (event.key === "Escape") { if(ratingSelectorOpen)cancelRatingSelector(); else if(savedOpen)setSavedOpen(false); else if(shortlistOpen)setShortlistOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
+    if (!ready || session.view !== "discover" || details || savedOpen || shortlistOpen || ageOpen || cardExiting) return;
     // With the card (or its open rating row) focused, 1–9 rate directly and 0 means 10: one keystroke.
-    if (/^[0-9]$/.test(event.key) && event.target instanceof Node && (event.target === mediaCard.current || (ratingSelectorOpen && mediaCard.current?.contains(event.target)))) {
+    if (/^[0-9]$/.test(event.key) && event.target instanceof Node && (event.target === mediaCard.current || (ratingSelectorOpen && Boolean(seenScrubRoot.current?.contains(event.target))))) {
       event.preventDefault();
       transitionDecision("seen", "control", event.key === "0" ? 10 : Number(event.key));
       return;
@@ -1099,6 +1154,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     window.location.replace("/sign-in");
   }
 
+  useEffect(() => { cardStack.current?.style.removeProperty("--lift"); }, [item?.id]);
+
   useEffect(() => {
     if (!refocusCard.current) return;
     refocusCard.current = false;
@@ -1108,9 +1165,9 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   // The header stays on screen while the session loads, so navigation and sign-out are never hidden.
   function renderTopbar() {
     return <header className="topbar">
-      <a className="brand" href="/" aria-label={`${appName} home`}><span className="brand-symbol">✳</span><span>{appName.toLowerCase()}</span></a>
+      <a className="brand" href="/" aria-label={`${appName} home`}><span className="brand-symbol">✳</span><span className="brand-name">{appName.toLowerCase()}</span></a>
       <nav className="category-nav" aria-label="Media categories">{categories.filter(category=>adultSectionEnabled || category!=="Adult").map(category=>{const index=categories.indexOf(category); return <button key={category} className={`nav-item ${session.category===category?"active":""} ${category==="Adult"?"adult-nav":""}`} onClick={()=>changeCategory(category)} disabled={!ready} aria-pressed={session.category===category}>{category==="Adult"?<><Icon name="lock"/><span>Adult</span></>:<><span className={`nav-dot dot-${index}`}/><span>{category}</span></>}</button>;})}</nav>
-      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} disabled={!ready} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details ref={accountMenu} className="account-menu"><summary className="avatar" aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
+      <div className="header-right"><button ref={shortlistBadge} className="shortlist-badge" type="button" onClick={()=>setShortlistOpen(true)} disabled={!ready} aria-haspopup="dialog" aria-label={`Shortlist, ${picks.length} ${picks.length===1?"title":"titles"}`}><Icon name="bookmark"/>{picks.length > 0 && <b aria-hidden="true">{picks.length}</b>}</button><details ref={accountMenu} className="account-menu"><summary className="avatar" aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><button type="button" onClick={()=>{ if (accountMenu.current) accountMenu.current.open = false; setSavedOpen(true); }}>Saved titles ({saved.length})</button><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
     </header>;
   }
 
@@ -1139,16 +1196,15 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
           <div className="review-footnote">You can keep browsing before saving your shortlist.</div>
         </div> : <div className="discover-layout">
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}{discoveryPages[session.category].error && <> <button className="text-button" onClick={() => retryCategory(session.category)}>Try now</button></>}</p>}
-          <div className="discover-intro"><h1>{session.category}</h1></div>
-          {item ? <div className="deck-wrap"><div className="deck-meta"><span>{seenCount} reviewed <small>· {categoryPicks} shortlisted</small></span></div>
-            <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
-              {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/></>}
-              {nextItem && renderMediaCard(nextItem, false)}
+          <h1 className="sr-only">{session.category}</h1>
+          {item ? <div className="deck-wrap">
+            <div ref={cardStack} className="card-stack" aria-label="Media discovery card">
+              {thirdItem && renderMediaCard(thirdItem, false, 2)}
+              {nextItem && renderMediaCard(nextItem, false, 1)}
               {renderMediaCard(item, true)}
             </div>
-            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-keyshortcuts="ArrowLeft"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last choice"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-keyshortcuts="ArrowRight"><small>Want to see</small><span><Icon name="right"/></span></button></div>
+            {renderDeckControls(item)}
             <p id="card-controls-hint" className="sr-only">Press Enter for details. Use the left and right arrow keys to pass or shortlist, or 1 to 9 and 0 for 10 to rate it as seen.</p>
-            {showSwipeHint && <p className="swipe-hint" aria-hidden="true">Drag the card, or use <kbd>←</kbd> <kbd>→</kbd></p>}
           </div> : <div className="empty-state" role="status"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
             {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>More titles are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>{feedFailureMessage(discoveryPages[session.category].feed.sources)} Your saved choices are safe; try again in a moment.</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></>}
           </div>}
@@ -1156,17 +1212,25 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
           {saveStatus === "error" && <p className="sync-error" role="alert">Couldn’t sync your choices. They’ll retry automatically.</p>}
         </div>}
       </section>
-      {session.view==="discover"&&<aside className="shortlist-panel"><div className="panel-heading"><div><div className="eyebrow">YOUR SHORTLIST</div><h2>Your shortlist <span>{picks.length}</span></h2></div><button className="undo-button" onClick={undo} aria-label="Undo last choice" disabled={!session.history.length}><Icon name="rewind"/> Undo</button></div><p className="panel-copy">Titles to compare before saving.</p>
-        <div className="tray-list">{picks.length?picks.slice(-4).reverse().map(pick=><div className="tray-item" key={pick.id}><Poster item={pick} className="tray-poster"/><div><strong>{pick.title}</strong><small>{pick.year} · {pick.type}</small></div><button onClick={()=>removePick(pick.id)} aria-label={`Remove ${pick.title} from shortlist`}><Icon name="close"/></button></div>):<div className="tray-empty"><div className="tray-spark">✳</div><span>Shortlisted titles<br/>will appear here.</span></div>}</div>
-        {picks.length>4&&<div className="more-picks">+ {picks.length-4} more in your shortlist</div>}
-        <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in your shortlist</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
-      </aside>}
     </main>
     {details&&<Modal className="details-modal" labelledBy="modal-title" onClose={()=>setDetails(null)}><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{displayMetadata(details, true)}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}{details.rating !== "—" && <span>★ {details.rating}</span>}</div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}{
       item?.id===details.id&&!session.shortlisted.includes(details.id)&&!session.saved.includes(details.id)
         ? <button className="button button-accent" onClick={()=>{decide("keep");setDetails(null);showNotice("Added to your shortlist");}}>Add to shortlist <Icon name="arrow"/></button>
         : <p className="details-status" role="status">{session.saved.includes(details.id) ? "Saved for later." : session.shortlisted.includes(details.id) ? "Already in your shortlist." : ""}</p>
     }</div></Modal>}
+    {shortlistOpen&&<Modal className="shortlist-sheet" labelledBy="shortlist-title" onClose={()=>setShortlistOpen(false)}>
+      <div className="sheet-handle" aria-hidden="true"/>
+      <div className="sheet-head">
+        <h2 id="shortlist-title">Shortlist <span>{picks.length}</span></h2>
+        <button className="sheet-saved" type="button" onClick={()=>{ setShortlistOpen(false); setSavedOpen(true); }}><Icon name="bookmark"/> Saved {saved.length}</button>
+        <button className="modal-close" type="button" onClick={()=>setShortlistOpen(false)} aria-label="Close shortlist"><Icon name="close"/></button>
+      </div>
+      {picks.length || sheetRemoved.length ? <ul className="sheet-list">
+        {[...picks].reverse().map(pick=><li key={pick.id}><Poster item={pick} className="tray-poster"/><div><strong>{pick.title}</strong><small>{displayMetadata(pick) || pick.type}</small></div><button type="button" onClick={()=>{ const restore = removePick(pick.id, false); setSheetRemoved(current => [{ pick, restore }, ...current]); }} aria-label={`Remove ${pick.title} from shortlist`}><Icon name="close"/></button></li>)}
+        {sheetRemoved.map(({ pick, restore })=><li key={`removed-${pick.id}`} className="sheet-removed"><Poster item={pick} className="tray-poster"/><div><strong>{pick.title}</strong><small>Removed</small></div><button type="button" className="sheet-undo" onClick={()=>{ restore(); setSheetRemoved(current => current.filter(entry => entry.pick.id !== pick.id)); }} aria-label={`Undo removing ${pick.title}`}>Undo</button></li>)}
+      </ul> : <div className="sheet-empty"><Icon name="bookmark"/><p>Swipe right or tap the bookmark to shortlist titles. They gather here.</p></div>}
+      <button className="button button-accent sheet-review" type="button" onClick={()=>{ setShortlistOpen(false); beginReview(); }} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button>
+    </Modal>}
     {ageOpen&&<Modal className="age-modal" labelledBy="age-title" onClose={()=>setAgeOpen(false)}><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes and may display explicit artwork.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></Modal>}
     {savedOpen && <Modal className="saved-modal" labelledBy="saved-title" onClose={() => setSavedOpen(false)}>
         <button className="modal-close" onClick={() => setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close" /></button>
