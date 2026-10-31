@@ -44,9 +44,15 @@ export async function GET(request: NextRequest) {
     const signals = recommendationSignalsFromHistory(rows, excludeSessionId, category);
     // Comparisons are additional evidence, not a duplicate of the current session's decision signals.
     const comparisons = recommendationComparisonsFromHistory(rows, null, category);
+    const profileView = request.nextUrl.searchParams.get("profile") === "1";
+    const featureLimit = profileView ? 4 : 12;
     const currentCandidateIds = new Set(request.nextUrl.searchParams.getAll("candidateId").filter(isStringId).slice(0, 100));
-    const featureItemIds = [...signals.map(signal => signal.itemId), ...comparisons.flatMap(comparison => [comparison.preferredItemId, comparison.removedItemId])];
-    const missing = [...new Set(featureItemIds.filter(id => !currentCandidateIds.has(id)))].slice(-12);
+    // The account profile summarizes choice signals. Keep its metadata budget
+    // focused on those signals rather than review comparisons.
+    const featureItemIds = profileView
+      ? signals.map(signal => signal.itemId)
+      : [...signals.map(signal => signal.itemId), ...comparisons.flatMap(comparison => [comparison.preferredItemId, comparison.removedItemId])];
+    const missing = [...new Set(featureItemIds.filter(id => !currentCandidateIds.has(id)))].slice(-featureLimit);
     const loadFeatures = async (id: string) => {
       try {
         let featureKeys: string[] = [];

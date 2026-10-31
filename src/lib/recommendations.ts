@@ -66,6 +66,35 @@ export const reviewRatingWeights: Record<number, number> = {
   5: 1,
 };
 
+export interface RecommendationPreference {
+  key: string;
+  score: number;
+  evidenceCount: number;
+}
+
+/** Summarize the same shrunken feature evidence used by the ranker. */
+export function recommendationPreferenceProfile(signals: RecommendationSignal[]): RecommendationPreference[] {
+  const evidenceByFeature = new Map<string, FeatureEvidence>();
+  for (const signal of signals) {
+    const decisionWeight = signal.decision === "seen"
+      ? reviewRatingWeights[signal.rating ?? 0]
+      : recommendationWeights[signal.decision];
+    const weight = signal.weight ?? decisionWeight;
+    if (weight === undefined) continue;
+    for (const key of signal.featureKeys ?? []) {
+      const evidence = evidenceByFeature.get(key) ?? { total: 0, count: 0 };
+      evidence.total += weight;
+      evidence.count += 1;
+      evidenceByFeature.set(key, evidence);
+    }
+  }
+  return [...evidenceByFeature].map(([key, evidence]) => ({
+    key,
+    score: evidence.total / (evidence.count + 2),
+    evidenceCount: evidence.count,
+  })).sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
+}
+
 interface FeatureEvidence {
   total: number;
   count: number;
