@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { Modal } from "@/app/modal";
+import { withoutHiddenPairings } from "@/lib/adult-pairing";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 import { rankRecommendations, buildRecommendationProfile, mergeRecommendationEvents, recommendationFeatureKeys, shownCandidateIds, type RecommendationFeatures } from "@/lib/recommendations";
@@ -161,13 +162,15 @@ interface DiscoveryClientProps {
   isAdmin: boolean;
   integrationsReadOnly: boolean;
   adultSectionEnabled: boolean;
+  /** Pairings this account hides in Adult; an explicit hide always wins over learning. */
+  adultHiddenPairings: string[];
   mediaItems: MediaItem[];
   initialFeeds: Record<Category, DiscoveryFeed>;
   seerrConnections: Array<{ id: string; name: string }>;
   plexConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, userId, isAdmin, integrationsReadOnly, adultSectionEnabled, mediaItems, initialFeeds, seerrConnections, plexConnections }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, userId, isAdmin, adultHiddenPairings, integrationsReadOnly, adultSectionEnabled, mediaItems, initialFeeds, seerrConnections, plexConnections }: DiscoveryClientProps) {
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -262,9 +265,9 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const [loadedProfileCategories, setLoadedProfileCategories] = useState<Set<Category>>(() => new Set());
   const activeCategory = useRef(session.category);
   activeCategory.current = session.category;
-  const catalogue = catalogueItems.filter(item => adultSectionEnabled || item.category !== "Adult");
+  const catalogue = withoutHiddenPairings(catalogueItems.filter(item => adultSectionEnabled || item.category !== "Adult"), adultHiddenPairings);
   const categoryItems = catalogue.filter(item => item.category === session.category);
-  const localFeatures = Object.fromEntries([...catalogue, ...Object.values(resolvedSavedItems)].map(item => [item.id, recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type })]));
+  const localFeatures = Object.fromEntries([...catalogue, ...Object.values(resolvedSavedItems)].map(item => [item.id, recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type, pairing: item.pairing })]));
   const combinedFeatures = { ...featuresByItemId };
   for (const [id, keys] of Object.entries(localFeatures)) combinedFeatures[id] = [...new Set([...(combinedFeatures[id] ?? []), ...keys])];
   const profile = buildRecommendationProfile(learningEvents, combinedFeatures, session.category);

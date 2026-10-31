@@ -354,8 +354,8 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   await expect(page.locator(".card-active h2")).toBeVisible();
   await page.locator(".card-active .card-poster").click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Performers" })).toBeVisible();
-  await expect(page.getByRole("dialog").getByText("Mock Adult Performer")).toBeVisible();
-  await expect(page.getByRole("dialog").locator(".person-portrait img")).toHaveAttribute("src", "https://images.example.test/person.jpg");
+  await expect(page.getByRole("dialog").getByText("Mock Adult Performer", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").locator(".person-portrait img").first()).toHaveAttribute("src", "https://images.example.test/person.jpg");
   await page.getByRole("button", { name: "Close details" }).click();
   await request.post("http://127.0.0.1:4199/__control", { data: { failMovies: true } });
   const shows = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
@@ -623,4 +623,40 @@ test("Seen it: press and slide rates in one gesture, a number key rates the focu
     const history = (await (await fetch("/api/account/export")).json()).recommendationHistory as Array<{ eventType: string; itemId: string; rating: number | null }>;
     return ["tmdb-movie-101", "tmdb-movie-102"].map(id => history.find(event => event.eventType === "decision" && event.itemId === id)?.rating ?? null);
   })).toEqual([8, 7]);
+});
+
+test("Adult learns who is on screen, and a pairing hidden in Account never appears", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await page.evaluate(async () => {
+    const users = (await (await fetch("/api/admin/users")).json()).users;
+    const user = users.find((entry: { email: string }) => entry.email === "recommendations@example.test");
+    await fetch("/api/admin/users", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: user.id, adultAllowed: true }) });
+  });
+  const adultIds = async () => page.evaluate(async () => ((await (await fetch("/api/discovery-feed?category=Adult")).json()).items as Array<{ id: string; pairing?: string[] }>).map(item => `${item.id}=${(item.pairing ?? []).join("+")}`));
+  const before = await adultIds();
+  expect(before).toContain("theporndb-scene-adult-scene-1=pairing:women");
+  expect(before).toContain("theporndb-scene-adult-scene-2=pairing:men");
+
+  // Four passes on men-only scenes: the engine suggests hiding them; it never hides on its own.
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: true } });
+  const passes = ["2", "12", "22", "32"].map((n, index) => ({ ...learningDecision(`theporndb-scene-adult-scene-${n}`, index, "pass", "Adult"), id: `men-pass-${n}` }));
+  await page.evaluate(async events => fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) }), passes);
+  await page.goto("/account");
+  await expect(page.getByRole("heading", { name: "Who you want to see" })).toBeVisible();
+  await expect(page.getByText("you tend to pass on", { exact: false })).toContainText("Men only");
+
+  const menSwitch = page.getByRole("switch", { name: "Show Men only" });
+  await expect(menSwitch).toHaveAttribute("aria-checked", "true");
+  await menSwitch.click();
+  await expect(menSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: false } });
+  const hidden = await adultIds();
+  expect(hidden.some(entry => entry.endsWith("=pairing:men"))).toBe(false);
+  expect(hidden).toContain("theporndb-scene-adult-scene-1=pairing:women");
+
+  await menSwitch.click();
+  await expect(menSwitch).toHaveAttribute("aria-checked", "true");
+  await expect.poll(adultIds).toContain("theporndb-scene-adult-scene-2=pairing:men");
 });

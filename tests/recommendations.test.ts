@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MediaItem } from "../src/data";
-import { buildRecommendationProfile, capGenreRuns, effectiveRecommendationEvents, mergeRecommendationEvents, rankRecommendations, recommendationBaseline, recommendationComparisonsFromHistory, recommendationFeatureItemIds, recommendationRetrievalFeatures, recommendationSignalsFromHistory, relatedShowSeeds, reviewRatingWeights, shownCandidateIds, type RecommendationHistoryEvent } from "../src/lib/recommendations";
+import { buildRecommendationProfile, capGenreRuns, effectiveRecommendationEvents, mergeRecommendationEvents, rankRecommendations, recommendationBaseline, recommendationFeatureKeys, recommendationComparisonsFromHistory, recommendationFeatureItemIds, recommendationRetrievalFeatures, recommendationSignalsFromHistory, relatedShowSeeds, reviewRatingWeights, shownCandidateIds, type RecommendationHistoryEvent } from "../src/lib/recommendations";
 
 const item = (id: string, genre: string, rating = "—"): MediaItem => ({ id, title: id, type: "Movie", runtime: "90m", rating, genre: genre ? [genre] : [], synopsis: "", palette: ["#000", "#111", "#222"], art: "mist", label: id, category: "Movies" });
 const event = (overrides: Partial<RecommendationHistoryEvent> = {}): RecommendationHistoryEvent => ({ id: "e", sessionId: "run", reviewId: null, itemId: "old", category: "Movies", eventType: "decision", decision: "keep", rating: null, targetEventId: null, occurredAt: "2026-10-31T10:00:00.000Z", ...overrides });
@@ -116,4 +116,17 @@ test("learned rankings break up long same-genre runs only among near-equal score
   assert.deepEqual(capGenreRuns(farBehind).map(row => row.item.id), ["d1", "d2", "d3", "c1"], "a clearly worse match is never promoted");
   const coldStart = [item("a", "Drama"), item("b", "Drama"), item("c", "Drama"), item("d", "Comedy")];
   assert.deepEqual(rankRecommendations(coldStart).items.map(row => row.id), ["a", "b", "c", "d"], "provider order is untouched without signals");
+});
+test("adult pairing outweighs tags: passing men-only scenes sinks them even when their tags are liked", () => {
+  const scene = (id: string, pairing: string, tag = "Outdoors"): MediaItem => ({ ...item(id, tag), category: "Adult", type: "Scene", pairing: [pairing] });
+  const signal = (id: string, pairing: string, decision: "keep" | "pass", tag = "outdoors") => ({ itemId: id, decision, featureKeys: [`genre:${tag}`, pairing] });
+  // Same tag across the board; the only consistent difference is who is on screen.
+  const history = [
+    ...["m1", "m2", "m3", "m4"].map(id => signal(id, "pairing:men", "pass")),
+    ...["w1", "w2", "w3"].map(id => signal(id, "pairing:women", "keep")),
+    ...["x1", "x2", "x3"].map(id => signal(id, "pairing:mixed", "keep")),
+  ];
+  const ranked = rankRecommendations([scene("men", "pairing:men"), scene("mixed", "pairing:mixed"), scene("women", "pairing:women")], history).items.map(row => row.id);
+  assert.equal(ranked.at(-1), "men");
+  assert.deepEqual(recommendationFeatureKeys({ genres: ["Outdoors"], type: "Scene", pairing: ["pairing:men", "pairing:men", "bogus"] }).filter(key => key.startsWith("pairing:")), ["pairing:men"]);
 });

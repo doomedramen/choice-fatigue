@@ -36,6 +36,8 @@ Package manager is pnpm (pinned 12.16.1, Node 22+); the README/hooks run it thro
 - `rate-limit.ts` — per-process token buckets (event POSTs: 20 per 10 s per account). Trace events are pruned after 180 days from the events POST route.
 - `discovery-state.ts`, `discovery-state-merge.ts`, `api/discovery-state` — per-account session state (shortlist vs permanently saved, undo history) persisted server-side and merged across devices; UI lives in `src/app/discovery-client.tsx`.
 
+**Adult pairing.** `adult-pairing.ts` derives who is on screen (women only / men only / mixed, plus trans) from performer genders, falling back to tags; the ranker weights `pairing:` features at 1.5. Accounts can hide pairings (`User.adultHiddenPairings`, `/api/account/adult-preferences`); `getDiscoveryFeed` and the client drop hidden pairings, and an explicit hide always wins.
+
 **Access control.** First account becomes admin; later sign-ups need the admin-set invite code. Adult content requires both the instance master switch (`global-settings.ts`) and a per-account admin grant (`adult-access*.ts`). Auth in `auth.ts`/`auth-session.ts`; `/admin` and admin APIs are role-checked.
 
 **Integrations and secrets.** Provider credentials, SMTP, and shared service connections (Seerr, Plex, Radarr, Sonarr, Whisparr, Stash, Jellyfin, Emby) are configured in the Admin UI and stored AES-encrypted in Postgres using `INTEGRATION_CREDENTIALS_KEY` (`src/lib/integrations/crypto.ts`); losing the key makes them undecryptable. Server-side only — never return secrets to the client.

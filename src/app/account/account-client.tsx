@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth-client";
-import { buildRecommendationProfile, recommendationPreferenceProfile, type RecommendationFeatures, type RecommendationSignal } from "@/lib/recommendations";
+import { buildRecommendationProfile, recommendationBaseline, recommendationPreferenceProfile, type RecommendationFeatures, type RecommendationSignal } from "@/lib/recommendations";
+import { adultPairingKeys, adultPairingLabels, isAdultPairingKey, type AdultPairingKey } from "@/lib/adult-pairing";
 import type { RecommendationEventInput } from "@/lib/recommendation-event-validation";
 import { ConfirmDialog } from "@/app/modal";
 import "./account.css";
@@ -12,6 +13,7 @@ type PreferenceCategory = "Movies" | "Shows" | "Adult";
 type PreferenceProfile = { category: PreferenceCategory; signals: RecommendationSignal[]; failed: boolean };
 
 function preferenceName(key: string) {
+  if (isAdultPairingKey(key)) return adultPairingLabels[key];
   const [kind, value = ""] = key.split(":");
   if (kind === "decade") return `${value}s`;
   if (kind === "type") return value === "tv" ? "Series" : value.charAt(0).toUpperCase() + value.slice(1);
@@ -62,7 +64,7 @@ function TasteProfile({ revision }: { revision: number }) {
       {profiles.map(profile => {
         const usableSignals = profile.signals.filter(signal => signal.featureKeys?.length);
         const titleCount = new Set(usableSignals.map(signal => signal.itemId)).size;
-        const preferences = recommendationPreferenceProfile(profile.signals).filter(preference => /^(genre|decade|type):/.test(preference.key));
+        const preferences = recommendationPreferenceProfile(profile.signals).filter(preference => /^(genre|decade|type|pairing):/.test(preference.key));
         const leaning = preferences.filter(preference => preference.score >= 0.12).slice(0, 4);
         const passing = preferences.filter(preference => preference.score <= -0.12).sort((a, b) => a.score - b.score).slice(0, 4);
         return <article className="taste-category" key={profile.category}>
@@ -82,7 +84,65 @@ function TasteProfile({ revision }: { revision: number }) {
   </section>;
 }
 
-export default function AccountClient({ userId, name, email, isAdmin }: { userId: string; name: string; email: string; isAdmin: boolean }) {
+/**
+ * Who you want to see in Adult. Hiding a pairing here always wins; learning only suggests, from a
+ * pairing you keep passing (clearly below your usual rate, across at least four titles).
+ */
+function AdultPreferences({ initialHidden, revision }: { initialHidden: AdultPairingKey[]; revision: number }) {
+  const [hidden, setHidden] = useState<AdultPairingKey[]>(initialHidden);
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [suggested, setSuggested] = useState<AdultPairingKey[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/recommendation-events?category=Adult", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json() as { events: RecommendationEventInput[]; featuresByItemId: RecommendationFeatures };
+        const signals = buildRecommendationProfile(data.events, data.featuresByItemId, "Adult").signals;
+        const avoided = recommendationPreferenceProfile(signals, recommendationBaseline(signals))
+          .filter(preference => isAdultPairingKey(preference.key) && preference.evidenceCount >= 4 && preference.score <= -0.2)
+          .map(preference => preference.key as AdultPairingKey);
+        if (!cancelled) setSuggested(avoided);
+      } catch { /* Suggestions are optional; the switches still work. */ }
+    })();
+    return () => { cancelled = true; };
+  }, [revision]);
+
+  async function save(next: AdultPairingKey[]) {
+    const previous = hidden;
+    setHidden(next);
+    setSaving(true);
+    setStatus("");
+    try {
+      const response = await fetch("/api/account/adult-preferences", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ hiddenPairings: next }) });
+      if (response.status === 401) { window.location.replace("/sign-in"); return; }
+      if (!response.ok) throw new Error();
+      setStatus("Saved. Adult discovery uses this from your next page of titles.");
+    } catch {
+      setHidden(previous);
+      setStatus("Couldn’t save that change. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const toggle = (key: AdultPairingKey) => void save(hidden.includes(key) ? hidden.filter(entry => entry !== key) : [...hidden, key]);
+  const suggestions = suggested.filter(key => !hidden.includes(key));
+  return <section className="account-panel adult-preferences" aria-labelledby="adult-preferences-title">
+    <div className="account-panel-heading"><div><p className="account-eyebrow">ADULT</p><h2 id="adult-preferences-title">Who you want to see</h2><p>Hidden pairings never appear in Adult. Everything else is learned from your choices, and who is on screen counts for more than tags.</p></div></div>
+    <ul className="pairing-switches">{adultPairingKeys.map(key => {
+      const shown = !hidden.includes(key);
+      return <li key={key}><span>{adultPairingLabels[key]}</span><button type="button" role="switch" aria-checked={shown} aria-label={`Show ${adultPairingLabels[key]}`} className={`pairing-switch ${shown ? "on" : ""}`} disabled={saving} onClick={() => toggle(key)}><span>{shown ? "Shown" : "Hidden"}</span></button></li>;
+    })}</ul>
+    {suggestions.map(key => <p className="pairing-suggestion" key={key}><span>From your choices, you tend to pass on <strong>{adultPairingLabels[key]}</strong>.</span> <button type="button" className="pairing-suggestion-button" onClick={() => void save([...hidden, key])} disabled={saving}>Hide it</button></p>)}
+    {status && <p className="taste-profile-status" role="status">{status}</p>}
+  </section>;
+}
+
+export default function AccountClient({ userId, name, email, isAdmin, adultAccess, hiddenPairings }: { userId: string; name: string; email: string; isAdmin: boolean; adultAccess: boolean; hiddenPairings: AdultPairingKey[] }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState(false);
@@ -142,6 +202,7 @@ export default function AccountClient({ userId, name, email, isAdmin }: { userId
       <div className="account-heading"><p className="account-eyebrow">YOUR PROFILE</p><h1>Account settings</h1><p>Manage your profile and your Choice Fatigue data.</p></div>
       <section className="account-panel" aria-labelledby="profile-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PROFILE DETAILS</p><h2 id="profile-title">Your information</h2></div></div><dl className="profile-details"><div><dt>Name</dt><dd>{name}</dd></div><div><dt>Email address</dt><dd>{email}</dd></div></dl></section>
       <TasteProfile revision={profileRevision} />
+      {adultAccess && <AdultPreferences initialHidden={hiddenPairings} revision={profileRevision} />}
       <section className="account-panel" aria-labelledby="data-title"><div className="account-panel-heading"><div><p className="account-eyebrow">YOUR DATA</p><h2 id="data-title">Take your choices with you</h2><p>Download a copy of your profile and discovery data.</p></div></div><a className="account-download" href="/api/account/export">Download my data <span aria-hidden="true">↓</span></a></section>
       <section className="account-panel" aria-labelledby="recommendation-title"><div className="account-panel-heading"><div><p className="account-eyebrow">PERSONALISATION</p><h2 id="recommendation-title">Recommendation history</h2><p>Earlier choices help shape future sessions. Adult choices are kept separate from Movies and Shows.</p></div></div><button className="account-download" type="button" onClick={() => setConfirmingClear(true)} disabled={resettingRecommendations}>{resettingRecommendations ? "Clearing…" : "Clear recommendation history"}</button>{recommendationNotice && <p role="status" className="account-success">{recommendationNotice}</p>}</section>
       <section className="account-panel" aria-labelledby="connections-title"><div className="account-panel-heading"><div><p className="account-eyebrow">INSTANCE SERVICES</p><h2 id="connections-title">Shared services</h2><p>Media services are configured for this instance and shared with all accounts.</p></div></div>{isAdmin && <Link className="account-download" href="/admin?section=services">Manage services <span aria-hidden="true">→</span></Link>}</section>

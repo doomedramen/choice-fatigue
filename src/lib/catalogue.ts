@@ -10,10 +10,17 @@ import { parseProviderTitleId } from "@/lib/media-provider-id";
 import { loadRecommendationProfile } from "@/lib/recommendation-profile";
 import { advanceFeedStreams, reconcileFeedStreams, type DiscoveryFeed, type FeedStream } from "@/lib/discovery-feed";
 import type { RecommendationCategory } from "@/lib/recommendation-event-validation";
+import { parseHiddenPairings, withoutHiddenPairings } from "@/lib/adult-pairing";
+import { prisma } from "@/lib/prisma";
 import { encodeFeedCursor, feedCursorSecret, InvalidFeedCursorError, readFeedCursor, validateFeedCursor } from "@/lib/feed-cursor";
 export type { CategoryFeedStatus } from "@/lib/discovery-feed";
 
 export { InvalidFeedCursorError };
+
+async function loadHiddenPairings(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { adultHiddenPairings: true } });
+  return parseHiddenPairings(user?.adultHiddenPairings ?? []) ?? [];
+}
 
 /** Authorization is enforced by the page/API before Adult retrieval is requested. */
 export async function getDiscoveryFeed(userId: string, category: RecommendationCategory, cursorParam: string | null = null, refresh = false, pendingExcludedIds: string[] = [], knownFeatureIds: string[] = []): Promise<DiscoveryFeed> {
@@ -62,12 +69,21 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
     if (stream.source === "theporndb") return getThePornDBCataloguePage(stream.kind!, stream.page);
     return getStashDbCataloguePage(stream.page, stream.features);
   }, ids => createHash("sha256").update(ids.join("\n")).digest("hex"), Date.now(), stream => !refresh || !previousStreams.includes(stream));
+  // An explicit hide always wins: hidden pairings never become candidates, so they are absent from items and traces.
+  const hiddenPairings = category === "Adult" ? await loadHiddenPairings(userId) : [];
+  const items = withoutHiddenPairings(result.items, hiddenPairings);
+  const visibleIds = new Set(items.map(item => item.id));
+  const batches = hiddenPairings.length ? result.batches.flatMap(batch => {
+    const kept = batch.candidateIds.map((id, index) => ({ id, index })).filter(({ id }) => visibleIds.has(id));
+    if (!kept.length) return [];
+    return [{ ...batch, candidateIds: kept.map(({ id }) => id), ...(batch.provenance ? { provenance: { ...batch.provenance, positions: kept.map(({ index }) => batch.provenance!.positions[index]) } } : {}) }];
+  }) : result.batches;
   const candidateFeatures: Record<string, string[]> = {};
   const considered = new Set(profile ? [...buildRecommendationProfile(profile.events, profile.featuresByItemId, category).consideredIds, ...profile.olderConsideredIds] : []);
   for (const id of pendingExcludedIds) if (parseProviderTitleId(id)?.category === category) considered.add(id);
   // Ten credit lookups per page, spent on titles this tab has not already resolved or tried.
   const known = new Set(knownFeatureIds);
-  const candidates = category === "Adult" ? [] : result.items.filter(item => !considered.has(item.id) && !known.has(item.id)).slice(0, 10);
+  const candidates = category === "Adult" ? [] : items.filter(item => !considered.has(item.id) && !known.has(item.id)).slice(0, 10);
   await Promise.all(candidates.map(async item => {
     const reference = parseProviderTitleId(item.id);
     if (!reference || reference.provider !== "tmdb") return;
@@ -76,7 +92,7 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
   return {
     candidateFeatures, creditCoverage: { requested: candidates.length, resolved: Object.keys(candidateFeatures).length },
     snapshot: { candidateRequestedIds: candidates.map(item => item.id), candidateResolvedIds: Object.keys(candidateFeatures), historicalRequestedIds: profile?.requestedCreditItemIds ?? [], historicalResolvedIds: profile?.resolvedCreditItemIds ?? [] },
-    items: result.items, batches: result.batches, sources: result.sources, status: result.status,
+    items, batches, sources: result.sources, status: result.status,
     hasMore: result.streams.some(stream => !stream.done),
     cursor: result.streams.length ? encodeFeedCursor({ category, streams: result.streams }, userId, secret) : null,
   };

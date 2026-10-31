@@ -156,7 +156,7 @@ interface ItemFeature {
   weight: number;
 }
 
-export interface RecommendationFeatureMetadata { genres?: string[]; year?: number; type?: string }
+export interface RecommendationFeatureMetadata { genres?: string[]; year?: number; type?: string; pairing?: string[] }
 
 function normalized(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -170,17 +170,20 @@ export function recommendationFeatureKeys(metadata: RecommendationFeatureMetadat
 
   return [
     ...genres,
+    // Adult pairing keys (pairing:women, …) are already normalised by adult-pairing.ts.
+    ...[...new Set(metadata.pairing ?? [])].filter(key => /^pairing:[a-z]+$/.test(key)).map(key => ({ key, weight: 1.5 })),
     ...(decade === null ? [] : [{ key: `decade:${decade}`, weight: 0.25 }]),
     ...(type && type !== "title" ? [{ key: `type:${type}`, weight: 0.25 }] : []),
   ].map(feature => feature.key);
 }
 
+/** Who is on screen is a stronger, steadier preference than any single tag, so pairing outweighs a genre. */
 function featureWeight(key: string) {
-  return key.startsWith("genre:") ? 1 : 0.25;
+  return key.startsWith("pairing:") ? 1.5 : key.startsWith("genre:") ? 1 : 0.25;
 }
 
 function featuresFor(item: MediaItem): ItemFeature[] {
-  return recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type })
+  return recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type, pairing: item.pairing })
     .map(key => ({ key, weight: featureWeight(key) }));
 }
 
@@ -220,10 +223,10 @@ export function rankRecommendations(
   const comparisons = historicalComparisons.map(comparison => ({
     preferred: itemById.has(comparison.preferredItemId)
       ? featuresFor(itemById.get(comparison.preferredItemId)!).map(feature => feature.key)
-      : (comparison.preferredFeatureKeys ?? []).filter(key => /^(genre|decade|type):/.test(key)),
+      : (comparison.preferredFeatureKeys ?? []).filter(key => /^(genre|decade|type|pairing):/.test(key)),
     removed: itemById.has(comparison.removedItemId)
       ? featuresFor(itemById.get(comparison.removedItemId)!).map(feature => feature.key)
-      : (comparison.removedFeatureKeys ?? []).filter(key => /^(genre|decade|type):/.test(key)),
+      : (comparison.removedFeatureKeys ?? []).filter(key => /^(genre|decade|type|pairing):/.test(key)),
   })).filter(comparison => comparison.preferred.length && comparison.removed.length);
   const similarity = (candidate: Set<string>, other: string[]) => {
     const otherSet = new Set(other);

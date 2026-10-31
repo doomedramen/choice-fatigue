@@ -15,7 +15,7 @@ export default async function HomePage() {
     getGlobalSettings(),
     prisma.adminServiceIntegration.findMany({ where: { service: "seerr" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
     prisma.adminServiceIntegration.findMany({ where: { service: "plex" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
-    prisma.user.findUnique({ where: { id: session.user.id }, select: { adultAllowed: true } }),
+    prisma.user.findUnique({ where: { id: session.user.id }, select: { adultAllowed: true, adultHiddenPairings: true } }),
   ]);
   const canAccessAdult = adultAccessEnabled(settings.adultSectionEnabled, user?.adultAllowed === true);
   const catalogue = await getDiscoveryCatalogue(session.user.id, canAccessAdult);
@@ -26,6 +26,7 @@ export default async function HomePage() {
     isAdmin={session.user.role === "admin"}
     integrationsReadOnly={integrationsReadOnly()}
     adultSectionEnabled={canAccessAdult}
+    adultHiddenPairings={canAccessAdult ? user?.adultHiddenPairings ?? [] : []}
     mediaItems={catalogue.items.filter(item => canAccessAdult || item.category !== "Adult")}
     initialFeeds={catalogue.feeds}
     seerrConnections={seerrConnections}

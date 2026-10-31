@@ -48,3 +48,14 @@
 .account-success { border:1px solid #365c4c; background:#182d29; color:#b4efc9; }
 @media (max-width:520px) { .taste-profile-groups { grid-template-columns:1fr; } }
 @media (min-width:640px) { .account-header { min-height:76px; padding:0 5%; } .account-main { padding-top:46px; } .account-panel,.account-danger { padding:24px; } }
+
+/* Adult pairings: one row per pairing with a Shown/Hidden switch. */
+.pairing-switches { display: grid; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+.pairing-switches li { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 14px; border: 1px solid #2e384c; border-radius: 12px; background: #121927; color: #eef1f7; font-size: 15px; font-weight: 700; }
+.pairing-switch { position: relative; display: inline-flex; min-width: 108px; min-height: 44px; align-items: center; justify-content: flex-end; padding: 0 14px 0 44px; border: 1px solid #46536a; border-radius: 999px; background: #202a3c; color: #c5cede; font-size: 13px; font-weight: 800; }
+.pairing-switch::before { content: ""; position: absolute; top: 50%; left: 6px; width: 30px; height: 30px; border-radius: 50%; background: #5d6880; transform: translateY(-50%); transition: background-color 160ms ease-out; }
+.pairing-switch.on { justify-content: flex-start; padding: 0 44px 0 14px; border-color: #8a67ff; background: #2b2150; color: #e3dbff; }
+.pairing-switch.on::before { left: auto; right: 6px; background: #8a67ff; }
+.pairing-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 14px 0 0; padding: 10px 12px; border: 1px dashed #4b5670; border-radius: 12px; color: #c9d0dd; font-size: 14px; }
+.pairing-suggestion strong { color: #fff; }
+.pairing-suggestion-button { min-height: 40px; padding: 0 14px; border: 1px solid #ff917e; border-radius: 10px; background: #3a1f1c; color: #ffe1db; font-size: 13px; font-weight: 800; }

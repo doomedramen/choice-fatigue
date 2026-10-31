@@ -6,6 +6,7 @@ import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
+import { adultPairingFromCast } from "@/lib/adult-pairing";
 
 const ENDPOINT = process.env.NODE_ENV !== "production" ? process.env.STASHDB_API_BASE_URL || "https://stashdb.org/graphql" : "https://stashdb.org/graphql";
 const RESULT_LIMIT = 25;
@@ -19,6 +20,7 @@ type StashScene = {
   release_date?: unknown;
   duration?: unknown;
   tags?: StashTag[];
+  performers?: Array<{ performer?: { gender?: unknown } | null } | null>;
   studio?: StashStudio;
   images?: Array<{ url?: unknown } | null>;
 };
@@ -83,6 +85,7 @@ function normalizeScene(scene: StashScene) {
     synopsis: stringValue(scene.details).slice(0, 3000),
     ...(runtimeFrom(scene.duration) ? { runtime: runtimeFrom(scene.duration) } : {}),
     genres,
+    pairing: adultPairingFromCast((scene.performers ?? []).map(appearance => appearance?.performer?.gender), genres),
     artworkUrl: providerArtworkUrl(...(Array.isArray(scene.images) ? scene.images.map(image => image?.url) : [])),
   };
 }
@@ -95,6 +98,7 @@ const findQuery = `query FindSceneById($id: ID!) {
     release_date
     duration
     tags { id name }
+    performers { performer { gender } }
     studio { name }
     images { url }
   }
@@ -121,6 +125,7 @@ const popularQuery = `query PopularScenes($input: SceneQueryInput!) {
       release_date
       duration
       tags { id name }
+      performers { performer { gender } }
       studio { name }
       images { url }
     }
@@ -154,6 +159,7 @@ function stashDbMediaItem(scene: NonNullable<ReturnType<typeof normalizeScene>>)
     runtime: scene.runtime ?? "—",
     rating: "—",
     genre: scene.genres,
+    ...(scene.pairing.length ? { pairing: scene.pairing } : {}),
     synopsis: scene.synopsis,
     palette: ["#3d2d38", "#2a202b", "#181620"],
     art: "noir",
@@ -184,7 +190,7 @@ export async function getStashDbRecommendationMetadata(sourceId: string) {
   const normalized = scene ? normalizeScene(scene) : null;
   if (!scene || !normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
   return {
-    featureKeys: recommendationFeatureKeys({ genres: normalized.genres, year: normalized.year, type: "Scene" }),
+    featureKeys: recommendationFeatureKeys({ genres: normalized.genres, year: normalized.year, type: "Scene", pairing: normalized.pairing }),
     retrievalTags: Object.fromEntries((scene.tags ?? []).flatMap(tag => {
       const id = stringValue(tag.id), name = stringValue(tag.name).toLowerCase().replace(/\s+/g, " ");
       return id && name ? [[`genre:${name}`, id]] : [];

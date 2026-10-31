@@ -122,6 +122,7 @@ To compare matched provider order with the current ranker at each impression on 
 - The development v3 migration resets old learning traces and mutable deck decisions, preserves saved provider IDs, and seeds their retention evidence. Legacy event formats are not supported.
 - Discovery uses choices and ten-point ratings to learn category-specific preferences. Movies and Shows also use bounded people and studio signals, and Shows can draw candidates related to highly rated or saved shows. Sparse evidence shrinks toward neutral, and Adult signals remain isolated. Provider metadata is fetched transiently. See [`docs/recommendation-algorithm-plan.md`](docs/recommendation-algorithm-plan.md).
 - The first account can sign up without an invite and becomes administrator. Later sign-ups require the invite code saved by an administrator. Signup and sign-in do not send or require email verification.
+- Adult learns who is on screen (women only, men only, mixed, trans) from performer genders and weighs it above tags; any pairing can be hidden outright in Account, and hidden pairings never appear.
 - Adult is disabled by default. An administrator must enable the instance master switch and grant access separately to each account. Its confirmation screen is a self-attested age gate, not identity or legal age verification.
 
 All application configuration is managed through Admin settings. Environment variables are limited to database connectivity, authentication runtime settings, and the server encryption key.

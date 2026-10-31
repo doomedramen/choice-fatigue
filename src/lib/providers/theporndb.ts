@@ -6,6 +6,7 @@ import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
+import { adultPairingFromCast } from "@/lib/adult-pairing";
 
 export const thePornDBKinds = ["scene", "movie"] as const;
 export type ThePornDBKind = (typeof thePornDBKinds)[number];
@@ -19,6 +20,7 @@ type ThePornDBRecord = {
   year?: unknown;
   duration?: unknown;
   tags?: unknown;
+  performers?: unknown;
   type?: unknown;
   rating?: unknown;
   image?: unknown;
@@ -79,6 +81,16 @@ function formatDuration(value: unknown) {
   return hours ? `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}` : `${minutes}m`;
 }
 
+/** Performer genders sit in `extra.gender`, or on the linked parent performer. */
+function pairingFrom(record: ThePornDBRecord) {
+  const performers = Array.isArray(record.performers) ? record.performers : [];
+  const genders = performers.map(entry => {
+    const performer = entry && typeof entry === "object" ? entry as { extra?: { gender?: unknown }; parent?: { extra?: { gender?: unknown } } } : {};
+    return performer.extra?.gender ?? performer.parent?.extra?.gender;
+  });
+  return adultPairingFromCast(genders, genresFrom(record.tags));
+}
+
 function genresFrom(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.map(tag => {
@@ -120,6 +132,7 @@ function popularItem(record: ThePornDBRecord, kind: ThePornDBKind): MediaItem | 
     runtime: result.runtime ?? "—",
     rating: rating === null ? "—" : rating.toFixed(1),
     genre: result.genres,
+    ...(pairingFrom(record).length ? { pairing: pairingFrom(record) } : {}),
     synopsis: result.synopsis,
     palette: ["#58352e", "#362b30", "#211c28"],
     art: "noir",
@@ -173,5 +186,5 @@ export async function getThePornDBRecommendationFeatures(kind: ThePornDBKind, so
   const payload = await requestThePornDB<ThePornDBPayload>(apiPath(kind, sourceId), token);
   const record = recordsFrom(payload)[0];
   if (!record || recordId(record) !== sourceId) throw new ThePornDBInvalidRecordError();
-  return recommendationFeatureKeys({ genres: genresFrom(record.tags), year: yearFrom(record), type: kind === "movie" ? "Movie" : "Scene" });
+  return recommendationFeatureKeys({ genres: genresFrom(record.tags), year: yearFrom(record), type: kind === "movie" ? "Movie" : "Scene", pairing: pairingFrom(record) });
 }

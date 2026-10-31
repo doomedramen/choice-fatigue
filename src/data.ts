@@ -9,6 +9,8 @@ export interface MediaItem {
   runtime: string;
   rating: string;
   genre: string[];
+  /** Adult only: who is on screen (pairing:women, pairing:men, pairing:mixed, pairing:trans). Derived per fetch, never stored. */
+  pairing?: string[];
   synopsis: string;
   artworkUrl?: string;
   backdropUrl?: string;

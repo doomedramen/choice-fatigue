@@ -328,7 +328,7 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
         const held = rotating ? missing.filter(id => attempted.has(id)) : selected;
         const featureItems = [...available, ...held.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])];
         const resolved = creditsBySession.get(event.sessionId) ?? new Set<string>();
-        const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type }), ...((["content-v6", "content-v7"].includes(event.algorithmVersion) ? resolved.has(item.id) : !availableIds.has(item.id) || creditRequested.has(item.id)) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
+        const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type, pairing: item.pairing }), ...((["content-v6", "content-v7"].includes(event.algorithmVersion) ? resolved.has(item.id) : !availableIds.has(item.id) || creditRequested.has(item.id)) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
         featureEligible += missing.length; featureRequested += selected.length; featureResolved += selected.filter(id => metadata.has(id)).length;
         const profile = buildRecommendationProfile(prior, features, category);
         const window = new Set(event.candidateIds);

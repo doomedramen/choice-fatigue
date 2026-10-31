@@ -16,6 +16,8 @@ model User {
   role          String           @default("user")
   disabled      Boolean          @default(false)
   adultAllowed  Boolean          @default(false)
+  /// Adult pairings this account chose to hide (pairing:women, pairing:men, pairing:mixed, pairing:trans). An explicit hide always wins over learning.
+  adultHiddenPairings String[]   @default([])
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   sessions      Session[]

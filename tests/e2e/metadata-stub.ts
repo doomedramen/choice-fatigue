@@ -7,7 +7,9 @@ let requests: Array<{ path: string; search: string; input?: unknown }> = [];
 const genres = [{ id: 18, name: "Drama" }, { id: 35, name: "Comedy" }, { id: 16, name: "Animation" }];
 const movie = (id: number, title: string, genreId: number) => ({ id, adult: false, production_companies: [{ id: 88 }], credits: { cast: [{ id: 77, order: 0, name: "Mock Actor", character: "The Lead", profile_path: "/actor.jpg" }], crew: [{ id: 55, job: "Director" }, { id: 56, job: "Writer" }] }, aggregate_credits: { cast: [{ id: 77, order: 0, name: "Mock Actor", profile_path: "/actor.jpg", roles: [{ character: "The Lead" }] }], crew: [{ id: 55, jobs: [{ job: "Director" }] }, { id: 56, jobs: [{ job: "Writer" }] }] }, created_by: [{ id: 57 }], title, release_date: "2024-04-12", overview: "Fictional test metadata.", vote_average: 7.1, genre_ids: [genreId], genres: genres.filter(genre => genre.id === genreId), poster_path: null, runtime: 110 });
 const show = (id: number, title: string, genreId: number) => ({ ...movie(id, title, genreId), name: title, first_air_date: "2023-02-03", episode_run_time: [42] });
-const scene = (id: string) => ({ id, title: id === "stash-scene-1" ? "Mock Stash Scene" : `Mock Stash ${id}`, details: "Fictional test metadata.", release_date: "2024-01-01", images: [{ url: "https://images.example.test/stash.jpg" }], performers: [{ as: null, performer: { name: "Mock Stash Performer", images: [{ url: "https://images.example.test/person.jpg" }] } }], tags: [{ id: "tag-drama", name: "Drama" }] });
+// Who is on screen, by the ID's last digit: 1 is women only, 2 is men only, anything else mixed.
+const cast = (id: string) => /2$/.test(id) ? ["MALE", "MALE"] : /1$/.test(id) ? ["FEMALE", "FEMALE"] : ["FEMALE", "MALE"];
+const scene = (id: string) => ({ id, title: id === "stash-scene-1" ? "Mock Stash Scene" : `Mock Stash ${id}`, details: "Fictional test metadata.", release_date: "2024-01-01", images: [{ url: "https://images.example.test/stash.jpg" }], performers: cast(id).map((gender, index) => ({ as: null, performer: { name: index ? `Mock Stash Performer ${index + 1}` : "Mock Stash Performer", gender, images: [{ url: "https://images.example.test/person.jpg" }] } })), tags: [{ id: "tag-drama", name: "Drama" }] });
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://127.0.0.1:${port}`);
   response.setHeader("content-type", "application/json");
@@ -61,9 +63,9 @@ const server = createServer(async (request, response) => {
     const collection = url.pathname.split("/")[2];
     const id = url.pathname.split("/")[3];
     const kind = collection === "scenes" ? "scene" : "movie";
-    const record = (sourceId: string) => ({ _id: sourceId, title: sourceId === `adult-${kind}-1` ? `Mock Adult ${kind === "scene" ? "Scene" : "Movie"}` : `Mock Adult ${sourceId}`, date: "2024-01-01", year: 2024, poster: "https://images.example.test/poster.jpg", performers: [{ name: "Mock Adult Performer", face: "https://images.example.test/person.jpg" }], description: "Fictional test metadata.", tags: [{ name: "Drama" }] });
+    const record = (sourceId: string) => ({ _id: sourceId, title: sourceId === `adult-${kind}-1` ? `Mock Adult ${kind === "scene" ? "Scene" : "Movie"}` : `Mock Adult ${sourceId}`, date: "2024-01-01", year: 2024, poster: "https://images.example.test/poster.jpg", performers: cast(sourceId).map((gender, index) => ({ name: index ? `Mock Adult Performer ${index + 1}` : "Mock Adult Performer", face: "https://images.example.test/person.jpg", extra: { gender: gender === "MALE" ? "Male" : "Female" } })), description: "Fictional test metadata.", tags: [{ name: "Drama" }] });
     const page = Number(url.searchParams.get("page") || "1");
-    const records = control.emptyAdult ? [] : control.extended ? page <= 2 ? Array.from({ length: 25 }, (_, i) => record(`adult-${kind}-${(page - 1) * 25 + i + 1}`)) : [] : page === 1 ? [record(`adult-${kind}-1`)] : [];
+    const records = control.emptyAdult ? [] : control.extended ? page <= 2 ? Array.from({ length: 25 }, (_, i) => record(`adult-${kind}-${(page - 1) * 25 + i + 1}`)) : [] : page === 1 ? [record(`adult-${kind}-1`), record(`adult-${kind}-2`)] : [];
     response.end(JSON.stringify(id ? { data: record(id) } : { data: records, meta: { current_page: page, last_page: control.extended ? 2 : 1 } }));
   } else if (url.pathname === "/graphql") {
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
