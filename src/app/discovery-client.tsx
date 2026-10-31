@@ -66,6 +66,10 @@ function Icon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+/** Score colours for the Seen it rail and stamp: coral for low, amber for middling, teal for good, violet for favourites. */
+function seenRatingColor(value:number) { return value <= 3 ? "#c4573a" : value <= 6 ? "#a06a14" : value <= 8 ? "#16805f" : "#6a4ed8"; }
+function seenRatingLabel(value:number) { return value <= 3 ? "Not for me" : value <= 5 ? "It was fine" : value <= 7 ? "Good" : value <= 8 ? "Great" : "All-timer"; }
+
 function Poster({ item, className="", loading="lazy" }: { item: MediaItem; className?: string; loading?: "eager" | "lazy" }) {
   const [failedSource, setFailedSource] = useState("");
   const source = item.artworkUrl && item.artworkUrl !== failedSource ? item.artworkUrl : undefined;
@@ -218,6 +222,9 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const dragOffset = useRef(0);
   const mediaCard = useRef<HTMLElement|null>(null);
   const ratingInput = useRef<HTMLButtonElement|null>(null);
+  const seenScrubRoot = useRef<HTMLDivElement|null>(null);
+  const ratingDismissedAt = useRef(0);
+  const seenScrub = useRef<{ pointerId:number; startX:number; moved:boolean; value:number; cancelled:boolean }|null>(null);
   const windowKeyHandler = useRef<(event:KeyboardEvent) => void>(() => undefined);
   const seenButton = useRef<HTMLButtonElement|null>(null);
   const shownItemKey = useRef("");
@@ -639,6 +646,19 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     if (ratingSelectorOpen) ratingInput.current?.focus();
   }, [ratingSelectorOpen]);
 
+  // Changing your mind: a press anywhere outside the open rating row closes it without rating.
+  useEffect(() => {
+    if (!ratingSelectorOpen) return;
+    function closeOnOutsidePress(event: globalThis.PointerEvent) {
+      const row = seenScrubRoot.current;
+      if (!row || !(event.target instanceof Node) || row.contains(event.target)) return;
+      ratingDismissedAt.current = Date.now();
+      setRatingSelectorOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+  }, [ratingSelectorOpen]);
+
   useEffect(() => {
     function closeAccountMenu(event: globalThis.PointerEvent) {
       const menu = accountMenu.current;
@@ -788,12 +808,22 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     }
     swipeExit.current=true;
     setCardExiting(true);
-    element.style.transform=decision === "seen" ? "translateY(-10px) scale(.98)" : `translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
-    element.style.opacity="0";
     element.style.pointerEvents="none";
-    if (source==="control") element.classList.add("control-exit");
     element.classList.remove("drag-keep","drag-pass");
-    const handoffDelay=source==="control"?230:150;
+    // A rating first lands a "SEEN · n" stamp in the score's colour, then the card lifts away.
+    const stampHold = decision === "seen" ? 220 : 0;
+    if (decision === "seen") {
+      const stamp = element.querySelector<HTMLElement>(".stamp-seen");
+      if (stamp) stamp.textContent = `SEEN · ${rating}`;
+      element.style.setProperty("--seen-color", seenRatingColor(rating!));
+      element.classList.add("seen-exit");
+    }
+    window.setTimeout(() => {
+      element.style.transform=decision === "seen" ? "translateY(-24px) scale(.96)" : `translateX(${decision==="keep"?"105%":"-105%"}) rotate(${decision==="keep"?4:-4}deg)`;
+      element.style.opacity="0";
+      if (source==="control") element.classList.add("control-exit");
+    }, stampHold);
+    const handoffDelay=stampHold+(source==="control"?230:150);
     window.setTimeout(()=>{
       swipeExit.current=false;
       setCardExiting(false);
@@ -917,7 +947,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       card.style.opacity="";
       card.style.removeProperty("--drag");
       card.classList.remove("drag-keep","drag-pass");
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && item && !ratingSelectorOpen) setDetails(item);
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && item && !ratingSelectorOpen && Date.now() - ratingDismissedAt.current > 500) setDetails(item);
     }
   }
 
@@ -932,6 +962,56 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     card.style.opacity="";
     card.style.removeProperty("--drag");
     card.classList.remove("drag-keep","drag-pass");
+  }
+
+  // Hold-and-slide rating: press Seen it, slide along the 1–10 rail, release to rate. A press without
+  // a slide opens the 1–10 buttons instead; dragging well below the rail cancels.
+  function seenValueAt(root:HTMLElement, clientX:number) {
+    const rect = root.getBoundingClientRect();
+    return Math.min(10, Math.max(1, Math.ceil((clientX - rect.left) / rect.width * 10)));
+  }
+  function paintSeenScrub(root:HTMLElement, value:number, cancelled:boolean) {
+    root.style.setProperty("--seen-value", String(value));
+    root.style.setProperty("--seen-color", seenRatingColor(value));
+    root.dataset.cancel = String(cancelled);
+    const bubble = root.querySelector(".seen-bubble");
+    if (bubble) { bubble.querySelector("strong")!.textContent = String(value); bubble.querySelector("small")!.textContent = seenRatingLabel(value); }
+    root.querySelectorAll<HTMLElement>(".seen-rail span").forEach(tick => tick.classList.toggle("on", Number(tick.dataset.value) <= value));
+  }
+  function onSeenPointerDown(event:PointerEvent<HTMLButtonElement>) {
+    const root = seenScrubRoot.current;
+    if (!root || event.button !== 0 || swipeExit.current) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = root.getBoundingClientRect();
+    root.style.setProperty("--seen-origin", `${(event.clientX - rect.left) / rect.width * 100}%`);
+    const value = seenValueAt(root, event.clientX);
+    seenScrub.current = { pointerId: event.pointerId, startX: event.clientX, moved: false, value, cancelled: false };
+    paintSeenScrub(root, value, false);
+    root.classList.add("scrubbing");
+  }
+  function onSeenPointerMove(event:PointerEvent<HTMLButtonElement>) {
+    const scrub = seenScrub.current, root = seenScrubRoot.current;
+    if (!scrub || !root || scrub.pointerId !== event.pointerId) return;
+    if (Math.abs(event.clientX - scrub.startX) > 6) scrub.moved = true;
+    scrub.cancelled = event.clientY > root.getBoundingClientRect().bottom + 36;
+    const value = seenValueAt(root, event.clientX);
+    if (value !== scrub.value && !scrub.cancelled) navigator.vibrate?.(4);
+    scrub.value = value;
+    paintSeenScrub(root, value, scrub.cancelled);
+  }
+  function onSeenPointerUp(event:PointerEvent<HTMLButtonElement>) {
+    const scrub = seenScrub.current;
+    if (!scrub || scrub.pointerId !== event.pointerId) return;
+    seenScrub.current = null;
+    seenScrubRoot.current?.classList.remove("scrubbing");
+    if (scrub.cancelled) return;
+    if (scrub.moved) transitionDecision("seen", "control", scrub.value);
+    else setRatingSelectorOpen(true);
+  }
+  function onSeenPointerCancel() {
+    seenScrub.current = null;
+    seenScrubRoot.current?.classList.remove("scrubbing");
   }
 
   function moveRatingFocus(event:React.KeyboardEvent<HTMLDivElement>) {
@@ -965,19 +1045,26 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
           <div className="card-overline"><span>{displayMetadata(candidate) || "Details unavailable"}</span>{candidate.rating !== "—" && <span><Icon name="spark"/> {candidate.rating}</span>}</div>
           <h2>{candidate.title}</h2>
           <div className="card-footer">
-            <div className="card-actions">
-              {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`}>
+            <div className="card-actions" ref={active ? seenScrubRoot : undefined}>
+              {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`} onBlur={event=>{ if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setRatingSelectorOpen(false); }}>
                 <legend className="sr-only">Rate {candidate.title} with 1 to 10 to continue.</legend>
                 <div className="seen-rating-header"><span>Your rating <small>/ 10</small></span><button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button></div>
                 {/* Buttons, not radios: arrow keys only move focus here, and a rating is saved only on click, Enter, or Space. */}
                 <div className="seen-rating-options" onKeyDown={moveRatingFocus}>{[1,2,3,4,5,6,7,8,9,10].map(stars=>
                   <button key={stars} ref={stars===1?ratingInput:undefined} type="button" aria-label={`${stars} out of 10`} onClick={()=>transitionDecision("seen","control",stars)}>{stars}</button>
                 )}</div>
-              </fieldset> : <><button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`Details for ${candidate.title}`}><Icon name="info"/><span>Details</span></button><button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button></>)}
+              </fieldset> : <><button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`Details for ${candidate.title}`}><Icon name="info"/><span>Details</span></button><button ref={seenButton} className="card-seen-button" type="button"
+                  onPointerDown={onSeenPointerDown} onPointerMove={onSeenPointerMove} onPointerUp={onSeenPointerUp} onPointerCancel={onSeenPointerCancel}
+                  // Pointer presses are handled above; a keyboard Enter or Space (detail 0) opens the 1–10 buttons.
+                  onClick={event=>{ if (event.detail === 0) setRatingSelectorOpen(true); }}
+                  aria-label={`Seen it: rate ${candidate.title}. Press and slide to rate, or choose a rating`}><Icon name="eye"/><span>Seen it</span></button>
+                {/* The hold-and-slide rail: drawn over the action row while a press is live, driven directly from pointer events. */}
+                <div className="seen-rail" aria-hidden="true"><div className="seen-rail-fill"/>{[1,2,3,4,5,6,7,8,9,10].map(stars=><span key={stars} data-value={stars}>{stars}</span>)}</div>
+                <div className="seen-bubble" aria-hidden="true"><strong/><small/></div></>)}
             </div>
           </div>
         </div>
-      {active && <><div className="swipe-stamp stamp-keep">SHORTLIST</div><div className="swipe-stamp stamp-pass">PASS</div></>}
+      {active && <><div className="swipe-stamp stamp-keep">SHORTLIST</div><div className="swipe-stamp stamp-pass">PASS</div><div className="swipe-stamp stamp-seen" aria-hidden="true"/></>}
     </article>;
   }
 
@@ -985,6 +1072,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   windowKeyHandler.current = (event:KeyboardEvent) => {
     if (event.key === "Escape") { if(ratingSelectorOpen)cancelRatingSelector(); else if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
     if (!ready || session.view !== "discover" || details || savedOpen || ageOpen || cardExiting) return;
+    // With the card (or its open rating row) focused, 1–9 rate directly and 0 means 10: one keystroke.
+    if (/^[0-9]$/.test(event.key) && event.target instanceof Node && (event.target === mediaCard.current || (ratingSelectorOpen && mediaCard.current?.contains(event.target)))) {
+      event.preventDefault();
+      transitionDecision("seen", "control", event.key === "0" ? 10 : Number(event.key));
+      return;
+    }
     if (event.target instanceof HTMLElement && event.target.closest("button, input, select, textarea, a, summary, [contenteditable='true']")) return;
     if (event.key === "ArrowLeft") { event.preventDefault(); transitionDecision("pass"); }
     if (event.key === "ArrowRight") { event.preventDefault(); transitionDecision("keep"); }
@@ -1054,7 +1147,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
               {renderMediaCard(item, true)}
             </div>
             <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-keyshortcuts="ArrowLeft"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last choice"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-keyshortcuts="ArrowRight"><small>Want to see</small><span><Icon name="right"/></span></button></div>
-            <p id="card-controls-hint" className="sr-only">Press Enter for details. Use the left and right arrow keys to pass or shortlist.</p>
+            <p id="card-controls-hint" className="sr-only">Press Enter for details. Use the left and right arrow keys to pass or shortlist, or 1 to 9 and 0 for 10 to rate it as seen.</p>
             {showSwipeHint && <p className="swipe-hint" aria-hidden="true">Drag the card, or use <kbd>←</kbd> <kbd>→</kbd></p>}
           </div> : <div className="empty-state" role="status"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
             {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>More titles are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>{feedFailureMessage(discoveryPages[session.category].feed.sources)} Your saved choices are safe; try again in a moment.</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></>}

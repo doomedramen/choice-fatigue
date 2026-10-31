@@ -474,3 +474,21 @@ button:active:not(:disabled) { transform: scale(.98); }
 .shell.has-toast .main { padding-bottom: 96px; }
 /* On wide screens the review list fills the lower page, so its toast sits in the empty space beside the heading instead. */
 @media (min-width: 720px) { .shell.in-review .toast { top: 92px; bottom: auto; } }
+
+/* Hold-and-slide "Seen it": the rail unfurls over the action row from the press point and fills in the score's colour. */
+.card-actions { position: relative; }
+.seen-rail { position: absolute; z-index: 3; inset: 0; display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); overflow: hidden; border: 1px solid #46536b; border-radius: 10px; background: #1b2536; opacity: 0; transform: scaleX(.3); transform-origin: var(--seen-origin, 50%) 50%; pointer-events: none; transition: transform 220ms var(--ease-out), opacity 140ms ease-out; }
+.seen-rail-fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--seen-value, 0) * 10%); background: var(--seen-color, #6a4ed8); transition: width 90ms ease-out, background-color 120ms ease-out; }
+.seen-rail span { position: relative; display: grid; place-items: center; color: #9ea9bd; font-size: 13px; font-weight: 800; }
+.seen-rail span.on { color: #fff; }
+.seen-bubble { position: absolute; z-index: 4; bottom: calc(100% + 10px); left: clamp(44px, calc((var(--seen-value, 1) - .5) * 10%), calc(100% - 44px)); min-width: 88px; padding: 8px 14px; border-radius: 14px; background: var(--seen-color, #6a4ed8); color: #fff; text-align: center; opacity: 0; transform: translateX(-50%) scale(.6); pointer-events: none; transition: transform 160ms var(--ease-out), opacity 120ms ease-out, left 90ms ease-out, background-color 120ms ease-out; }
+.seen-bubble strong { display: block; font-family: var(--font-manrope), sans-serif; font-size: 30px; font-weight: 800; line-height: 1; }
+.seen-bubble small { display: block; margin-top: 2px; font-size: 12px; font-weight: 700; }
+.card-actions.scrubbing .seen-rail { opacity: 1; transform: scaleX(1); }
+.card-actions.scrubbing .seen-bubble { opacity: 1; transform: translateX(-50%) scale(1); }
+.card-actions.scrubbing[data-cancel="true"] .seen-bubble { opacity: 0; }
+.card-actions.scrubbing[data-cancel="true"] .seen-rail { opacity: .45; }
+.card-actions.scrubbing .card-seen-button { cursor: grabbing; }
+.card-seen-button { touch-action: none; }
+.stamp-seen { left: 50%; color: #fff; border-color: var(--seen-color, #6a4ed8); background: var(--seen-color, #6a4ed8); transform: translateX(-50%) rotate(-4deg) scale(1.4); transition: opacity 140ms ease-out, transform 200ms var(--ease-out); white-space: nowrap; }
+.media-card.seen-exit .stamp-seen { opacity: 1; transform: translateX(-50%) rotate(-4deg) scale(1); }

@@ -584,3 +584,35 @@ test("event writes reject other accounts' IDs and Adult without access, and are 
   for (let index = 0; index < 25; index++) statuses.push((await post(page, [])).status);
   expect(statuses).toContain(429);
 });
+
+test("Seen it: press and slide rates in one gesture, a number key rates the focused card, and a press outside closes the row", async ({ page }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await page.goto("/");
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
+
+  await page.getByRole("button", { name: /Seen it: rate Mock Movie One/ }).click();
+  await expect(page.getByRole("button", { name: "1 out of 10", exact: true })).toBeVisible();
+  await page.getByRole("heading", { name: "Movies", exact: true }).click();
+  await expect(page.getByRole("button", { name: "1 out of 10", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
+
+  const seen = (await page.getByRole("button", { name: /Seen it: rate Mock Movie One/ }).boundingBox())!;
+  const row = (await page.locator(".card-active .card-actions").boundingBox())!;
+  await page.mouse.move(seen.x + seen.width / 2, seen.y + seen.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(row.x + row.width * 0.72, seen.y + seen.height / 2, { steps: 8 });
+  await expect(page.locator(".card-active .seen-bubble strong")).toHaveText("8");
+  await expect(page.locator(".card-active .seen-bubble small")).toHaveText("Great");
+  await page.mouse.up();
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie Two");
+
+  await page.locator(".card-active").focus();
+  await page.keyboard.press("7");
+  await expect(page.getByRole("heading", { name: "Mock Movie Two" })).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async () => {
+    const history = (await (await fetch("/api/account/export")).json()).recommendationHistory as Array<{ eventType: string; itemId: string; rating: number | null }>;
+    return ["tmdb-movie-101", "tmdb-movie-102"].map(id => history.find(event => event.eventType === "decision" && event.itemId === id)?.rating ?? null);
+  })).toEqual([8, 7]);
+});
