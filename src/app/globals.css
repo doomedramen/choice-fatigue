@@ -337,7 +337,7 @@ button:active:not(:disabled) { transform: scale(.98); }
   .decision-row { gap: 25px; margin: 19px 0 8px; }
   .decision-button > span { width: 52px; height: 52px; }
   .bottom-note { margin-top: auto; }
-  .shortlist-panel { display: flex; min-width: 0; flex-direction: column; order: initial; margin: 0 -20px 0 0; padding: 34px 0 22px 22px; border-top: 0; border-left: 1px solid #303a50; background: #101624; }
+  .shortlist-panel { display: flex; min-width: 0; flex-direction: column; align-items: stretch; order: initial; margin: 0 -20px 0 0; padding: 34px 0 22px 22px; border-top: 0; border-left: 1px solid #303a50; background: #101624; }
   .panel-heading h2 { font-size: 22px; }
   .panel-copy { display: block; margin: 10px 0 18px; color: #b7c1d2; font-size: 14px; line-height: 1.45; }
   .tray-list { display: flex; width: 100%; flex-direction: column; gap: 9px; padding: 0; overflow: visible; }
