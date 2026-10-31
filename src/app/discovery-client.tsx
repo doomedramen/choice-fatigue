@@ -41,13 +41,14 @@ const seerrAvailabilityLabels: Record<string, string> = {
 };
 const seerrTrackedStatuses = new Set(["pending", "processing", "partially-available", "available"]);
 
-type IconName = "spark"|"back"|"close"|"left"|"check"|"bookmark"|"arrow"|"info"|"rewind"|"lock"|"eye";
+type IconName = "spark"|"back"|"close"|"left"|"right"|"check"|"bookmark"|"arrow"|"info"|"rewind"|"lock"|"eye";
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, React.ReactNode> = {
     spark:<><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/></>,
     back:<><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></>,
     close:<path d="m18 6-12 12M6 6l12 12"/>,
     left:<path d="m15 18-6-6 6-6"/>,
+    right:<path d="m9 18 6-6-6-6"/>,
     check:<path d="m5 12 4 4L19 6"/>,
     bookmark:<path d="M6 4.8A1.8 1.8 0 0 1 7.8 3h8.4A1.8 1.8 0 0 1 18 4.8V21l-6-3.6L6 21V4.8Z"/>,
     arrow:<path d="M5 12h14M13 6l6 6-6 6"/>,
@@ -738,14 +739,14 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
           <div className="review-footnote">You can keep browsing before saving your picks.</div>
         </div> : <div className="discover-layout">
           {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}</p>}
-          <div className="discover-intro"><h1>{session.category}</h1><button className="session-chip" onClick={startFresh} title="Start a new session. Past choices will still shape recommendations."><Icon name="spark"/><span>Start fresh</span></button></div>
+          <div className="discover-intro"><h1>{session.category}</h1><button className="session-chip" onClick={startFresh} title="Clears this session’s passes, ratings, and shortlist. Saved titles and learned preferences stay."><Icon name="spark"/><span>Clear choices</span></button></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
               {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/><span className="stack-shadow stack-shadow-three" aria-hidden="true"/><span className="stack-shadow stack-shadow-four" aria-hidden="true"/></>}
               {nextItem && renderMediaCard(nextItem, false)}
               {renderMediaCard(item, true)}
             </div>
-            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Pass"><span><Icon name="close"/></span><small>Pass</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Shortlist"><span><Icon name="check"/></span><small>Shortlist</small></button></div>
+            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Pass, left arrow" title="Pass"><span><Icon name="left"/></span></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Shortlist, right arrow" title="Shortlist"><span><Icon name="right"/></span></button></div>
             {(session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].error && <p className="feed-load-error" role="alert">{discoveryPages[session.category].error} <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as TmdbCategory)}>Try again</button></p>}
           </div> : <div className="empty-state"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
             {(session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : (session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].error ? <><h2>More titles couldn’t load.</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as TmdbCategory)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}

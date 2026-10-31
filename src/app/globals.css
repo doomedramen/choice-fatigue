@@ -174,10 +174,9 @@ button:active:not(:disabled) { transform: scale(.98); }
 .stamp-pass { right: 20px; color: #fff; border-color: #ffbcad; transform: rotate(9deg); }
 .drag-keep .stamp-keep, .drag-pass .stamp-pass { opacity: .95; }
 .decision-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 12px 0 0; }
-.decision-button { display: flex; min-height: 44px; align-items: center; gap: 9px; padding: 5px 12px 5px 6px; border: 1px solid #46536a; border-radius: 11px; background: #171f30; color: #eef1f7; transition: background 140ms ease-out, border-color 140ms ease-out; }
-.decision-button > span { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #59677e; border-radius: 8px; background: #202a3d; color: #fff; transition: transform 140ms ease-out, background 140ms ease-out; }
+.decision-button { display: grid; width: 48px; height: 48px; min-height: 48px; place-items: center; padding: 5px; border: 1px solid #46536a; border-radius: 12px; background: #171f30; color: #eef1f7; transition: background 140ms ease-out, border-color 140ms ease-out; }
+.decision-button > span { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid #59677e; border-radius: 9px; background: #202a3d; color: #fff; transition: transform 140ms ease-out, background 140ms ease-out; }
 .decision-button svg { width: 20px; height: 20px; }
-.decision-button small { font-size: 13px; font-weight: 800; letter-spacing: .1px; text-transform: none; }
 .decision-button.pass:hover > span { background: #703d42; }
 .decision-button.keep:hover > span { background: #44337b; }
 .small-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #47536a; border-radius: 12px; background: #1a2333; color: #e7eaf1; }
