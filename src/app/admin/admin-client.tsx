@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import TmdbProviderSettings, { type TmdbProviderStatus } from "./tmdb-provider-settings";
 import AdultProviderSettings, { type AdultProviderStatus } from "./adult-provider-settings";
 import ServiceIntegrations from "./service-integrations";
+import { createClientUuid } from "@/lib/client-uuid";
 import "./admin.css";
 
 type Tab = "providers" | "services" | "settings" | "users";
@@ -115,7 +116,7 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
   }
 
   function generateInviteCode() {
-    const code = `cf-${crypto.randomUUID().replaceAll("-", "")}`;
+    const code = `cf-${createClientUuid().replaceAll("-", "")}`;
     setSettings(current => ({ ...current, betaInviteCode: code }));
     setNotice("New invite code generated. Save settings to activate it, then copy it to share.");
   }

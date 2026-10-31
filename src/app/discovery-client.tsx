@@ -6,6 +6,7 @@ import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 import { rankSessionRecommendations, type RecommendationComparison, type RecommendationSignal } from "@/lib/recommendations";
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
+import { createClientUuid } from "@/lib/client-uuid";
 import type { CategoryFeedStatus } from "@/lib/catalogue";
 
 type Decision = "keep" | "pass" | "seen";
@@ -196,7 +197,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
         }
         if (cancelled) return;
         const next = { ...initialState(), ...stored };
-        if (!next.sessionId) next.sessionId = crypto.randomUUID();
+        if (!next.sessionId) next.sessionId = createClientUuid();
         if (typeof next.eventSequence !== "number" || next.eventSequence < 0) next.eventSequence = 0;
         if (typeof next.reviewId !== "string") next.reviewId = null;
         learningSequence.current = next.eventSequence;
@@ -307,7 +308,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
 
   function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null) {
     const event: LearningEvent = {
-      id: crypto.randomUUID(), sessionId: session.sessionId, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
+      id: createClientUuid(), sessionId: session.sessionId, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
       eventType, decision, rating, targetEventId, algorithmVersion: "content-v2",
     };
     learningQueue.current = [...learningQueue.current, event];
@@ -530,7 +531,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     showNotice("Back in discovery — your first impression still counts.");
   }
   function beginReview() {
-    const reviewId = crypto.randomUUID();
+    const reviewId = createClientUuid();
     enqueueLearningEvent("review_started", null, session.category, null, null, null, reviewId);
     setSession(current=>({...current, reviewId, reviewRemoved:[], view:"review"}));
   }
@@ -564,7 +565,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   }
   function startFresh() {
     enqueueLearningEvent("session_ended", null, session.category);
-    setSession(current=>({...current, sessionId:crypto.randomUUID(), eventSequence:0, reviewId:null, lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
+    setSession(current=>({...current, sessionId:createClientUuid(), eventSequence:0, reviewId:null, lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], history:[], reviewRemoved:[], view:"discover"}));
     setRatingSelectorOpen(false);
     showNotice("Fresh session started");
   }
