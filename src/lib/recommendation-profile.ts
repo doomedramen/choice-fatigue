@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { buildRecommendationProfile, recommendationFeatureItemIds, recommendationRetrievalFeatures, type RecommendationFeatures } from "@/lib/recommendations";
+import { buildRecommendationProfile, recommendationFeatureItemIds, recommendationRetrievalFeatures, recentUnresolvedFeatureIds, type RecommendationFeatures } from "@/lib/recommendations";
 import { creditPreferences } from "@/lib/credit-features";
 import { parseProviderTitleId } from "@/lib/media-provider-id";
 import { getTmdbCreditFeatures, getTmdbRecommendationFeatures } from "@/lib/providers/tmdb";
@@ -22,8 +22,10 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
     provenance: row.provenance as RecommendationEventInput["provenance"], retrievalId: row.retrievalId, source: row.source as RecommendationEventInput["source"], lane: row.lane as RecommendationEventInput["lane"],
   }));
   const known = new Set(resolvedCreditIds);
-  const eligibleIds = recommendationFeatureItemIds(events, category).filter(id => !known.has(id));
-  const requestedIds = hydrate ? eligibleIds.slice(0, 12) : [];
+  const eligibleIds = recommendationFeatureItemIds(events, category);
+  const unresolvedIds = eligibleIds.filter(id => !known.has(id));
+  // Reuse only within the same recent-history window; cached titles must not expand the budget.
+  const requestedIds = hydrate ? recentUnresolvedFeatureIds(eligibleIds, known) : [];
   const featuresByItemId: RecommendationFeatures = {};
   let creditRequested = 0, creditResolved = 0;
   const resolvedCreditItemIds: string[] = [];
@@ -53,7 +55,7 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
   const retrievalFeatures = recommendationRetrievalFeatures(profile.signals);
   return {
     events, featuresByItemId,
-    coverage: { eligible: eligibleIds.length, requested: requestedIds.length, resolved: Object.keys(featuresByItemId).length, omittedByLimit: Math.max(0, eligibleIds.length - requestedIds.length) },
+    coverage: { eligible: unresolvedIds.length, requested: requestedIds.length, resolved: Object.keys(featuresByItemId).length, omittedByLimit: Math.max(0, unresolvedIds.length - requestedIds.length) },
     creditCoverage: { requested: creditRequested, resolved: creditResolved }, resolvedCreditItemIds, requestedCreditItemIds,
     creditFeatures: creditPreferences(profile.signals).filter(feature => feature.positiveTitles >= 2 && feature.score > 0),
     retrievalFeatures, stashTagIds: retrievalFeatures.flatMap(key => stashTags[key] ? [stashTags[key]] : []),

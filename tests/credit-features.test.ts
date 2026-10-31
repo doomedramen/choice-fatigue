@@ -1,10 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { creditFeatureKeys, creditPreferences, creditBonus } from "../src/lib/credit-features";
-import { relatedShowSeeds, rankRecommendations, type RecommendationHistoryEvent } from "../src/lib/recommendations";
+import { relatedShowSeeds, rankRecommendations, recentUnresolvedFeatureIds, type RecommendationHistoryEvent } from "../src/lib/recommendations";
 import type { MediaItem } from "../src/data";
 const event = (id: string, itemId: string, changes: Partial<RecommendationHistoryEvent> = {}): RecommendationHistoryEvent => ({ id, itemId, sessionId: "s", category: "Shows", eventType: "decision", decision: "seen", rating: 8, targetEventId: null, occurredAt: `2026-10-31T10:00:0${id}.000Z`, algorithmVersion: "content-v4", ...changes });
 const item = (id: string): MediaItem => ({ id, title: id, category: "Shows", type: "Series", genre: [], runtime: "—", rating: "—", synopsis: "", label: id, art: "mist", palette: ["", "", ""] });
+
+test("cached history does not expand the twelve-title hydration window", () => {
+  const ids = Array.from({ length: 20 }, (_, i) => `tmdb-movie-${i + 1}`);
+  const requested = recentUnresolvedFeatureIds(ids, new Set(ids.slice(0, 10)));
+  assert.deepEqual(requested, ids.slice(10, 12));
+});
 
 test("normalizes and bounds role-specific credit identifiers", () => {
   assert.deepEqual(creditFeatureKeys({ created_by: [{ id: 11 }, { id: 11 }], production_companies: [{ id: 9 }], aggregate_credits: { cast: Array.from({ length: 7 }, (_, id) => ({ id: id + 1, order: id })), crew: [{ id: 5, jobs: [{ job: "Director" }, { job: "Writer" }] }, { id: 6, jobs: [{ job: "Producer" }] }] } }, "tv"), ["actor:1", "actor:2", "actor:3", "actor:4", "actor:5", "director:5", "writer:5", "creator:11", "company:9"]);

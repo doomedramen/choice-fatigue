@@ -407,3 +407,17 @@ test("a provider 429 preserves the cursor and retries after its cooldown", async
     return feed.items.length;
   }, first.cursor), { timeout: 10_000 }).toBeGreaterThan(0);
 });
+
+test("a failed related lane does not prevent popular pagination", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: true, failRelated: true } });
+  const seed = { ...learningDecision("tmdb-tv-201", 0), id: "related-seed", category: "Shows", decision: "seen", rating: 9, algorithmVersion: "content-v4" };
+  await page.evaluate(async event => fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events: [event] }) }), seed);
+  const first = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
+  expect(first.sources).toContainEqual(expect.objectContaining({ lane: "related", outcome: "unavailable" }));
+  expect(first.items.length).toBeGreaterThan(0);
+  const next = await page.evaluate(async cursor => (await fetch(`/api/discovery-feed?category=Shows&cursor=${encodeURIComponent(cursor)}`)).json(), first.cursor);
+  expect(next.sources).toContainEqual(expect.objectContaining({ lane: "popular", outcome: "ready" }));
+  expect(next.items.some((item: { id: string }) => item.id === "tmdb-tv-121")).toBe(true);
+});

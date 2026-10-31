@@ -254,6 +254,11 @@ export function recommendationFeatureItemIds(events: RecommendationHistoryEvent[
   return [...new Set([...history].reverse().flatMap(event => event.itemId && eligible.has(event.itemId) ? [event.itemId] : []))];
 }
 
+/** Cached credits count toward the recent-title budget, even when no request is needed. */
+export function recentUnresolvedFeatureIds(eligibleIds: string[], resolvedIds: Set<string>, limit = 12): string[] {
+  return eligibleIds.slice(0, limit).filter(id => !resolvedIds.has(id));
+}
+
 export function shownCandidateIds(itemId: string, remainingIds: string[]): string[] {
   return [itemId, ...remainingIds.filter(id => id !== itemId)].slice(0, 100);
 }

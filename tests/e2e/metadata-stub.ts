@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 const port = Number(process.env.METADATA_STUB_PORT || 4199);
-type Control = { failTmdb: boolean; failMovies: boolean; failAdult: boolean; malformedTmdb: boolean; malformedAdult: boolean; emptyTmdb: boolean; emptyAdult: boolean; extended: boolean; throttleMovies: boolean; missingCredits: boolean };
-const defaults = (): Control => ({ failTmdb: false, failMovies: false, failAdult: false, malformedTmdb: false, malformedAdult: false, emptyTmdb: false, emptyAdult: false, extended: false, throttleMovies: false, missingCredits: false });
+type Control = { failTmdb: boolean; failMovies: boolean; failAdult: boolean; malformedTmdb: boolean; malformedAdult: boolean; emptyTmdb: boolean; emptyAdult: boolean; extended: boolean; throttleMovies: boolean; missingCredits: boolean; failRelated: boolean };
+const defaults = (): Control => ({ failTmdb: false, failMovies: false, failAdult: false, malformedTmdb: false, malformedAdult: false, emptyTmdb: false, emptyAdult: false, extended: false, throttleMovies: false, missingCredits: false, failRelated: false });
 let control = defaults();
 let requests: Array<{ path: string; search: string; input?: unknown }> = [];
 const genres = [{ id: 18, name: "Drama" }, { id: 35, name: "Comedy" }, { id: 16, name: "Animation" }];
@@ -35,6 +35,7 @@ const server = createServer(async (request, response) => {
   if ((url.pathname.startsWith("/theporndb/") || url.pathname === "/graphql") && control.malformedAdult) { response.end(JSON.stringify({ data: "invalid provider shape" })); return; }
   if (/^\/3\/genre\/(movie|tv)\/list$/.test(url.pathname)) response.end(JSON.stringify({ genres }));
   else if (/^\/3\/tv\/\d+\/recommendations$/.test(url.pathname)) {
+    if (control.failRelated) { response.statusCode = 503; response.end("{}"); return; }
     const page = Number(url.searchParams.get("page"));
     response.end(JSON.stringify({ results: page === 1 ? [show(9901, "Related Show", 18), { ...show(9902, "Adult result", 18), adult: true }, { ...show(9903, "Unknown flag", 18), adult: undefined }] : page === 2 ? [show(9904, "Related page two", 18)] : [], total_pages: 2 }));
   } else if (/^\/3\/person\/\d+\/tv_credits$/.test(url.pathname)) {
