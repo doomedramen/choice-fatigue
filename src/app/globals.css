@@ -374,9 +374,9 @@ button:active:not(:disabled) { transform: scale(.98); }
 
 @media (min-width: 1100px) {
   .topbar { padding-right: 5%; padding-left: 5%; }
-  .main { grid-template-columns: minmax(0,1fr) 330px; gap: 0 42px; padding-right: 5%; padding-left: 5%; }
+  .main { grid-template-columns: minmax(0,1fr) 390px; gap: 0 32px; padding-right: 20px; padding-left: 5%; }
   .content-area { padding-top: 42px; }
-  .shortlist-panel { padding-left: 28px; }
+  .shortlist-panel { margin: 20px 0; padding: 26px; border: 1px solid #303a50; border-radius: 16px; background: #121927; }
 }
 
 @media (prefers-reduced-motion: reduce) {
