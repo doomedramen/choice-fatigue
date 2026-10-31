@@ -6,6 +6,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import type { IntegrationConfig } from "@/lib/integrations/crypto";
 import { getGlobalSettings } from "@/lib/global-settings";
+import { assertIntegrationReadOnly, assertTestNetworkTarget } from "@/lib/outbound-policy";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const DNS_TIMEOUT_MS = 3_000;
@@ -172,6 +173,7 @@ export async function requestIntegrationService(
   endpoint: string,
   options: { method?: "GET" | "POST"; body?: unknown; credentialHeader?: "x-api-key" | "x-plex-token" } = {},
 ): Promise<ServiceResponse> {
+  assertIntegrationReadOnly(options.method ?? "GET", options.body);
   const allowPrivate = (await getGlobalSettings()).allowPrivateNetworkTargets;
   let target: URL;
   try {
@@ -183,6 +185,7 @@ export async function requestIntegrationService(
   }
 
   if ((target.protocol !== "https:" && target.protocol !== "http:") || target.username || target.password || target.hash) throw new IntegrationTargetError();
+  assertTestNetworkTarget(target);
   const hostname = target.hostname.replace(/^\[|\]$/g, "");
   const addresses = await resolveTarget(hostname, allowPrivate);
   if (target.protocol === "http:" && !allowPrivate) throw new IntegrationTargetError();

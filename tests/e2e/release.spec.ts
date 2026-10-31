@@ -7,6 +7,7 @@ async function resetE2eDatabase() {
   const connectionString = process.env.E2E_DATABASE_URL;
   if (!connectionString) throw new Error("E2E_DATABASE_URL must point to the disposable Playwright database.");
   const databaseName = decodeURIComponent(new URL(connectionString).pathname.slice(1));
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(connectionString).hostname)) throw new Error("Refusing to connect to a non-local Playwright database.");
   if (!databaseName.endsWith("_e2e")) throw new Error("Refusing to reset a database that is not explicitly named *_e2e.");
 
   const client = new Client({ connectionString });
@@ -73,6 +74,8 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
   await page.goto("/admin");
   await configure(page);
+  const blocked = await page.evaluate(async () => (await fetch("/api/integrations/not-a-real-connection/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ catalogueEntryId: "tmdb-movie-101" }) })).status);
+  expect(blocked).toBe(403);
   const adminUsers = await page.evaluate(async () => (await (await fetch("/api/admin/users")).json()).users);
   const admin = adminUsers.find((user: { email: string }) => user.email === "release-admin@example.test");
   expect(admin).toBeTruthy();

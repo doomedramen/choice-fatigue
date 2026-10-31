@@ -5,6 +5,7 @@ import { getGlobalSettings } from "@/lib/global-settings";
 import { getDiscoveryCatalogue } from "@/lib/catalogue";
 import { prisma } from "@/lib/prisma";
 import { adultAccessEnabled } from "@/lib/adult-access-policy";
+import { integrationsReadOnly } from "@/lib/outbound-policy";
 
 export default async function HomePage() {
   const session = await getSession();
@@ -23,6 +24,7 @@ export default async function HomePage() {
     userName={session.user.name}
     userId={session.user.id}
     isAdmin={session.user.role === "admin"}
+    integrationsReadOnly={integrationsReadOnly()}
     adultSectionEnabled={canAccessAdult}
     mediaItems={catalogue.items.filter(item => canAccessAdult || item.category !== "Adult")}
     initialFeeds={catalogue.feeds}

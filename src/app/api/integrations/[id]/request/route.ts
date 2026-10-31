@@ -6,6 +6,7 @@ import { IntegrationRequestError, readIntegrationJson, requireSameOrigin } from 
 import { getSavedSeerrTitle } from "@/lib/integrations/saved-tmdb-title";
 import { getSeerrAvailability, SeerrApiError, seerrAlreadyTracksTitle } from "@/lib/integrations/seerr";
 import { prisma } from "@/lib/prisma";
+import { integrationsReadOnly } from "@/lib/outbound-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (error instanceof IntegrationRequestError) return jsonError(error.message, error.status);
     return jsonError("The request could not be sent.", 500);
   }
+
+  if (integrationsReadOnly()) return jsonError("Media service requests are disabled in read-only mode.", 403);
 
   try {
     const input = await readIntegrationJson(request, 2 * 1024);

@@ -8,6 +8,7 @@ let transporter: Transporter | undefined;
 let activeSmtpUrl: string | undefined;
 
 export async function sendAuthEmail(message: AuthMessage) {
+  if (process.env.E2E_NETWORK_ISOLATION === "1") throw new Error("Email delivery is disabled in browser tests.");
   const settings = await getEnabledSmtpSettings();
   if (!settings && process.env.NODE_ENV === "development") {
     console.info(`[Choice Fatigue auth email: ${message.subject}] To: ${message.to}\n${message.text}`);

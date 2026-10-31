@@ -1,3 +1,5 @@
+import { assertTestNetworkTarget } from "@/lib/outbound-policy";
+
 /** Provider throttles are kept in process memory; metadata and credentials are never cached. */
 const cooldowns = new Map<string, number>();
 let activeRequests = 0;
@@ -24,11 +26,12 @@ export function retryAfterTime(value: string | null, now = Date.now()): number {
 }
 
 export async function requestProviderJson<T>(source: string, url: string, init: RequestInit = {}): Promise<T> {
+  assertTestNetworkTarget(url);
   return withProviderSlot(async () => {
     const retryAt = cooldowns.get(source) ?? 0;
     if (retryAt > Date.now()) throw new ProviderRequestError(retryAt, 429);
     try {
-      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(8000), cache: "no-store" });
+      const response = await fetch(url, { ...init, ...(process.env.E2E_NETWORK_ISOLATION === "1" ? { redirect: "manual" as const } : {}), signal: AbortSignal.timeout(8000), cache: "no-store" });
       if (response.status === 429) {
         const next = retryAfterTime(response.headers.get("retry-after"));
         cooldowns.set(source, next);

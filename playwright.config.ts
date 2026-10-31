@@ -2,6 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = "http://localhost:4173";
 const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const e2eDatabaseUrl = process.env.E2E_DATABASE_URL || "postgresql://choice_fatigue:choice_fatigue_dev@127.0.0.1:5432/choice_fatigue_e2e?schema=public";
+const e2eDatabase = new URL(e2eDatabaseUrl);
+if (!["localhost", "127.0.0.1", "[::1]"].includes(e2eDatabase.hostname) || !decodeURIComponent(e2eDatabase.pathname.slice(1)).endsWith("_e2e")) {
+  throw new Error("Browser tests require a local disposable database named *_e2e.");
+}
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -18,7 +23,9 @@ export default defineConfig({
       timeout: 180_000,
       env: {
         NODE_ENV: "development",
-        DATABASE_URL: process.env.E2E_DATABASE_URL || "postgresql://choice_fatigue:choice_fatigue_dev@127.0.0.1:5432/choice_fatigue_e2e?schema=public",
+        DATABASE_URL: e2eDatabaseUrl,
+        E2E_NETWORK_ISOLATION: "1",
+        INTEGRATIONS_READ_ONLY: "1",
         BETTER_AUTH_SECRET: "playwright-test-auth-secret-at-least-32-characters-long",
         BETTER_AUTH_URL: baseURL,
         INTEGRATION_CREDENTIALS_KEY: key,

@@ -110,6 +110,7 @@ interface DiscoveryClientProps {
   userName: string;
   userId: string;
   isAdmin: boolean;
+  integrationsReadOnly: boolean;
   adultSectionEnabled: boolean;
   mediaItems: MediaItem[];
   initialFeeds: Record<Category, DiscoveryFeed>;
@@ -117,7 +118,7 @@ interface DiscoveryClientProps {
   plexConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, userId, isAdmin, adultSectionEnabled, mediaItems, initialFeeds, seerrConnections, plexConnections }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, userId, isAdmin, integrationsReadOnly, adultSectionEnabled, mediaItems, initialFeeds, seerrConnections, plexConnections }: DiscoveryClientProps) {
   const router = useRouter();
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
@@ -864,6 +865,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
         <div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div>
         <h2 id="saved-title">Saved for later</h2>
         <p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>
+        {integrationsReadOnly && <p>Service connections are read-only; availability checks are available.</p>}
         {saved.length > 0 && seerrConnections.length > 0 && <label className="saved-connection-select">Seerr server
           <select value={selectedSeerrId} onChange={event => setSelectedSeerrId(event.target.value)}>{seerrConnections.map(connection => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select>
         </label>}
@@ -890,7 +892,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
             {pick.requestable && (seerrConnections.length > 0 || plexConnections.length > 0) ? <div className="saved-actions">
               {seerrConnections.length > 0 && <>
                 <button className="saved-availability-button" type="button" onClick={() => void checkSavedAvailability(pick)} disabled={!selectedSeerrId || availabilityCheckingKey !== "" || requestingKey !== "" || plexAvailabilityCheckingKey !== "" || saveStatus === "saving"} aria-label={`Check ${pick.title} in Seerr`}>{availabilityCheckingKey === key ? "Checking…" : "Seerr check"}</button>
-                <button className="saved-request-button" type="button" onClick={() => void requestSavedTitle(pick)} disabled={!selectedSeerrId || requestingKey !== "" || availabilityCheckingKey !== "" || plexAvailabilityCheckingKey !== "" || saveStatus === "saving" || tracked}>{saveStatus === "saving" ? "Syncing…" : requestingKey === key ? "Sending…" : tracked ? "Tracked" : "Request"}</button>
+                {!integrationsReadOnly && <button className="saved-request-button" type="button" onClick={() => void requestSavedTitle(pick)} disabled={!selectedSeerrId || requestingKey !== "" || availabilityCheckingKey !== "" || plexAvailabilityCheckingKey !== "" || saveStatus === "saving" || tracked}>{saveStatus === "saving" ? "Syncing…" : requestingKey === key ? "Sending…" : tracked ? "Tracked" : "Request"}</button>}
               </>}
               {plexConnections.length > 0 && <button className="saved-availability-button" type="button" onClick={() => void checkSavedPlexAvailability(pick)} disabled={!selectedPlexId || plexAvailabilityCheckingKey !== "" || availabilityCheckingKey !== "" || requestingKey !== "" || saveStatus === "saving"} aria-label={`Check ${pick.title} in Plex`}>{plexAvailabilityCheckingKey === plexKey ? "Checking…" : "Plex check"}</button>}
             </div> : <span className="saved-request-note">{pick.requestable ? "Connect Seerr or Plex" : "TMDB link needed"}</span>}
