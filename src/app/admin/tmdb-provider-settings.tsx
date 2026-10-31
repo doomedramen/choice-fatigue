@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import styles from "./tmdb-provider-settings.module.css";
 
 export interface TmdbProviderStatus {
@@ -16,6 +16,8 @@ export default function TmdbProviderSettings({ status, onStatusChange }: { statu
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => setEnabled(status.enabled), [status.enabled]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
