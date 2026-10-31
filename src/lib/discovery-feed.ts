@@ -5,11 +5,11 @@ export type FeedOutcome = "ready" | "unconfigured" | "unavailable" | "empty";
 export type CategoryFeedStatus = { outcome: FeedOutcome; enabledSources: number; successfulSources: number; hasTitles: boolean };
 export type FeedStream = {
   source: RecommendationSource; lane: RecommendationLane; kind?: "scene" | "movie";
-  page: number; features: string[]; done: boolean; retryAt: number | null; fingerprint: string | null;
+  seedItemId?: string; seedEventId?: string; page: number; features: string[]; done: boolean; retryAt: number | null; fingerprint: string | null;
 };
-export type CandidateBatch = { source: RecommendationSource; lane: RecommendationLane; candidateIds: string[] };
+export type CandidateBatch = { source: RecommendationSource; lane: RecommendationLane; candidateIds: string[]; provenance?: { seedItemId: string; seedEventId: string; endpoint: "recommendations"; page: number; positions: number[] } | null };
 export type FeedSourceStatus = { source: RecommendationSource; lane: RecommendationLane; kind?: "scene" | "movie"; outcome: "ready" | "empty" | "unavailable"; retryAt: number | null };
-export type DiscoveryFeed = { items: MediaItem[]; batches: CandidateBatch[]; cursor: string | null; hasMore: boolean; status: CategoryFeedStatus; sources: FeedSourceStatus[] };
+export type DiscoveryFeed = { items: MediaItem[]; batches: CandidateBatch[]; cursor: string | null; hasMore: boolean; status: CategoryFeedStatus; sources: FeedSourceStatus[]; candidateFeatures?: Record<string, string[]>; creditCoverage?: { requested: number; resolved: number } };
 export type FeedCursor = { category: RecommendationCategory; streams: FeedStream[] };
 
 export function interleaveItems(groups: MediaItem[][]): MediaItem[] {
@@ -32,7 +32,7 @@ export function deduplicateTitles(items: MediaItem[]) {
 /** Independent source failures must not discard successful pages or advance failed cursors. */
 export async function advanceFeedStreams(
   streams: FeedStream[],
-  load: (stream: FeedStream) => Promise<{ items: MediaItem[]; hasMore: boolean }>,
+  load: (stream: FeedStream) => Promise<{ items: MediaItem[]; hasMore: boolean; positions?: Record<string, number> }>,
   fingerprint: (ids: string[]) => string,
   now = Date.now(),
 ) {
@@ -47,13 +47,14 @@ export async function advanceFeedStreams(
       const repeated = stream.fingerprint === hash;
       stream.fingerprint = hash;
       stream.done = repeated || !result.hasMore || stream.page >= 500;
+      const fetchedPage = stream.page;
       stream.page += 1;
       stream.retryAt = null;
-      return { stream, items: repeated ? [] : result.items, ids: repeated ? [] : ids, failed: false };
+      return { stream, items: repeated ? [] : result.items, ids: repeated ? [] : ids, failed: false, fetchedPage, positions: result.positions };
     } catch (error) {
       const retryAt = error && typeof error === "object" && "retryAt" in error ? Number(error.retryAt) : 0;
       stream.retryAt = Number.isFinite(retryAt) && retryAt > now ? retryAt : null;
-      return { stream, items: [], ids: [], failed: true };
+      return { stream, items: [], ids: [], failed: true, fetchedPage: stream.page, positions: undefined };
     }
   }));
   const active = results.filter(result => result !== null);
@@ -66,7 +67,7 @@ export async function advanceFeedStreams(
   const outcome: FeedOutcome = !streams.length ? "unconfigured" : items.length ? "ready" : active.some(result => result.failed) ? "unavailable" : "empty";
   return {
     items, streams: next, sources,
-    batches: active.filter(result => result.ids.length).map(({ stream, ids }) => ({ source: stream.source, lane: stream.lane, candidateIds: ids })),
+    batches: active.filter(result => result.ids.length).map(({ stream, ids, fetchedPage, positions }) => ({ source: stream.source, lane: stream.lane, candidateIds: ids, ...(stream.lane === "related" ? { provenance: { seedItemId: stream.seedItemId!, seedEventId: stream.seedEventId!, endpoint: "recommendations" as const, page: fetchedPage, positions: ids.map((id, index) => positions?.[id] ?? index + 1) } } : {}) })),
     status: { outcome, enabledSources: streams.length, successfulSources, hasTitles: items.length > 0 } satisfies CategoryFeedStatus,
   };
 }

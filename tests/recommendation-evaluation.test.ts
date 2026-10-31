@@ -81,3 +81,13 @@ test("retention follows a shortlist saved after the UI is restored in another br
   ];
   assert.equal(replayRecommendationEvents(events, new Map())[0].reviewRetention, 1);
 });
+
+test("replay checks related seeds against choices already made, never future ratings", () => {
+  const events = [
+    replayEvent(0, { category: "Shows", eventType: "candidate_batch", candidateIds: ["tmdb-tv-2"], retrievalId: "related", source: "tmdb", lane: "related", algorithmVersion: "content-v5", provenance: { seedItemId: "tmdb-tv-1", seedEventId: "event-1", endpoint: "recommendations", page: 1, positions: [1] } }),
+    replayEvent(1, { category: "Shows", eventType: "decision", itemId: "tmdb-tv-1", decision: "seen", rating: 9, algorithmVersion: "content-v5" }),
+  ];
+  const report = replayRecommendationEvents(events, new Map())[1];
+  assert.equal(report.relatedSeedBatches, 1);
+  assert.equal(report.matchingRelatedSeedBatches, 0);
+});

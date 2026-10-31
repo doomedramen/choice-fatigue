@@ -164,7 +164,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const learningSequence = useRef(0);
   const runId = useRef("");
   const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
-  const [featuresByItemId, setFeaturesByItemId] = useState<RecommendationFeatures>({});
+  const [featuresByItemId, setFeaturesByItemId] = useState<RecommendationFeatures>(() => Object.assign({}, ...Object.values(initialFeeds).map(feed => feed.candidateFeatures ?? {})));
   const [learningError, setLearningError] = useState("");
   const [loadedProfileCategories, setLoadedProfileCategories] = useState<Set<Category>>(() => new Set());
   const activeCategory = useRef(session.category);
@@ -172,8 +172,14 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const catalogue = catalogueItems.filter(item => adultSectionEnabled || item.category !== "Adult");
   const categoryItems = catalogue.filter(item => item.category === session.category);
   const localFeatures = Object.fromEntries([...catalogue, ...Object.values(resolvedSavedItems)].map(item => [item.id, recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type })]));
-  const profile = buildRecommendationProfile(learningEvents, { ...featuresByItemId, ...localFeatures }, session.category);
-  const recommendations = rankRecommendations(categoryItems, profile.signals, profile.comparisons);
+  const combinedFeatures = { ...featuresByItemId };
+  for (const [id, keys] of Object.entries(localFeatures)) combinedFeatures[id] = [...new Set([...(combinedFeatures[id] ?? []), ...keys])];
+  const profile = buildRecommendationProfile(learningEvents, combinedFeatures, session.category);
+  const relatedRanks: Record<string, number> = {};
+  for (const event of learningEvents) if (event.sessionId === runId.current && event.category === session.category && event.eventType === "candidate_batch" && event.lane === "related" && event.provenance) {
+    event.candidateIds?.forEach((id, index) => { const rank = (event.provenance!.page - 1) * 20 + event.provenance!.positions[index]; relatedRanks[id] = Math.min(relatedRanks[id] ?? Infinity, rank); });
+  }
+  const recommendations = rankRecommendations(categoryItems, profile.signals, profile.comparisons, combinedFeatures, relatedRanks);
   const items = recommendations.items;
   const previouslyConsideredIds = new Set(profile.consideredIds);
   const retainedIds = new Set([...session.saved, ...session.shortlisted]);
@@ -201,6 +207,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
       const result = await response.json() as DiscoveryFeed & { error?: string };
       if (!response.ok || !Array.isArray(result.items) || !Array.isArray(result.batches) || !result.status) throw new Error(result.error || "More titles could not be loaded.");
       feedCursors.current[category] = result.cursor;
+      setFeaturesByItemId(current => ({ ...current, ...result.candidateFeatures }));
       const retrievalId = createClientUuid();
       for (const batch of result.batches) recordCandidateBatch(category, batch, retrievalId);
       setCatalogueItems(current => deduplicateTitles([...current, ...result.items.filter(candidate => candidate.category === category)]));
@@ -359,10 +366,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     finally { setLoadedProfileCategories(current => new Set([...current, category])); }
   }
 
-  function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null, source: LearningEvent["source"] = null, lane: LearningEvent["lane"] = null, retrievalId: string | null = null) {
+  function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null, source: LearningEvent["source"] = null, lane: LearningEvent["lane"] = null, retrievalId: string | null = null, provenance: LearningEvent["provenance"] = null) {
     const event: LearningEvent = {
       id: createClientUuid(), sessionId: runId.current, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
-      eventType, decision, rating, targetEventId, algorithmVersion: "content-v4", occurredAt: new Date().toISOString(), retrievalId, source, lane,
+      eventType, decision, rating, targetEventId, algorithmVersion: "content-v5", occurredAt: new Date().toISOString(), retrievalId, source, lane, provenance,
     };
     learningQueue.current = [...learningQueue.current, event];
     setLearningEvents(current => mergeRecommendationEvents(current, [event]));
@@ -372,7 +379,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   }
 
   function recordCandidateBatch(category: Category, batch: CandidateBatch, retrievalId: string) {
-    enqueueLearningEvent("candidate_batch", null, category, null, null, null, null, batch.candidateIds, batch.source, batch.lane, retrievalId);
+    enqueueLearningEvent("candidate_batch", null, category, null, null, null, null, batch.candidateIds, batch.source, batch.lane, retrievalId, batch.provenance ?? null);
   }
 
   useEffect(() => {
@@ -414,6 +421,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     if (previousInitialFeeds.current === initialFeeds) return;
     previousInitialFeeds.current = initialFeeds;
     setCatalogueItems(mediaItems);
+    setFeaturesByItemId(current => ({ ...current, ...Object.assign({}, ...Object.values(initialFeeds).map(feed => feed.candidateFeatures ?? {})) }));
     setDiscoveryPages(Object.fromEntries(categories.map(category => [category, discoveryPageState(initialFeeds[category])])) as DiscoveryPageState);
     feedCursors.current = { Movies: initialFeeds.Movies.cursor, Shows: initialFeeds.Shows.cursor, Adult: initialFeeds.Adult.cursor };
     if (ready) for (const category of categories) if (category !== "Adult" || adultSectionEnabled) {

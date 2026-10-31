@@ -1,4 +1,5 @@
 import type { MediaItem } from "@/data";
+import { creditBonus, creditPreferences } from "@/lib/credit-features";
 
 export type RecommendationDecision = "keep" | "pass" | "seen";
 export interface RecommendationSignal { itemId: string; decision: RecommendationDecision; rating?: number; weight?: number; featureKeys?: string[] }
@@ -135,6 +136,8 @@ export function rankRecommendations(
   items: MediaItem[],
   historicalSignals: RecommendationSignal[] = [],
   historicalComparisons: RecommendationComparison[] = [],
+  candidateFeatures: RecommendationFeatures = {},
+  relatedRanks: Record<string, number> = {},
 ) {
   const featureEvidence = new Map<string, FeatureEvidence>();
   let signalCount = 0;
@@ -158,6 +161,7 @@ export function rankRecommendations(
     }
   }
 
+  const credits = creditPreferences(historicalSignals);
   const neutralPriorStrength = 2;
   const featureScores = new Map([...featureEvidence].map(([feature, evidence]) => [
     feature,
@@ -167,10 +171,10 @@ export function rankRecommendations(
   const comparisons = historicalComparisons.map(comparison => ({
     preferred: itemById.has(comparison.preferredItemId)
       ? featuresFor(itemById.get(comparison.preferredItemId)!).map(feature => feature.key)
-      : comparison.preferredFeatureKeys ?? [],
+      : (comparison.preferredFeatureKeys ?? []).filter(key => /^(genre|decade|type):/.test(key)),
     removed: itemById.has(comparison.removedItemId)
       ? featuresFor(itemById.get(comparison.removedItemId)!).map(feature => feature.key)
-      : comparison.removedFeatureKeys ?? [],
+      : (comparison.removedFeatureKeys ?? []).filter(key => /^(genre|decade|type):/.test(key)),
   })).filter(comparison => comparison.preferred.length && comparison.removed.length);
   const similarity = (candidate: Set<string>, other: string[]) => {
     const otherSet = new Set(other);
@@ -195,7 +199,8 @@ export function rankRecommendations(
       const relativeReviewScore = comparisons.length
         ? comparisons.reduce((total, comparison) => total + similarity(featureKeys, comparison.preferred) - similarity(featureKeys, comparison.removed), 0) / comparisons.length
         : 0;
-      const score = preferenceScore + relativeReviewScore * 0.1;
+      const rank = relatedRanks[item.id];
+      const score = preferenceScore + relativeReviewScore * 0.1 + creditBonus(candidateFeatures[item.id] ?? [], credits) + (rank > 0 ? 0.1 * 61 / (60 + rank) : 0);
       return { item, originalIndex, score };
     })
     .sort((a, b) => b.score - a.score || a.originalIndex - b.originalIndex);
@@ -251,4 +256,22 @@ export function recommendationFeatureItemIds(events: RecommendationHistoryEvent[
 
 export function shownCandidateIds(itemId: string, remainingIds: string[]): string[] {
   return [itemId, ...remainingIds.filter(id => id !== itemId)].slice(0, 100);
+}
+
+
+export function relatedShowSeeds(events: RecommendationHistoryEvent[]) {
+  const rows = mergeRecommendationEvents(events).filter(event => event.category === "Shows");
+  const undone = new Set(rows.filter(event => event.eventType === "decision_undone").map(event => event.targetEventId));
+  const latestRating = new Map<string, number>();
+  for (const event of rows) if (event.itemId && event.eventType === "decision" && event.decision === "seen" && event.rating != null && !undone.has(event.id)) latestRating.set(event.itemId, event.algorithmVersion === "content-v3" ? event.rating * 2 : event.rating);
+  const rated: Array<{ itemId: string; eventId: string }> = [], saved: Array<{ itemId: string; eventId: string }> = [];
+  for (const event of [...rows].reverse()) {
+    if (!event.itemId || !/^tmdb-tv-[1-9]\d*$/.test(event.itemId) || (latestRating.get(event.itemId) ?? 10) <= 5) continue;
+    if (event.eventType === "decision" && event.decision === "seen" && !undone.has(event.id) && (latestRating.get(event.itemId) ?? 0) >= 8 && (event.algorithmVersion === "content-v3" ? (event.rating ?? 0) * 2 : event.rating ?? 0) === latestRating.get(event.itemId)) rated.push({ itemId: event.itemId, eventId: event.id });
+    if (event.eventType === "saved" && !(event.targetEventId && undone.has(event.targetEventId))) saved.push({ itemId: event.itemId, eventId: event.id });
+  }
+  const selected: Array<{ itemId: string; eventId: string }> = [];
+  const distinctSaved = saved.find(seed => seed.itemId !== rated[0]?.itemId);
+  for (const seed of [rated[0], distinctSaved ?? saved[0], ...rated, ...saved]) if (seed && !selected.some(existing => existing.itemId === seed.itemId) && selected.length < 2) selected.push(seed);
+  return selected;
 }

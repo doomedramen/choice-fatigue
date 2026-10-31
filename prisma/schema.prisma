@@ -95,6 +95,7 @@ model RecommendationEvent {
   targetEventId     String?
   algorithmVersion  String
   occurredAt        DateTime @default(now())
+  provenance        Json?
   retrievalId       String?
   source            String?
   lane              String?

@@ -8,6 +8,14 @@ const stream = (source: FeedStream["source"], lane: FeedStream["lane"] = "popula
 test("mixes lanes deterministically and deduplicates matching IDs/titles", () => {
   assert.deepEqual(interleaveItems([[item("a"), item("b")], [item("c"), item("a")]]).map(row => row.id), ["a", "c", "b"]);
 });
+test("related streams preserve duplicate origins and advance independently", async () => {
+  const related: FeedStream = { ...stream("tmdb"), lane: "related", seedItemId: "tmdb-tv-1", seedEventId: "event-1", page: 2 };
+  const result = await advanceFeedStreams([stream("tmdb"), related], async lane => ({ items: [item("shared")], positions: lane.lane === "related" ? { shared: 4 } : undefined, hasMore: true }), ids => ids.join(","));
+  assert.deepEqual(result.items.map(row => row.id), ["shared"]);
+  assert.equal(result.batches.length, 2);
+  assert.deepEqual(result.batches[1].provenance, { seedItemId: "tmdb-tv-1", seedEventId: "event-1", endpoint: "recommendations", page: 2, positions: [4] });
+  assert.deepEqual(result.streams.map(row => row.page), [2, 3]);
+});
 test("a failed source retains its page while successful sources advance", async () => {
   const result = await advanceFeedStreams([stream("tmdb"), stream("stashdb")], async source => {
     if (source.source === "tmdb") throw new Error("upstream failed");

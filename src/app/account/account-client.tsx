@@ -61,7 +61,7 @@ function TasteProfile({ revision }: { revision: number }) {
       {profiles.map(profile => {
         const usableSignals = profile.signals.filter(signal => signal.featureKeys?.length);
         const titleCount = new Set(usableSignals.map(signal => signal.itemId)).size;
-        const preferences = recommendationPreferenceProfile(profile.signals);
+        const preferences = recommendationPreferenceProfile(profile.signals).filter(preference => /^(genre|decade|type):/.test(preference.key));
         const leaning = preferences.filter(preference => preference.score >= 0.12).slice(0, 4);
         const passing = preferences.filter(preference => preference.score <= -0.12).sort((a, b) => a.score - b.score).slice(0, 4);
         return <article className="taste-category" key={profile.category}>

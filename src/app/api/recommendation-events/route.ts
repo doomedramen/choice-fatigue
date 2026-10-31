@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
     if (!recommendationCategories.includes(category)) return NextResponse.json({ error: "Choose a valid category." }, { status: 400 });
     if (category === "Adult" && !await canAccessAdult(session.user.id)) return NextResponse.json({ error: "The Adult category is currently disabled." }, { status: 403 });
     const candidates = request.nextUrl.searchParams.getAll("candidateId").filter(id => id.length > 0 && id.length <= 200).slice(0, 100);
-    const { events, featuresByItemId, coverage } = await loadRecommendationProfile(session.user.id, category, candidates);
-    return NextResponse.json({ events, featuresByItemId, coverage }, { headers });
+    const { events, featuresByItemId, coverage, creditCoverage } = await loadRecommendationProfile(session.user.id, category, candidates);
+    return NextResponse.json({ events, featuresByItemId, coverage, creditCoverage }, { headers });
   } catch (error) { return errorResponse(error); }
 }
 export async function POST(request: NextRequest) {
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     const owned = accepted.filter(event => !foreignIds.has(event.id));
     for (const event of accepted) if (foreignIds.has(event.id)) rejected.push({ id: event.id, index: events.findIndex(value => value === event), code: "duplicate" });
     if (owned.length) await prisma.recommendationEvent.createMany({
-      data: owned.map(event => ({ ...event, userId: session.user.id, occurredAt: new Date(event.occurredAt), candidateIds: event.candidateIds ?? undefined })), skipDuplicates: true,
+      data: owned.map(event => ({ ...event, userId: session.user.id, occurredAt: new Date(event.occurredAt), candidateIds: event.candidateIds ?? undefined, provenance: event.provenance ?? undefined })), skipDuplicates: true,
     });
     return NextResponse.json({ acceptedIds: owned.map(event => event.id), rejected }, { headers });
   } catch (error) { return errorResponse(error); }

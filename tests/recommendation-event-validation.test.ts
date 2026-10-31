@@ -44,3 +44,13 @@ test("ten-point ratings use v4 while queued v3 ratings retain their original ran
   assert.equal(isValidRecommendationEvent({ ...decision, algorithmVersion: "content-v3", decision: "seen", rating: 10 }), false);
   assert.equal(isValidRecommendationEvent({ ...decision, algorithmVersion: "content-v3", decision: "seen", rating: 5 }), true);
 });
+
+test("v5 relationship provenance is restricted to valid show batches", () => {
+  const provenance = { seedItemId: "tmdb-tv-9", seedEventId: "seed-event", endpoint: "recommendations", page: 1, positions: [1, 3] };
+  const batch = { ...base, category: "Shows", algorithmVersion: "content-v5", lane: "related", candidateIds: ["tmdb-tv-12", "tmdb-tv-13"], provenance };
+  assert.equal(isValidRecommendationEvent(batch), true);
+  assert.equal(isValidRecommendationEvent({ ...batch, algorithmVersion: "content-v4" }), false);
+  assert.equal(isValidRecommendationEvent({ ...batch, provenance: { ...provenance, positions: [1] } }), false);
+  assert.equal(isValidRecommendationEvent({ ...batch, provenance: { ...provenance, name: "metadata" } }), false);
+  assert.equal(isValidRecommendationEvent({ ...decision, provenance }), false);
+});

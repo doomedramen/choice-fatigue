@@ -5,7 +5,7 @@ const defaults = (): Control => ({ failTmdb: false, failMovies: false, failAdult
 let control = defaults();
 let requests: Array<{ path: string; search: string; input?: unknown }> = [];
 const genres = [{ id: 18, name: "Drama" }, { id: 35, name: "Comedy" }, { id: 16, name: "Animation" }];
-const movie = (id: number, title: string, genreId: number) => ({ id, adult: false, title, release_date: "2024-04-12", overview: "Fictional test metadata.", vote_average: 7.1, genre_ids: [genreId], genres: genres.filter(genre => genre.id === genreId), poster_path: null, runtime: 110 });
+const movie = (id: number, title: string, genreId: number) => ({ id, adult: false, production_companies: [{ id: 88 }], credits: { cast: [{ id: 77, order: 0 }], crew: [{ id: 55, job: "Director" }, { id: 56, job: "Writer" }] }, aggregate_credits: { cast: [{ id: 77, order: 0 }], crew: [{ id: 55, jobs: [{ job: "Director" }] }, { id: 56, jobs: [{ job: "Writer" }] }] }, created_by: [{ id: 57 }], title, release_date: "2024-04-12", overview: "Fictional test metadata.", vote_average: 7.1, genre_ids: [genreId], genres: genres.filter(genre => genre.id === genreId), poster_path: null, runtime: 110 });
 const show = (id: number, title: string, genreId: number) => ({ ...movie(id, title, genreId), name: title, first_air_date: "2023-02-03", episode_run_time: [42] });
 const scene = (id: string) => ({ id, title: id === "stash-scene-1" ? "Mock Stash Scene" : `Mock Stash ${id}`, details: "Fictional test metadata.", release_date: "2024-01-01", tags: [{ id: "tag-drama", name: "Drama" }] });
 const server = createServer(async (request, response) => {
@@ -34,12 +34,19 @@ const server = createServer(async (request, response) => {
   }
   if ((url.pathname.startsWith("/theporndb/") || url.pathname === "/graphql") && control.malformedAdult) { response.end(JSON.stringify({ data: "invalid provider shape" })); return; }
   if (/^\/3\/genre\/(movie|tv)\/list$/.test(url.pathname)) response.end(JSON.stringify({ genres }));
+  else if (/^\/3\/tv\/\d+\/recommendations$/.test(url.pathname)) {
+    const page = Number(url.searchParams.get("page"));
+    response.end(JSON.stringify({ results: page === 1 ? [show(9901, "Related Show", 18), { ...show(9902, "Adult result", 18), adult: true }, { ...show(9903, "Unknown flag", 18), adult: undefined }] : page === 2 ? [show(9904, "Related page two", 18)] : [], total_pages: 2 }));
+  } else if (/^\/3\/person\/\d+\/tv_credits$/.test(url.pathname)) {
+    response.end(JSON.stringify({ cast: [show(9910, "Person Show", 18)], crew: [{ ...show(9911, "Crew Show", 18), job: "Director" }] }));
+  }
   else if (/^\/3\/discover\/(movie|tv)$/.test(url.pathname)) {
     const isMovie = url.pathname.endsWith("movie");
     const page = Number(url.searchParams.get("page"));
     const personalized = Boolean(url.searchParams.get("with_genres"));
+    const credits = ["with_cast", "with_crew", "with_companies"].some(param => url.searchParams.has(param));
     const result = isMovie ? movie : show;
-    const records = control.emptyTmdb ? [] : personalized
+    const records = control.emptyTmdb ? [] : credits ? page === 1 ? [result(9920, "Credit Match", 18)] : [] : personalized
       ? page === 1 ? Array.from({ length: 5 }, (_, i) => result(9001 + i, `Niche Animation ${i + 1}`, 16)) : []
       : control.extended ? page <= 8 ? Array.from({ length: 20 }, (_, i) => { const id = 101 + (page - 1) * 20 + i; return result(id, `Paged ${isMovie ? "Movie" : "Show"} ${id}`, id % 3 === 1 ? 35 : 18); }) : []
       : page === 1 ? isMovie ? [movie(101, "Mock Movie One", 18), movie(102, "Mock Movie Two", 35)] : [show(201, "Mock Show One", 18), show(202, "Mock Show Two", 35)] : [];

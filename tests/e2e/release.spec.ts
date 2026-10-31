@@ -302,6 +302,8 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   const personalized = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
   expect(personalized.items.some((item: { id: string }) => item.id === "tmdb-movie-9001")).toBe(true);
   expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "personalized")).toBe(true);
+  expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "person")).toBe(true);
+  expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "company")).toBe(true);
   expect(await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status)).toBe(403);
   expect(await page.evaluate(async () => (await fetch("/api/recommendation-events?category=Adult")).status)).toBe(403);
   const beforeGrant = await (await request.get("http://127.0.0.1:4199/__control")).json();
@@ -327,4 +329,30 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   const movies = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
   expect(shows.items.length).toBeGreaterThan(0);
   expect(movies.status.outcome).toBe("unavailable");
+});
+
+test("related shows and credit lanes preserve provenance and category boundaries", async ({ page }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  const events = [201, 202].map((id, index) => ({ ...learningDecision(`tmdb-tv-${id}`, index), id: `show-seed-${index}`, category: "Shows", decision: "seen", rating: 9, algorithmVersion: "content-v4" }));
+  const seeded = await page.evaluate(async events => (await fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) })).json(), events);
+  expect(seeded.acceptedIds).toHaveLength(2);
+  const feed = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
+  expect(feed.batches.filter((batch: { lane: string }) => batch.lane === "related")).toHaveLength(2);
+  expect(feed.batches.some((batch: { lane: string }) => batch.lane === "person")).toBe(true);
+  expect(feed.batches.some((batch: { lane: string }) => batch.lane === "company")).toBe(true);
+  expect(feed.items.some((item: { id: string }) => item.id === "tmdb-tv-9901")).toBe(true);
+  expect(feed.items.some((item: { id: string }) => ["tmdb-tv-9902", "tmdb-tv-9903"].includes(item.id))).toBe(false);
+  expect(feed.creditCoverage.resolved).toBeGreaterThan(0);
+  expect(JSON.stringify(feed.candidateFeatures)).toContain("actor:77");
+  const next = await page.evaluate(async cursor => (await fetch(`/api/discovery-feed?category=Shows&cursor=${encodeURIComponent(cursor)}`)).json(), feed.cursor);
+  expect(next.batches.filter((batch: { lane: string; provenance?: { page: number } }) => batch.lane === "related" && batch.provenance?.page === 2)).toHaveLength(2);
+  expect(next.items.some((item: { id: string }) => item.id === "tmdb-tv-9904")).toBe(true);
+  await page.goto("/");
+  await expect.poll(async () => page.evaluate(async () => {
+    const history = (await (await fetch("/api/recommendation-events?category=Shows")).json()).events;
+    return history.filter((row: { lane: string; provenance?: { endpoint: string } }) => row.lane === "related" && row.provenance?.endpoint === "recommendations").length;
+  })).toBe(2);
+  const rejected = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status);
+  expect(rejected).toBe(403);
 });

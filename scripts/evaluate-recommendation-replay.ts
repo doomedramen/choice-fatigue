@@ -6,11 +6,12 @@ import type { MediaItem } from "../src/data";
 import { decryptMetadataProviderConfig } from "../src/lib/integrations/crypto";
 import { replayRecommendationEvents, summarizeMetadataCoverage } from "../src/lib/recommendation-evaluation";
 import { isValidRecommendationEvent } from "../src/lib/recommendation-event-validation";
+import { creditFeatureKeys } from "../src/lib/credit-features";
 import { requestProviderJson } from "../src/lib/providers/request";
 
 type Category = "Movies" | "Shows" | "Adult";
 type ProviderReference = { provider: "tmdb"; mediaType: "movie" | "tv"; id: number } | { provider: "theporndb"; kind: "scene" | "movie"; id: string } | { provider: "stashdb"; id: string };
-type FeatureMetadata = { genres: string[]; year?: number; type: string };
+type FeatureMetadata = { genres: string[]; year?: number; type: string; creditKeys?: string[] };
 
 const maxIds = 500;
 const concurrency = 4;
@@ -54,10 +55,10 @@ async function fetchFeatureMetadata(id: string, keys: Map<string, string>) : Pro
     const apiKey = keys.get("tmdb");
     if (!apiKey) return null;
     const endpoint = baseUrl("TMDB_API_BASE_URL", "https://api.themoviedb.org/3").replace(/\/$/, "");
-    const record = await requestJson<Record<string, unknown>>(`${endpoint}/${reference.mediaType}/${reference.id}?language=en-US`, { Authorization: `Bearer ${apiKey}`, accept: "application/json" });
+    const record = await requestJson<Record<string, unknown>>(`${endpoint}/${reference.mediaType}/${reference.id}?language=en-US&append_to_response=${reference.mediaType === "tv" ? "aggregate_credits" : "credits"}`, { Authorization: `Bearer ${apiKey}`, accept: "application/json" });
     if (record.id !== reference.id || record.adult === true || !text(reference.mediaType === "movie" ? record.title : record.name)) return null;
     const genres = Array.isArray(record.genres) ? record.genres.map(item => item && typeof item === "object" ? text((item as { name?: unknown }).name) : "").filter(Boolean) : [];
-    return { genres, year: year(reference.mediaType === "movie" ? record.release_date : record.first_air_date), type: reference.mediaType === "movie" ? "Movie" : "Series" };
+    return { genres, year: year(reference.mediaType === "movie" ? record.release_date : record.first_air_date), type: reference.mediaType === "movie" ? "Movie" : "Series", ...(record[reference.mediaType === "movie" ? "credits" : "aggregate_credits"] ? { creditKeys: creditFeatureKeys(record, reference.mediaType) } : {}) };
   }
   if (reference.provider === "theporndb") {
     const apiKey = keys.get("theporndb");
@@ -111,10 +112,11 @@ async function loadTransientMetadata(ids: string[], adultAllowed: boolean) {
           const feature = await fetchFeatureMetadata(id, keys);
           if (!feature) return null;
           const category: Category = id.startsWith("tmdb-movie-") ? "Movies" : id.startsWith("tmdb-tv-") ? "Shows" : "Adult";
-          const item: MediaItem = {
+          const item: MediaItem & { creditKeys?: string[] } = {
             id, title: id, type: feature.type, runtime: "—", rating: "—", genre: feature.genres, synopsis: "",
             palette: ["#344255", "#263244", "#151d2c"], art: "mist", label: id, category,
             ...(feature.year ? { year: feature.year } : {}),
+            ...(feature.creditKeys ? { creditKeys: feature.creditKeys } : {}),
           };
           return [id, item] as const;
         } catch { return null; }
@@ -130,9 +132,9 @@ async function main() {
   if (!file) throw new Error("Usage: pnpm eval:replay -- account-export.json");
   const parsed = JSON.parse(await readFile(file, "utf8")) as { account?: { adultAllowed?: boolean }; recommendationHistory?: unknown };
   if (!Array.isArray(parsed.recommendationHistory)) throw new Error("Input must be a Choice Fatigue account export with recommendationHistory.");
-  const eventKeys = ["id", "sessionId", "reviewId", "sequence", "itemId", "candidateIds", "category", "eventType", "decision", "rating", "targetEventId", "algorithmVersion", "occurredAt", "retrievalId", "source", "lane"];
+  const eventKeys = ["id", "sessionId", "reviewId", "sequence", "itemId", "candidateIds", "category", "eventType", "decision", "rating", "targetEventId", "algorithmVersion", "occurredAt", "retrievalId", "source", "lane", "provenance"];
   const rows = parsed.recommendationHistory.map(row => row && typeof row === "object" ? Object.fromEntries(eventKeys.map(key => [key, (row as Record<string, unknown>)[key]])) : row).filter(isValidRecommendationEvent);
-  if (rows.length !== parsed.recommendationHistory.length) throw new Error("Replay requires valid content-v3 or content-v4 events.");
+  if (rows.length !== parsed.recommendationHistory.length) throw new Error("Replay requires valid content-v3, content-v4 or content-v5 events.");
   const allIds = rows.flatMap(row => [...(row.itemId ? [row.itemId] : []), ...(row.candidateIds ?? [])]);
   const metadata = await loadTransientMetadata(allIds, parsed.account?.adultAllowed === true);
   const reports = replayRecommendationEvents(rows, metadata.items);
