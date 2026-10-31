@@ -162,7 +162,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .stamp-keep { left: 20px; color: #fff; border-color: #b9ffba; transform: rotate(-9deg); }
 .stamp-pass { right: 20px; color: #fff; border-color: #ffbcad; transform: rotate(9deg); }
 .drag-keep .stamp-keep, .drag-pass .stamp-pass { opacity: .95; }
-.decision-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 12px 0 0; }
+.decision-row { position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 14px; margin: 12px 0 0; }
 .decision-button { display: flex; width: auto; height: 44px; min-height: 44px; align-items: center; gap: 8px; padding: 5px 11px; border: 1px solid #46536a; border-radius: 11px; background: #171f30; color: #eef1f7; transition: background 140ms ease-out, border-color 140ms ease-out; }
 .decision-button > span { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #59677e; border-radius: 8px; background: #202a3d; color: #fff; transition: transform 140ms ease-out, background 140ms ease-out; }
 .decision-button svg { width: 20px; height: 20px; }
