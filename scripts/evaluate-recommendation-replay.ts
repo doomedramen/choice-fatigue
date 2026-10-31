@@ -4,8 +4,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { MediaItem } from "../src/data";
 import { decryptMetadataProviderConfig } from "../src/lib/integrations/crypto";
-import { replayRecommendationEvents, summarizeMetadataCoverage } from "../src/lib/recommendation-evaluation";
-import { isValidRecommendationEvent } from "../src/lib/recommendation-event-validation";
+import { replayMetadataPlan, replayRecommendationEvents, summarizeMetadataCoverage } from "../src/lib/recommendation-evaluation";
+import { isValidRecommendationEvent, type RecommendationEventInput } from "../src/lib/recommendation-event-validation";
 import { creditFeatureKeys } from "../src/lib/credit-features";
 import { requestProviderJson } from "../src/lib/providers/request";
 
@@ -80,18 +80,18 @@ async function fetchFeatureMetadata(id: string, keys: Map<string, string>) : Pro
   return { genres: tags(record.tags), year: year(record.release_date), type: "Scene" };
 }
 
-async function loadTransientMetadata(ids: string[], adultAllowed: boolean) {
+async function loadTransientMetadata(rows: RecommendationEventInput[], adultAllowed: boolean) {
   const databaseUrl = process.env.DATABASE_URL;
   const encryptionKey = process.env.INTEGRATION_CREDENTIALS_KEY;
-  if (!databaseUrl || !encryptionKey) return { items: new Map<string, MediaItem>(), eligible: 0, requested: 0, resolved: 0, error: "Set DATABASE_URL and INTEGRATION_CREDENTIALS_KEY to compare ranking policies." };
+  if (!databaseUrl || !encryptionKey) return { items: new Map<string, MediaItem>(), eligible: 0, requested: 0, resolved: 0, sessionsWithLabels: 0, sessionsCovered: 0, error: "Set DATABASE_URL and INTEGRATION_CREDENTIALS_KEY to compare ranking policies." };
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
   try {
-    const [rows, globalSettings] = await Promise.all([
+    const [credentials, globalSettings] = await Promise.all([
       prisma.metadataProviderCredential.findMany({ where: { enabled: true } }),
       prisma.globalSettings.findUnique({ where: { id: "global" }, select: { adultSectionEnabled: true } }),
     ]);
     const keys = new Map<string, string>();
-    for (const row of rows) {
+    for (const row of credentials) {
       if (row.provider !== "tmdb" && row.provider !== "theporndb" && row.provider !== "stashdb") continue;
       if (row.provider !== "tmdb" && (!adultAllowed || !globalSettings?.adultSectionEnabled)) continue;
       try {
@@ -99,11 +99,11 @@ async function loadTransientMetadata(ids: string[], adultAllowed: boolean) {
         if (config.apiKey) keys.set(row.provider, config.apiKey);
       } catch { /* A provider with an unreadable key is counted as unresolved. */ }
     }
-    const eligibleIds = [...new Set(ids)].filter(id => {
-      const reference = providerReference(id);
-      return Boolean(reference && keys.has(reference.provider));
-    });
-    const uniqueIds = eligibleIds.slice(0, maxIds);
+    const isEligible = (id: string) => { const reference = providerReference(id); return Boolean(reference && keys.has(reference.provider)); };
+    const eligibleIds = [...new Set(rows.flatMap(row => [...(row.itemId ? [row.itemId] : []), ...(row.candidateIds ?? [])]))].filter(isEligible);
+    // Spend the lookup budget on whole sessions rather than on whichever IDs appear first.
+    const plan = replayMetadataPlan(rows, isEligible, maxIds);
+    const uniqueIds = plan.ids;
     const items = new Map<string, MediaItem>();
     for (let index = 0; index < uniqueIds.length; index += concurrency) {
       const batch = uniqueIds.slice(index, index + concurrency);
@@ -123,7 +123,7 @@ async function loadTransientMetadata(ids: string[], adultAllowed: boolean) {
       }));
       for (const entry of resolved) if (entry) items.set(entry[0], entry[1]);
     }
-    return { items, eligible: eligibleIds.length, requested: uniqueIds.length, resolved: items.size, error: undefined };
+    return { items, eligible: eligibleIds.length, requested: uniqueIds.length, resolved: items.size, sessionsWithLabels: plan.sessionsWithLabels, sessionsCovered: plan.sessionsCovered, error: undefined };
   } finally { await prisma.$disconnect(); }
 }
 
@@ -135,11 +135,10 @@ async function main() {
   const eventKeys = ["id", "sessionId", "reviewId", "sequence", "itemId", "candidateIds", "category", "eventType", "decision", "rating", "targetEventId", "algorithmVersion", "occurredAt", "retrievalId", "source", "lane", "provenance"];
   const rows = parsed.recommendationHistory.map(row => row && typeof row === "object" ? Object.fromEntries(eventKeys.map(key => [key, (row as Record<string, unknown>)[key]])) : row).filter(isValidRecommendationEvent);
   if (rows.length !== parsed.recommendationHistory.length) throw new Error("Replay requires valid content-v3 through content-v7 events.");
-  const allIds = rows.flatMap(row => [...(row.itemId ? [row.itemId] : []), ...(row.candidateIds ?? [])]);
-  const metadata = await loadTransientMetadata(allIds, parsed.account?.adultAllowed === true);
+  const metadata = await loadTransientMetadata(rows, parsed.account?.adultAllowed === true);
   const reports = replayRecommendationEvents(rows, metadata.items);
-  const metadataCoverage = { ...summarizeMetadataCoverage(metadata.eligible, metadata.requested, metadata.resolved), error: metadata.error ?? null };
-  process.stdout.write(`${JSON.stringify({ method: "chronological per-impression comparison on matched candidates using current metadata; observational, not causal; lane yield is descriptive", metadataPolicy: "fetched transiently at evaluation time and not written to disk or database", metadataCoverage, categories: reports }, null, 2)}\n`);
+  const metadataCoverage = { ...summarizeMetadataCoverage(metadata.eligible, metadata.requested, metadata.resolved), sessionsWithLabels: metadata.sessionsWithLabels, sessionsCovered: metadata.sessionsCovered, error: metadata.error ?? null };
+  process.stdout.write(`${JSON.stringify({ method: "chronological per-impression comparison on matched candidates using current metadata; whole sessions sampled within the lookup budget; list metrics favour the logging policy, so read shownCardAuc and the paired ranker-minus-baseline intervals first; observational, not causal; lane yield is descriptive", metadataPolicy: "fetched transiently at evaluation time and not written to disk or database", metadataCoverage, categories: reports }, null, 2)}\n`);
 }
 
 void main().catch(error => { console.error(error instanceof Error ? error.message : "Replay evaluation failed."); process.exitCode = 1; });

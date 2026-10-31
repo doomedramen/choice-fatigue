@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareRankings, summarizeMetadataCoverage } from "../src/lib/recommendation-evaluation";
+import { compareRankings, replayMetadataPlan, summarizeMetadataCoverage } from "../src/lib/recommendation-evaluation";
 
 test("compares provider and ranker order against the same saved and shortlisted labels", () => {
   const result = compareRankings([
@@ -128,4 +128,42 @@ test("v6 replay uses retained order and recorded hydration outcomes", () => {
   assert.deepEqual(report.snapshotCoverage, { snapshots: 1, incompleteImpressions: 0 });
   const missing = replayRecommendationEvents(events.filter(event => event.eventType !== "retrieval_snapshot"), metadata)[0];
   assert.equal(missing.snapshotCoverage.incompleteImpressions, 1);
+});
+
+test("exposure weighting uses the logged shown order, and the shown card is scored pointwise", () => {
+  const row = (index: number, shownCard: { itemId: string; outcome: "keep" | "pass" }) => ({
+    providerOrder: ["a", "b", "c"], rankerOrder: shownCard.outcome === "keep" ? [shownCard.itemId, ...["a", "b", "c"].filter(id => id !== shownCard.itemId)] : [...["a", "b", "c"].filter(id => id !== shownCard.itemId), shownCard.itemId],
+    shortlisted: shownCard.outcome === "keep" ? [shownCard.itemId] : [], saved: [], sessionId: `s${index}`,
+    shownOrder: ["c", "b", "a"], shownCard,
+  });
+  const rows = [row(0, { itemId: "c", outcome: "keep" }), row(1, { itemId: "a", outcome: "pass" }), row(2, { itemId: "b", outcome: "keep" }), row(3, { itemId: "c", outcome: "pass" })];
+  const result = compareRankings(rows, 3);
+  assert.equal(result.shownCardAuc.currentRanker, 1, "kept cards ranked first, passed cards last");
+  assert.equal(result.shownCardAuc.providerOrder, 0.375, "kept c,b sit at 0 and 0.5; passed a,c at 1 and 0: 1.5 of 4 pairs");
+  const weighted = compareRankings([{ providerOrder: ["a", "b"], rankerOrder: ["a", "b"], shortlisted: ["a"], saved: [], shownOrder: ["b", "a"] }]);
+  assert.equal(weighted.exposureWeightedShortlistRecallAt10.currentRanker, 1);
+});
+
+test("ranker-versus-baseline differences are paired per trace and bootstrapped by session", () => {
+  const rows = Array.from({ length: 12 }, (_, index) => ({ providerOrder: ["x", "y", "z"], rankerOrder: ["z", "x", "y"], shortlisted: ["z"], saved: [], sessionId: `s${index % 4}` }));
+  const difference = compareRankings(rows, 5).shortlistedReciprocalRankDifference95.currentRankerMinusProvider!;
+  assert.equal(difference.mean, round(1 - 1 / 3));
+  assert.deepEqual(difference.interval, [difference.mean, difference.mean], "the same gain in every trace leaves no uncertainty");
+  assert.equal(compareRankings(rows.slice(0, 1)).shortlistedReciprocalRankDifference95.currentRankerMinusProvider, null);
+});
+function round(value: number) { return Number(value.toFixed(4)); }
+
+test("the replay lookup budget covers whole sessions instead of the earliest IDs", () => {
+  const session = (sessionId: string, base: number) => [
+    replayEvent(base, { sessionId, eventType: "item_shown", itemId: `tmdb-movie-${base}`, candidateIds: [`tmdb-movie-${base}`, `tmdb-movie-${base + 1}`, `tmdb-movie-${base + 2}`] }),
+    replayEvent(base + 1, { sessionId, eventType: "decision", itemId: `tmdb-movie-${base}`, decision: "keep" }),
+  ];
+  const events = [...session("a", 100), ...session("b", 200), ...session("c", 300)];
+  const plan = replayMetadataPlan(events, () => true, 6, 9);
+  assert.equal(plan.sessionsWithLabels, 3);
+  assert.equal(plan.sessionsCovered, 2, "two whole sessions fit in six lookups");
+  const coveredSessions = new Set(plan.ids.map(id => Math.floor(Number(id.split("-").at(-1)) / 100)));
+  assert.equal(coveredSessions.size, 2);
+  assert.deepEqual(replayMetadataPlan(events, () => true, 6, 9), plan, "the same seed picks the same sessions");
+  assert.equal(replayMetadataPlan(events, id => !id.endsWith("-101"), 100).ids.includes("tmdb-movie-101"), false, "ineligible IDs are never requested");
 });

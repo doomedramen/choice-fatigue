@@ -84,7 +84,7 @@ function pairwiseAccuracy(rankings: string[][], positives: string[][], negatives
 
 /**
  * Recall@10 where each relevant title is weighted by the inverse of an approximate exposure
- * propensity, 1/log2(shown position + 2). Titles the production order showed late were less likely
+ * propensity, 1/log2(shown position + 2), using the position in the logged shown order. Titles the production order showed late were less likely
  * to be chosen at all, so recovering them counts for more. This is a rough position-bias model.
  */
 function exposureWeightedRecallAt10(rankings: string[][], relevant: string[][], shownOrders: string[][]) {
@@ -101,18 +101,11 @@ function exposureWeightedRecallAt10(rankings: string[][], relevant: string[][], 
   return total ? round4(found / total) : null;
 }
 
-/** Session-level bootstrap: traces from one session are correlated, so sessions are the resampling unit. */
-function bootstrapMeanReciprocalRank(rankings: string[][], relevant: string[][], sessionIds: string[], seed: number, resamples = 1000): [number, number] | null {
-  const bySession = new Map<string, number[]>();
-  rankings.forEach((ranking, index) => {
-    const ranks = relevant[index].map(id => ranking.indexOf(id)).filter(rank => rank >= 0);
-    if (!ranks.length) return;
-    const values = bySession.get(sessionIds[index]) ?? [];
-    values.push(1 / (Math.min(...ranks) + 1));
-    bySession.set(sessionIds[index], values);
-  });
-  const sessions = [...bySession.values()];
+/** Session-level bootstrap of a mean over per-trace values: traces in one session are correlated, so sessions are resampled whole. */
+function bootstrapSessionMean(valuesBySession: Map<string, number[]>, seed: number, resamples = 1000): { mean: number; interval: [number, number] } | null {
+  const sessions = [...valuesBySession.values()].filter(values => values.length);
   if (sessions.length < 2) return null;
+  const all = sessions.flat();
   const random = seededRandom(seed);
   const means: number[] = [];
   for (let sample = 0; sample < resamples; sample++) {
@@ -124,14 +117,69 @@ function bootstrapMeanReciprocalRank(rankings: string[][], relevant: string[][],
     means.push(sum / count);
   }
   means.sort((a, b) => a - b);
-  return [round4(means[Math.floor(resamples * 0.025)]), round4(means[Math.ceil(resamples * 0.975) - 1])];
+  return { mean: round4(all.reduce((sum, value) => sum + value, 0) / all.length), interval: [round4(means[Math.floor(resamples * 0.025)]), round4(means[Math.ceil(resamples * 0.975) - 1])] };
 }
 
-export type RankingComparisonRow = { providerOrder: string[]; rankerOrder: string[]; shortlisted: string[]; saved: string[]; passed?: string[]; sessionId?: string };
+function reciprocalRank(ranking: string[], relevant: string[]) {
+  const ranks = relevant.map(id => ranking.indexOf(id)).filter(rank => rank >= 0);
+  return ranks.length ? 1 / (Math.min(...ranks) + 1) : null;
+}
+
+function bootstrapMeanReciprocalRank(rankings: string[][], relevant: string[][], sessionIds: string[], seed: number): [number, number] | null {
+  const bySession = new Map<string, number[]>();
+  rankings.forEach((ranking, index) => {
+    const value = reciprocalRank(ranking, relevant[index]);
+    if (value !== null) bySession.set(sessionIds[index], [...(bySession.get(sessionIds[index]) ?? []), value]);
+  });
+  return bootstrapSessionMean(bySession, seed)?.interval ?? null;
+}
+
+/**
+ * Paired comparison: per trace, the difference in reciprocal rank between two orders over the same
+ * candidates, bootstrapped by session. Separate intervals for each order overlap even when one order
+ * is reliably better; the interval of the difference is what says whether it is.
+ */
+function pairedReciprocalRankDifference(left: string[][], right: string[][], relevant: string[][], sessionIds: string[], seed: number) {
+  const bySession = new Map<string, number[]>();
+  left.forEach((ranking, index) => {
+    const a = reciprocalRank(ranking, relevant[index]), b = reciprocalRank(right[index], relevant[index]);
+    if (a !== null && b !== null) bySession.set(sessionIds[index], [...(bySession.get(sessionIds[index]) ?? []), a - b]);
+  });
+  return bootstrapSessionMean(bySession, seed);
+}
+
+/**
+ * Pointwise check on the card actually shown: where does each order place it within its window, and
+ * does that position separate cards the user kept from cards they passed (AUC; 0.5 is chance)? Unlike
+ * list metrics this does not reward an order for agreeing with whichever ranker chose what was shown,
+ * because every impression contributes exactly one logged card and its observed outcome.
+ */
+function shownCardAuc(rankings: string[][], shown: Array<{ itemId: string; outcome: "keep" | "pass" } | null>) {
+  const kept: number[] = [], passed: number[] = [];
+  rankings.forEach((ranking, index) => {
+    const card = shown[index];
+    const position = card ? ranking.indexOf(card.itemId) : -1;
+    if (!card || position < 0 || ranking.length < 2) return;
+    (card.outcome === "keep" ? kept : passed).push(1 - position / (ranking.length - 1));
+  });
+  if (!kept.length || !passed.length) return null;
+  let wins = 0;
+  for (const k of kept) for (const p of passed) wins += k > p ? 1 : k === p ? 0.5 : 0;
+  return round4(wins / (kept.length * passed.length));
+}
+
+export type RankingComparisonRow = {
+  providerOrder: string[]; rankerOrder: string[]; shortlisted: string[]; saved: string[]; passed?: string[]; sessionId?: string;
+  /** The logged window, in the order cards were actually shown (shown card first). */
+  shownOrder?: string[];
+  /** The card shown at this impression and what the user did with it, when they decided. */
+  shownCard?: { itemId: string; outcome: "keep" | "pass" } | null;
+};
 
 /**
  * Compare fixed rankings against observed shortlist/save labels within each traced candidate set.
- * A seeded random order is the floor any ranker must beat; intervals resample whole sessions.
+ * A seeded random order is the floor any ranker must beat; intervals resample whole sessions, and
+ * ranker-versus-baseline differences are paired per trace.
  */
 export function compareRankings(input: RankingComparisonRow[], seed = 1) {
   const random = seededRandom(seed);
@@ -142,13 +190,49 @@ export function compareRankings(input: RankingComparisonRow[], seed = 1) {
   };
   const shortlisted = input.map(row => row.shortlisted), saved = input.map(row => row.saved), passed = input.map(row => row.passed ?? []);
   const sessionIds = input.map((row, index) => row.sessionId ?? String(index));
+  const shownOrders = input.map(row => row.shownOrder ?? row.providerOrder);
+  const shownCards = input.map(row => row.shownCard ?? null);
   const report = <T>(score: (rankings: string[][]) => T) => ({ providerOrder: score(orders.providerOrder), currentRanker: score(orders.currentRanker), randomOrder: score(orders.randomOrder) });
   return {
     ...report(rankings => ({ shortlisted: metrics(rankings, shortlisted), saved: metrics(rankings, saved) })),
     keptOverPassedAccuracy: report(rankings => pairwiseAccuracy(rankings, shortlisted, passed)),
-    exposureWeightedShortlistRecallAt10: report(rankings => exposureWeightedRecallAt10(rankings, shortlisted, orders.providerOrder)),
+    exposureWeightedShortlistRecallAt10: report(rankings => exposureWeightedRecallAt10(rankings, shortlisted, shownOrders)),
+    shownCardAuc: report(rankings => shownCardAuc(rankings, shownCards)),
     shortlistedMeanReciprocalRank95: report(rankings => bootstrapMeanReciprocalRank(rankings, shortlisted, sessionIds, seed)),
+    shortlistedReciprocalRankDifference95: {
+      currentRankerMinusProvider: pairedReciprocalRankDifference(orders.currentRanker, orders.providerOrder, shortlisted, sessionIds, seed),
+      currentRankerMinusRandom: pairedReciprocalRankDifference(orders.currentRanker, orders.randomOrder, shortlisted, sessionIds, seed),
+    },
   };
+}
+
+/**
+ * Chooses which IDs a replay may look up when its budget is smaller than the history. Whole sessions
+ * are taken in a seeded random order, each with the titles it decided or saved and the windows of
+ * impressions whose card was decided, so covered sessions are evaluated fully rather than every
+ * session thinly or only the earliest. Sessions that do not fit are skipped and reported.
+ */
+export function replayMetadataPlan(events: RecommendationEventInput[], isEligible: (id: string) => boolean, maxIds = 500, seed = 1) {
+  const ordered = mergeRecommendationEvents(events);
+  const decided = new Set(effectiveRecommendationEvents(ordered).flatMap(event => event.eventType === "decision" && event.itemId ? [event.itemId] : []));
+  const bySession = new Map<string, Set<string>>();
+  for (const event of ordered) {
+    const ids = bySession.get(event.sessionId) ?? new Set<string>();
+    if ((event.eventType === "decision" || event.eventType === "saved") && event.itemId) ids.add(event.itemId);
+    if (event.eventType === "item_shown" && event.itemId && decided.has(event.itemId)) (event.candidateIds ?? []).forEach(id => ids.add(id));
+    bySession.set(event.sessionId, ids);
+  }
+  const chosen = new Set<string>();
+  let sessionsWithLabels = 0, sessionsCovered = 0;
+  for (const sessionId of shuffled([...bySession.keys()].sort(), seededRandom(seed))) {
+    const needed = [...bySession.get(sessionId)!].filter(id => isEligible(id) && !chosen.has(id));
+    if (!bySession.get(sessionId)!.size) continue;
+    sessionsWithLabels += 1;
+    if (chosen.size + needed.length > maxIds) continue;
+    needed.forEach(id => chosen.add(id));
+    sessionsCovered += 1;
+  }
+  return { ids: [...chosen], sessionsWithLabels, sessionsCovered };
 }
 
 /** Every impression is scored with only preceding events and previously fetched candidates. */
@@ -258,7 +342,14 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
         const contentOrder = rankRecommendations(candidates, profile.signals, profile.comparisons).items.map(item => item.id);
         const rankerOrder = rankRecommendations(candidates, profile.signals, profile.comparisons, features, relatedRanks).items.map(item => item.id);
         const labels = outcomes.get(event.sessionId)!;
-        const comparison = { providerOrder: candidates.map(item => item.id), rankerOrder, shortlisted: [...labels.shortlisted], saved: [...labels.saved], passed: [...labels.passed], sessionId: event.sessionId };
+        const candidateIds = new Set(candidates.map(item => item.id));
+        const shownOutcome = labels.shortlisted.has(event.itemId) ? "keep" as const : labels.passed.has(event.itemId) ? "pass" as const : null;
+        const comparison = {
+          providerOrder: candidates.map(item => item.id), rankerOrder, shortlisted: [...labels.shortlisted], saved: [...labels.saved], passed: [...labels.passed], sessionId: event.sessionId,
+          // The logged window keeps the order cards were really shown; derived traces below reuse it rather than their own baseline order.
+          shownOrder: event.candidateIds.filter(id => candidateIds.has(id)),
+          shownCard: shownOutcome && candidateIds.has(event.itemId) ? { itemId: event.itemId, outcome: shownOutcome } : null,
+        };
         if (candidates.length) { traces.push(comparison); contentTraces.push({ ...comparison, providerOrder: contentOrder }); }
         const popularIds = new Set(runGroups.flatMap(group => group.filter(batch => batch.lane === "popular").flatMap(batch => batch.ids)));
         const popularOrder = comparison.providerOrder.filter(id => popularIds.has(id));
