@@ -736,7 +736,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
           <div className="discover-intro"><h1>{session.category}</h1></div>
           {item ? <div className="deck-wrap"><div className="deck-meta"><span>{session.category.toUpperCase()} <i>·</i> {item.year}</span><span>{String(seenCount+1).padStart(2,"0")} <small>/ {String(items.length).padStart(2,"0")}</small></span></div>
             <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
-              {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/><span className="stack-shadow stack-shadow-three" aria-hidden="true"/><span className="stack-shadow stack-shadow-four" aria-hidden="true"/></>}
+              {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/></>}
               {nextItem && renderMediaCard(nextItem, false)}
               {renderMediaCard(item, true)}
             </div>

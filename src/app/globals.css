@@ -86,10 +86,8 @@ button:active:not(:disabled) { transform: scale(.98); }
 .deck-meta small { color: #8794aa; font-size: 12px; }
 .card-stack { position: relative; isolation: isolate; display: grid; padding: 0 11px 10px; touch-action: pan-y; }
 .stack-shadow { position: absolute; z-index: 0; top: 0; bottom: 10px; left: 50%; width: min(calc(100% - 22px), 450px); border: 1px solid #38445c; border-radius: 16px; box-shadow: 0 14px 30px #0005; pointer-events: none; transform-origin: center; }
-.stack-shadow-one { background: #6f3b51; transform: translateX(-50%) translateY(14px); }
-.stack-shadow-two { background: #a44b3e; transform: translateX(-50%) translateY(10px); }
-.stack-shadow-three { background: #b87928; transform: translateX(-50%) translateY(6px); }
-.stack-shadow-four { background: #394764; transform: translateX(-50%) translateY(3px); }
+.stack-shadow-one { background: #a44b3e; transform: translateX(-50%) translateY(26px) scale(.97); }
+.stack-shadow-two { background: #b87928; transform: translateX(-50%) translateY(14px) scale(.985); }
 .media-card { position: relative; z-index: 2; display: grid; width: min(100%, 380px); justify-self: center; grid-area: 1 / 1; grid-template-rows: auto minmax(170px, max-content); aspect-ratio: auto; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
 .media-card.control-exit { transition: box-shadow 160ms ease-out, transform 230ms var(--ease-out), opacity 170ms ease-out; }
 .media-card.card-under { z-index: 1; box-shadow: 0 12px 26px #0004; pointer-events: none; transform: none; }
