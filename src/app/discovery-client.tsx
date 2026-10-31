@@ -172,7 +172,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   ];
   const recommendations = rankSessionRecommendations(categoryItems, session.decisions, session.ratings, recommendationSignals, historicalComparisons);
   const items = recommendations.items;
-  const remainingItems = items.filter(candidate => !session.decisions[candidate.id]);
+  const previouslyConsideredIds = new Set(historicalSignals.map(signal => signal.itemId));
+  const remainingItems = items.filter(candidate => !session.decisions[candidate.id] && !previouslyConsideredIds.has(candidate.id));
   const item = remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0];
   const nextItem = remainingItems.find(candidate => candidate.id !== item?.id);
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
