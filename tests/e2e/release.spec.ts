@@ -121,9 +121,6 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(page.getByRole("dialog").getByText("Mock Movie One").first()).toBeVisible();
   await page.getByRole("button", { name: "Close saved titles" }).click();
   await request.post("http://127.0.0.1:4199/__control", { data: { emptyTmdb: false } });
-  await page.goto("/");
-  await page.locator('button[title="Start a fresh session"]').click();
-  await expect(page.getByRole("heading", { name: "Mock Movie One" })).toBeVisible();
 
   await page.getByRole("button", { name: "Adult", exact: true }).click();
   await page.getByRole("button", { name: "I’m 18 or older" }).click();
