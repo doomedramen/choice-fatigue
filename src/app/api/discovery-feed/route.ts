@@ -1,21 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthenticationError, requireSession } from "@/lib/auth-session";
-import { getPopularTmdbCataloguePage, type TmdbCategory } from "@/lib/providers/tmdb";
-
+import { getDiscoveryFeed, InvalidFeedCursorError } from "@/lib/catalogue";
+import { recommendationCategories, type RecommendationCategory } from "@/lib/recommendation-event-validation";
+import { userHasAdultGrant } from "@/lib/adult-access";
+import { getGlobalSettings } from "@/lib/global-settings";
+import { adultAccessEnabled } from "@/lib/adult-access-policy";
 export const dynamic = "force-dynamic";
-
 export async function GET(request: NextRequest) {
   try {
-    await requireSession();
-    const category = request.nextUrl.searchParams.get("category");
-    const page = Number(request.nextUrl.searchParams.get("page"));
-    if ((category !== "Movies" && category !== "Shows") || !Number.isSafeInteger(page) || page < 3 || page > 500) {
-      return NextResponse.json({ error: "Choose a valid discovery page." }, { status: 400 });
+    const session = await requireSession();
+    const category = request.nextUrl.searchParams.get("category") as RecommendationCategory;
+    if (!recommendationCategories.includes(category)) return NextResponse.json({ error: "Choose a valid discovery category." }, { status: 400 });
+    if (category === "Adult") {
+      const [settings, grant] = await Promise.all([getGlobalSettings(), userHasAdultGrant(session.user.id)]);
+      if (!adultAccessEnabled(settings.adultSectionEnabled, grant)) return NextResponse.json({ error: "The Adult category is currently disabled." }, { status: 403 });
     }
-    const result = await getPopularTmdbCataloguePage(category as TmdbCategory, page);
+    const result = await getDiscoveryFeed(session.user.id, category, request.nextUrl.searchParams.get("cursor"), request.nextUrl.searchParams.get("refresh") === "1");
     return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof AuthenticationError) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
+    if (error instanceof InvalidFeedCursorError) return NextResponse.json({ error: "Invalid discovery cursor." }, { status: 400 });
     return NextResponse.json({ error: "More titles could not be loaded." }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
   }
 }

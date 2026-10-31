@@ -1,13 +1,14 @@
 import "server-only";
+import { requestProviderJson } from "@/lib/providers/request";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
 
 const ENDPOINT = process.env.NODE_ENV !== "production" ? process.env.STASHDB_API_BASE_URL || "https://stashdb.org/graphql" : "https://stashdb.org/graphql";
-const RESULT_LIMIT = 12;
+const RESULT_LIMIT = 25;
 
-type StashTag = { name?: unknown };
+type StashTag = { id?: unknown; name?: unknown };
 type StashStudio = { name?: unknown } | null;
 type StashScene = {
   id?: unknown;
@@ -38,26 +39,12 @@ async function getApiKey() {
 }
 
 async function graphql<T>(query: string, variables: Record<string, unknown>, apiKey: string): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const response = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { ApiKey: apiKey, "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ query, variables }),
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!response.ok) throw new StashDbRequestError();
-    const result = await response.json() as GraphqlResponse<T>;
-    if (result.errors?.length || !result.data) throw new StashDbRequestError();
-    return result.data;
-  } catch (error) {
-    if (error instanceof StashDbRequestError) throw error;
-    throw new StashDbRequestError();
-  } finally {
-    clearTimeout(timeout);
-  }
+  const result = await requestProviderJson<GraphqlResponse<T>>("stashdb", ENDPOINT, {
+    method: "POST", headers: { ApiKey: apiKey, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (result.errors?.length || !result.data) throw new StashDbRequestError();
+  return result.data;
 }
 
 function stringValue(value: unknown) {
@@ -103,7 +90,7 @@ const findQuery = `query FindSceneById($id: ID!) {
     details
     release_date
     duration
-    tags { name }
+    tags { id name }
     studio { name }
   }
 }`;
@@ -117,20 +104,27 @@ const popularQuery = `query PopularScenes($input: SceneQueryInput!) {
       details
       release_date
       duration
-      tags { name }
+      tags { id name }
       studio { name }
     }
   }
 }`;
 
-/** Browse a provider-ranked adult scene pool without importing it into the local catalogue. */
-export async function getPopularStashDbCatalogue(): Promise<MediaItem[]> {
+/** Filter only by this provider's own tag IDs. */
+export async function getStashDbCataloguePage(page: number, tagIds: string[] = []) {
+  if (!Number.isSafeInteger(page) || page < 1 || page > 500) throw new StashDbRequestError();
   const apiKey = await getApiKey();
-  const response = await graphql<SceneBrowseResponse>(popularQuery, { input: { page: 1, per_page: RESULT_LIMIT, direction: "DESC", sort: "POPULARITY" } }, apiKey);
-  return (Array.isArray(response.queryScenes?.scenes) ? response.queryScenes.scenes : [])
-    .map(normalizeScene)
-    .filter((scene): scene is NonNullable<typeof scene> => scene !== null)
-    .map(stashDbMediaItem);
+  const response = await graphql<SceneBrowseResponse>(popularQuery, { input: {
+    page, per_page: RESULT_LIMIT, direction: "DESC", sort: "POPULARITY",
+    ...(tagIds.length ? { tags: { value: tagIds, modifier: "INCLUDES" } } : {}),
+  } }, apiKey);
+  if (!Array.isArray(response.queryScenes?.scenes)) throw new StashDbRequestError();
+  const records = response.queryScenes.scenes;
+  const count = response.queryScenes.count;
+  return {
+    items: records.map(normalizeScene).filter((scene): scene is NonNullable<typeof scene> => scene !== null).map(stashDbMediaItem),
+    hasMore: records.length > 0 && page < 500 && (typeof count === "number" ? page * RESULT_LIMIT < count : records.length === RESULT_LIMIT),
+  };
 }
 
 function stashDbMediaItem(scene: NonNullable<ReturnType<typeof normalizeScene>>): MediaItem {
@@ -164,13 +158,22 @@ export async function getStashDbMediaItem(sourceId: string): Promise<MediaItem> 
   return stashDbMediaItem(normalized);
 }
 
-export async function getStashDbRecommendationFeatures(sourceId: string) {
+export async function getStashDbRecommendationMetadata(sourceId: string) {
   if (!sourceId || sourceId.length > 160 || !/^[A-Za-z0-9_-]+$/.test(sourceId)) throw new StashDbMissingSceneError();
   const apiKey = await getApiKey();
   const response = await graphql<FindSceneResponse>(findQuery, { id: sourceId }, apiKey);
   const scene = response.findScene;
-  if (!scene) throw new StashDbMissingSceneError();
-  const normalized = normalizeScene(scene);
-  if (!normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
-  return recommendationFeatureKeys({ genres: normalized.genres, year: normalized.year, type: "Scene" });
+  const normalized = scene ? normalizeScene(scene) : null;
+  if (!scene || !normalized || normalized.sourceId !== sourceId) throw new StashDbMissingSceneError();
+  return {
+    featureKeys: recommendationFeatureKeys({ genres: normalized.genres, year: normalized.year, type: "Scene" }),
+    retrievalTags: Object.fromEntries((scene.tags ?? []).flatMap(tag => {
+      const id = stringValue(tag.id), name = stringValue(tag.name).toLowerCase().replace(/\s+/g, " ");
+      return id && name ? [[`genre:${name}`, id]] : [];
+    })),
+  };
+}
+
+export async function getStashDbRecommendationFeatures(sourceId: string) {
+  return (await getStashDbRecommendationMetadata(sourceId)).featureKeys;
 }

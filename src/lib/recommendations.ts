@@ -5,13 +5,13 @@ export interface RecommendationSignal { itemId: string; decision: Recommendation
 export interface RecommendationComparison { preferredItemId: string; removedItemId: string; preferredFeatureKeys?: string[]; removedFeatureKeys?: string[] }
 export interface RecommendationHistoryEvent {
   id: string; sessionId: string; reviewId?: string | null; itemId: string | null; eventType: string;
-  decision: string | null; rating: number | null; targetEventId: string | null; category?: string;
+  decision: string | null; rating: number | null; targetEventId: string | null; category?: string; occurredAt?: string | Date; sequence?: number;
 }
 
-export function recommendationComparisonsFromHistory(events: RecommendationHistoryEvent[], excludeSessionId?: string | null, category?: string): Array<Pick<RecommendationComparison, "preferredItemId" | "removedItemId">> {
+export function recommendationComparisonsFromHistory(events: RecommendationHistoryEvent[], category?: string): Array<Pick<RecommendationComparison, "preferredItemId" | "removedItemId">> {
   const reviews = new Map<string, { removed: Map<string, boolean>; saved: Set<string> }>();
   for (const event of events) {
-    if ((excludeSessionId && event.sessionId === excludeSessionId) || (category && event.category !== category) || !event.reviewId) continue;
+    if ((category && event.category !== category) || !event.reviewId) continue;
     let review = reviews.get(event.reviewId);
     if (!review) {
       review = { removed: new Map(), saved: new Set() };
@@ -37,8 +37,8 @@ export function recommendationComparisonsFromHistory(events: RecommendationHisto
   return comparisons;
 }
 
-export function recommendationSignalsFromHistory(events: RecommendationHistoryEvent[], excludeSessionId?: string | null, category?: string): RecommendationSignal[] {
-  const history = events.filter(event => (!excludeSessionId || event.sessionId !== excludeSessionId) && (!category || event.category === category));
+export function recommendationSignalsFromHistory(events: RecommendationHistoryEvent[], category?: string): RecommendationSignal[] {
+  const history = events.filter(event => (!category || event.category === category));
   const withdrawn = new Set(history
     .filter(event => event.eventType === "decision_undone")
     .map(event => event.targetEventId)
@@ -133,34 +133,14 @@ function featuresFor(item: MediaItem): ItemFeature[] {
     .map(key => ({ key, weight: featureWeight(key) }));
 }
 
-/** Rank one category using only explicit choices made in the current session. */
-export function rankSessionRecommendations(
+/** Rank one category from the canonical, corrected event profile. */
+export function rankRecommendations(
   items: MediaItem[],
-  decisions: Record<string, RecommendationDecision | undefined>,
-  ratings: Record<string, number | undefined> = {},
   historicalSignals: RecommendationSignal[] = [],
   historicalComparisons: RecommendationComparison[] = [],
 ) {
   const featureEvidence = new Map<string, FeatureEvidence>();
   let signalCount = 0;
-
-  for (const item of items) {
-    const decision = decisions[item.id];
-    if (!decision) continue;
-
-    const weight = decision === "seen"
-      ? reviewRatingWeights[ratings[item.id] ?? 0]
-      : recommendationWeights[decision];
-    if (weight === undefined) continue;
-
-    signalCount += 1;
-    for (const feature of featuresFor(item)) {
-      const evidence = featureEvidence.get(feature.key) ?? { total: 0, count: 0 };
-      evidence.total += weight;
-      evidence.count += 1;
-      featureEvidence.set(feature.key, evidence);
-    }
-  }
 
   const itemById = new Map(items.map(item => [item.id, item]));
   for (const signal of historicalSignals) {
@@ -224,4 +204,54 @@ export function rankSessionRecommendations(
     .sort((a, b) => b.score - a.score || a.originalIndex - b.originalIndex);
 
   return { items: ranked.map(entry => entry.item), signalCount };
+}
+
+
+export type RecommendationFeatures = Record<string, string[]>;
+
+/** The outbox may overlap a server read. Each event is replayed exactly once. */
+export function mergeRecommendationEvents<T extends RecommendationHistoryEvent>(...groups: T[][]): T[] {
+  const byId = new Map<string, T>();
+  for (const events of groups) for (const event of events) byId.set(event.id, event);
+  return [...byId.values()].sort((a, b) => {
+    const time = new Date(a.occurredAt ?? 0).getTime() - new Date(b.occurredAt ?? 0).getTime();
+    return time || a.sessionId.localeCompare(b.sessionId) || (a.sequence ?? 0) - (b.sequence ?? 0) || a.id.localeCompare(b.id);
+  });
+}
+
+export function buildRecommendationProfile(events: RecommendationHistoryEvent[], features: RecommendationFeatures, category: string) {
+  const history = mergeRecommendationEvents(events).filter(event => event.category === category);
+  const signals = recommendationSignalsFromHistory(history, category).map(signal => ({ ...signal, featureKeys: features[signal.itemId] ?? [] }));
+  const comparisons = recommendationComparisonsFromHistory(history, category).map(comparison => ({
+    ...comparison,
+    preferredFeatureKeys: features[comparison.preferredItemId] ?? [],
+    removedFeatureKeys: features[comparison.removedItemId] ?? [],
+  }));
+  return { signals, comparisons, consideredIds: [...new Set(signals.map(signal => signal.itemId))] };
+}
+
+/** Pick confident positive retrieval features; a saved title is still only one distinct title. */
+export function recommendationRetrievalFeatures(signals: RecommendationSignal[]): string[] {
+  const titlesByFeature = new Map<string, Set<string>>();
+  for (const signal of signals) for (const key of signal.featureKeys ?? []) {
+    const titles = titlesByFeature.get(key) ?? new Set<string>();
+    titles.add(signal.itemId);
+    titlesByFeature.set(key, titles);
+  }
+  return recommendationPreferenceProfile(signals)
+    .filter(preference => preference.key.startsWith("genre:") && preference.score > 0 && (titlesByFeature.get(preference.key)?.size ?? 0) >= 3)
+    .slice(0, 2).map(preference => preference.key);
+}
+
+/** Most recently acted-on usable evidence, independent of review-pair expansion order. */
+export function recommendationFeatureItemIds(events: RecommendationHistoryEvent[], category: string): string[] {
+  const history = mergeRecommendationEvents(events).filter(event => event.category === category);
+  const signals = recommendationSignalsFromHistory(history, category);
+  const comparisons = recommendationComparisonsFromHistory(history, category);
+  const eligible = new Set([...signals.map(signal => signal.itemId), ...comparisons.flatMap(pair => [pair.preferredItemId, pair.removedItemId])]);
+  return [...new Set([...history].reverse().flatMap(event => event.itemId && eligible.has(event.itemId) ? [event.itemId] : []))];
+}
+
+export function shownCandidateIds(itemId: string, remainingIds: string[]): string[] {
+  return [itemId, ...remainingIds.filter(id => id !== itemId)].slice(0, 100);
 }

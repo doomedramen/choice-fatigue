@@ -1,0 +1,72 @@
+import type { MediaItem } from "@/data";
+import type { RecommendationCategory, RecommendationLane, RecommendationSource } from "@/lib/recommendation-event-validation";
+
+export type FeedOutcome = "ready" | "unconfigured" | "unavailable" | "empty";
+export type CategoryFeedStatus = { outcome: FeedOutcome; enabledSources: number; successfulSources: number; hasTitles: boolean };
+export type FeedStream = {
+  source: RecommendationSource; lane: RecommendationLane; kind?: "scene" | "movie";
+  page: number; features: string[]; done: boolean; retryAt: number | null; fingerprint: string | null;
+};
+export type CandidateBatch = { source: RecommendationSource; lane: RecommendationLane; candidateIds: string[] };
+export type FeedSourceStatus = { source: RecommendationSource; lane: RecommendationLane; kind?: "scene" | "movie"; outcome: "ready" | "empty" | "unavailable"; retryAt: number | null };
+export type DiscoveryFeed = { items: MediaItem[]; batches: CandidateBatch[]; cursor: string | null; hasMore: boolean; status: CategoryFeedStatus; sources: FeedSourceStatus[] };
+export type FeedCursor = { category: RecommendationCategory; streams: FeedStream[] };
+
+export function interleaveItems(groups: MediaItem[][]): MediaItem[] {
+  const items: MediaItem[] = [];
+  for (let index = 0; index < Math.max(0, ...groups.map(group => group.length)); index++) {
+    for (const group of groups) if (group[index]) items.push(group[index]);
+  }
+  return deduplicateTitles(items);
+}
+
+export function deduplicateTitles(items: MediaItem[]) {
+  const ids = new Set<string>(), titles = new Set<string>();
+  return items.filter(item => {
+    const key = `${item.category}:${item.title.trim().toLowerCase().replace(/\s+/g, " ")}:${item.year ?? "unknown-year"}`;
+    if (ids.has(item.id) || titles.has(key)) return false;
+    ids.add(item.id); titles.add(key); return true;
+  });
+}
+
+/** Independent source failures must not discard successful pages or advance failed cursors. */
+export async function advanceFeedStreams(
+  streams: FeedStream[],
+  load: (stream: FeedStream) => Promise<{ items: MediaItem[]; hasMore: boolean }>,
+  fingerprint: (ids: string[]) => string,
+  now = Date.now(),
+) {
+  const next = streams.map(stream => ({ ...stream }));
+  const results = await Promise.all(next.map(async stream => {
+    if (stream.done) return null;
+    try {
+      if (stream.retryAt && stream.retryAt > now) throw { retryAt: stream.retryAt };
+      const result = await load(stream);
+      const ids = [...new Set(result.items.map(item => item.id))].slice(0, 100);
+      const hash = fingerprint(ids);
+      const repeated = stream.fingerprint === hash;
+      stream.fingerprint = hash;
+      stream.done = repeated || !result.hasMore || stream.page >= 500;
+      stream.page += 1;
+      stream.retryAt = null;
+      return { stream, items: repeated ? [] : result.items, ids: repeated ? [] : ids, failed: false };
+    } catch (error) {
+      const retryAt = error && typeof error === "object" && "retryAt" in error ? Number(error.retryAt) : 0;
+      stream.retryAt = Number.isFinite(retryAt) && retryAt > now ? retryAt : null;
+      return { stream, items: [], ids: [], failed: true };
+    }
+  }));
+  const active = results.filter(result => result !== null);
+  const items = interleaveItems(active.map(result => result.items));
+  const sources: FeedSourceStatus[] = active.map(({ stream, items, failed }) => ({
+    source: stream.source, lane: stream.lane, ...(stream.kind ? { kind: stream.kind } : {}),
+    outcome: failed ? "unavailable" : items.length ? "ready" : "empty", retryAt: stream.retryAt,
+  }));
+  const successfulSources = active.filter(result => !result.failed).length;
+  const outcome: FeedOutcome = !streams.length ? "unconfigured" : items.length ? "ready" : active.some(result => result.failed) ? "unavailable" : "empty";
+  return {
+    items, streams: next, sources,
+    batches: active.filter(result => result.ids.length).map(({ stream, ids }) => ({ source: stream.source, lane: stream.lane, candidateIds: ids })),
+    status: { outcome, enabledSources: streams.length, successfulSources, hasTitles: items.length > 0 } satisfies CategoryFeedStatus,
+  };
+}

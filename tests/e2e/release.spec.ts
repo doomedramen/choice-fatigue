@@ -30,7 +30,10 @@ async function resetE2eDatabase() {
   }
 }
 
-test.beforeEach(async () => resetE2eDatabase());
+test.beforeEach(async ({ request }) => {
+  await resetE2eDatabase();
+  await request.post("http://127.0.0.1:4199/__control", { data: { reset: true } });
+});
 
 async function waitForPersistedState(page: import("@playwright/test").Page, expected: { shortlistCount: number; decisionCount: number }) {
   await expect.poll(async () => page.evaluate(async () => {
@@ -160,8 +163,9 @@ test("first run, account access, provider discovery, saved state and account con
   const controlResponse = await request.post("http://127.0.0.1:4199/__control", { data: { failTmdb: true } });
   expect(controlResponse.ok()).toBeTruthy();
   await page.goto("/");
-  await expect(page.getByRole("status").filter({ hasText: "metadata source is temporarily unavailable" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Mock Adult Scene" })).toBeVisible();
+  await page.getByRole("button", { name: "Movies", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "metadata source is temporarily unavailable" })).toBeVisible();
   await request.post("http://127.0.0.1:4199/__control", { data: { failTmdb: false } });
   await request.post("http://127.0.0.1:4199/__control", { data: { malformedAdult: true } });
   await page.getByRole("button", { name: "Movies", exact: true }).click();
@@ -213,4 +217,106 @@ test("first run, account access, provider discovery, saved state and account con
 test("private account APIs reject anonymous access", async ({ request }) => {
   const response = await request.get("http://127.0.0.1:4173/api/discovery-state");
   expect(response.status()).toBe(401);
+});
+
+async function setupRecommendationAdmin(page: import("@playwright/test").Page) {
+  await page.goto("/sign-up");
+  await page.locator('input[name="name"]').fill("Recommendation Admin");
+  await page.locator('input[name="email"]').fill("recommendations@example.test");
+  await page.locator('input[name="password"]').fill(password);
+  await page.locator('input[name="confirmPassword"]').fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
+  await page.goto("/admin");
+  await configure(page);
+}
+
+function learningDecision(itemId: string, index: number, decision: "keep" | "pass" = "keep", category: "Movies" | "Adult" = "Movies") {
+  return { id: `seed-${category}-${index}`, sessionId: "seed", sequence: index, occurredAt: new Date(Date.UTC(2026, 9, 31, 8, 0, index)).toISOString(), itemId, category, eventType: "decision", decision, rating: null, reviewId: null, targetEventId: null, candidateIds: null, algorithmVersion: "content-v3", retrievalId: null, source: null, lane: null };
+}
+
+test("reranking preserves actual shown order and invalid events do not block valid choices", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: true } });
+  await page.goto("/");
+  await expect(page.locator(".card-active h2")).toHaveText("Paged Movie 101");
+  await page.getByRole("button", { name: "Pass, left arrow key" }).click();
+  await expect(page.locator(".card-active h2")).toHaveText("Paged Movie 102");
+  await expect.poll(async () => page.evaluate(async () => {
+    const data = await (await fetch("/api/recommendation-events?category=Movies")).json();
+    return data.events.some((event: { eventType: string; itemId: string; candidateIds: string[] }) => event.eventType === "item_shown" && event.itemId === "tmdb-movie-102" && event.candidateIds[0] === "tmdb-movie-102");
+  })).toBe(true);
+  const valid = learningDecision("tmdb-movie-900", 0);
+  const posted = await page.evaluate(async valid => {
+    const invalid = { ...valid, id: "invalid-trace", eventType: "item_shown", decision: null, candidateIds: ["tmdb-movie-901"] };
+    return (await fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events: [invalid, valid] }) })).json();
+  }, valid);
+  expect(posted.acceptedIds).toEqual([valid.id]);
+  expect(posted.rejected).toMatchObject([{ id: "invalid-trace", code: "invalid" }]);
+  await page.getByRole("button", { name: "Shortlist, right arrow key" }).click();
+  await expect.poll(async () => page.evaluate(async () => {
+    const data = await (await fetch("/api/account/export")).json();
+    return data.recommendationHistory.some((event: { eventType: string; itemId: string; decision: string }) => event.eventType === "decision" && event.itemId === "tmdb-movie-102" && event.decision === "keep");
+  })).toBe(true);
+  await expect(page.getByText(/recommendation events were rejected/)).toHaveCount(0);
+});
+
+test("paging past 100 accumulated candidates keeps traces bounded and learning usable", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: true } });
+  const past = Array.from({ length: 105 }, (_, index) => learningDecision(`tmdb-movie-${101 + index}`, index, "pass"));
+  const accepted = await page.evaluate(async events => (await fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) })).json(), past);
+  expect(accepted.acceptedIds).toHaveLength(105);
+  await page.goto("/");
+  await expect(page.locator(".card-active h2")).toContainText(/Paged Movie 2\d\d/, { timeout: 30_000 });
+  await page.getByRole("button", { name: "Shortlist, right arrow key" }).click();
+  await expect.poll(async () => page.evaluate(async () => {
+    const data = await (await fetch("/api/account/export")).json();
+    return data.recommendationHistory.filter((event: { eventType: string; decision: string }) => event.eventType === "decision" && event.decision === "keep").length;
+  })).toBe(1);
+  const traces = await page.evaluate(async () => {
+    const data = await (await fetch("/api/account/export")).json();
+    return data.recommendationHistory.filter((event: { category: string; candidateIds: string[] | null }) => event.category === "Movies" && event.candidateIds);
+  });
+  expect(traces.every((event: { candidateIds: string[] }) => event.candidateIds.length <= 100)).toBe(true);
+  expect(new Set(traces.filter((event: { eventType: string }) => event.eventType === "candidate_batch").flatMap((event: { candidateIds: string[] }) => event.candidateIds)).size).toBeGreaterThan(100);
+});
+
+test("profiles retrieve niche candidates, Adult access gates hydration, and provider failures are isolated", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  const cold = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
+  expect(cold.items.some((item: { id: string }) => item.id === "tmdb-movie-9001")).toBe(false);
+  const seed = [901, 902, 903].map((id, index) => learningDecision(`tmdb-movie-${id}`, index));
+  await page.evaluate(async events => fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) }), seed);
+  const personalized = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
+  expect(personalized.items.some((item: { id: string }) => item.id === "tmdb-movie-9001")).toBe(true);
+  expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "personalized")).toBe(true);
+  expect(await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status)).toBe(403);
+  expect(await page.evaluate(async () => (await fetch("/api/recommendation-events?category=Adult")).status)).toBe(403);
+  const beforeGrant = await (await request.get("http://127.0.0.1:4199/__control")).json();
+  expect(beforeGrant.requests.some((entry: { path: string }) => entry.path === "/graphql" || entry.path.startsWith("/theporndb"))).toBe(false);
+  await page.evaluate(async () => {
+    const users = (await (await fetch("/api/admin/users")).json()).users;
+    const user = users.find((user: { email: string }) => user.email === "recommendations@example.test");
+    await fetch("/api/admin/users", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: user.id, adultAllowed: true }) });
+  });
+  const adultSeed = [1, 2, 3].map((id, index) => learningDecision(`stashdb-stash-history-${id}`, index, "keep", "Adult"));
+  await page.evaluate(async events => fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) }), adultSeed);
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: true } });
+  const adult = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).json());
+  expect(adult.items.some((item: { id: string }) => item.id === "stashdb-stash-personalized")).toBe(true);
+  expect(adult.cursor).toBeTruthy();
+  const next = await page.evaluate(async cursor => (await fetch(`/api/discovery-feed?category=Adult&cursor=${encodeURIComponent(cursor)}`)).json(), adult.cursor);
+  expect(next.items.some((item: { id: string }) => item.id === "theporndb-scene-adult-scene-26")).toBe(true);
+  expect(next.items.some((item: { id: string }) => item.id === "stashdb-stash-scene-26")).toBe(true);
+  const sources = await (await request.get("http://127.0.0.1:4199/__control")).json();
+  expect(sources.requests.some((entry: { input?: { input?: { tags?: { modifier: string; value: string[] } } } }) => entry.input?.input?.tags?.modifier === "INCLUDES" && entry.input.input.tags.value.includes("tag-drama"))).toBe(true);
+  await request.post("http://127.0.0.1:4199/__control", { data: { failMovies: true } });
+  const shows = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Shows")).json());
+  const movies = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
+  expect(shows.items.length).toBeGreaterThan(0);
+  expect(movies.status.outcome).toBe("unavailable");
 });

@@ -94,10 +94,14 @@ model RecommendationEvent {
   rating            Int?
   targetEventId     String?
   algorithmVersion  String
+  occurredAt        DateTime @default(now())
+  retrievalId       String?
+  source            String?
+  lane              String?
   createdAt         DateTime @default(now())
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, category, createdAt])
+  @@index([userId, category, occurredAt])
   @@index([userId, sessionId, sequence])
   @@index([userId, targetEventId])
 }

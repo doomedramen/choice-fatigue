@@ -1,7 +1,7 @@
 # Choice Fatigue recommendation plan
 
-**Status:** The first research-informed content baseline supports confidence shrinkage, transient historical feature lookup, saved-title retention, and same-review comparisons. The offline comparison tool is implemented but remains unvalidated until representative traces are available; timestamps, diversity, and outcome measurement are still open. See the [primary-source research and code audit](recommendation-algorithm-research.md).
-**Date:** 30 October 2026
+**Status:** `content-v3` implements a single corrected event history, reliable per-event delivery, profile-aware candidate retrieval, paginated Adult feeds, and chronological impression replay. Ranking weights and retrieval thresholds remain engineering defaults, not validated improvements in user outcomes.
+**Updated:** 31 October 2026
 
 ## Product goal
 
@@ -34,7 +34,7 @@ The current implementation is a deterministic content heuristic. It uses **short
 ### 1. Build an eligible candidate set
 
 - Respect the selected category and its access rules.
-- Exclude titles already seen in the current session, plus titles the user has permanently hidden or saved when that matches their settings.
+- Exclude previously considered or saved provider IDs across the account history, plus current deck decisions. Undo retracts consideration and makes a title eligible again.
 - Do not let Adult choices affect Movies or Shows profiles, or the reverse.
 - Keep service availability (already in a library or already requested) as an eligibility or display signal, separate from taste.
 
@@ -42,17 +42,23 @@ The current implementation is a deterministic content heuristic. It uses **short
 
 The current ranker uses source genres, release decade, and title type. It shrinks sparse evidence toward neutral; decade and type use smaller hand-set weights (0.25 each), and genre features use 1.0. Provider ratings do not affect preference scores because they are not comparable across sources. These weights and the review comparison coefficient are still unvalidated. Category is a strict candidate boundary: the selected category is ranked on its own, and Adult choices cannot affect Movies or Shows.
 
-Discovery requests provider-ranked feeds directly when the page opens; no background sync or manual catalogue preloading is required. TMDB supplies two popularity-sorted pages each for Movies and Shows, and enabled Adult providers supply their current Adult feeds. Responses use `no-store` and are not copied into PostgreSQL. Stable provider IDs keep account swipe history attached to titles across requests; IDs are the only media data retained in discovery state and recommendation events. Adult-flagged TMDB results are excluded, and Adult feeds are only requested for accounts with access. Local fixture rows remain development-only.
+Discovery uses the same category-and-cursor retrieval path for initial loading and pagination. Each enabled source supplies one page per lane on each refill. Cold start uses only provider popularity order; once a genre/tag has positive evidence from at least three distinct titles, up to two such features can seed an additional personalized lane. This threshold and the deterministic lane interleaving are unvalidated defaults. Passes never become hard genre exclusions.
 
-Historical profile reads now resolve features for a bounded set of prior provider IDs that are absent from the current feed. Those lookups are direct, transient, and uncached; only the resulting compact feature keys live in the response and client memory. The profile API still omits event timestamps, so recency weighting cannot be computed.
+TMDB supplies popular Movies and Shows plus an OR-filtered genre lane. Genre names map to the provider's current genre IDs. StashDB supplies popular scenes plus an OR-filtered tag lane using that provider's own transient tag IDs. ThePornDB scene and movie feeds paginate independently and are ranked locally; no undocumented tag-filter parameters are sent. Sources interleave deterministically before local scoring, with stable-ID and conservative title/year deduplication. Lane queries stay fixed through pagination and refresh after a saved review; popular pagination is retained. The continuation cursor preserves completed lanes and `hasMore` distinguishes whether further pages remain.
+
+Responses use `no-store` and are not copied into PostgreSQL. Stable provider IDs attach account history to titles across requests. Adult-flagged TMDB results are excluded; Adult feeds and hydration require both instance enablement and the account grant. Local fixtures are test/development-only.
+
+Historical profile reads prioritize the most recently acted-on distinct titles, including saves and review comparison participants. Up to twelve missing IDs are hydrated per category read. All provider requests share a four-request process concurrency limit and eight-second request timeouts. Failed lanes preserve their page; successful lanes remain usable. HTTP 429 establishes a provider cooldown from `Retry-After`, with a thirty-second fallback. There is no background metadata polling. Compact feature keys and source tag mappings remain transient; response coverage distinguishes unresolved or budget-omitted evidence from neutral taste.
 
 ### Historical replay
 
 Run `pnpm eval:replay -- account-export.json` on a user-authorized account export while the app's `DATABASE_URL` and `INTEGRATION_CREDENTIALS_KEY` are available in `.env`. The evaluator reads only provider IDs, categories, timestamps, decisions, and ordered candidate-ID traces from the export. It resolves current source features transiently from enabled providers, with at most 500 lookups and four concurrent requests, and never writes title metadata to disk or the database. Adult metadata is resolved only when both the exported account grant and instance Adult switch are enabled.
 
-For each traced session, the evaluator compares provider order with the current ranker using historical preference evidence available before that session. It reports shortlist and save mean reciprocal rank and recall at 5 and 10, plus descriptive observed impressions and cards to first save. The report gives eligible, requested, resolved, and limit-omitted metadata counts overall, plus candidate metadata coverage by category, so the 500-lookup cap cannot make overall coverage appear higher. Results are limited to candidate IDs whose current metadata can be resolved. Provider metadata may have changed since the session, and users' later choices were observed under the product's displayed policy. These are offline descriptive comparisons, not causal estimates of a different policy's behavior. Do not tune weights or pool accounts based on low-coverage or insufficiently representative traces; do not pool accounts without an appropriate consent and privacy process.
+Replay requires a fresh `content-v3` export. At each shown-item event it reconstructs the preceding event history and fetched candidate batches, applies the same correction reducer and twelve-ID historical feature budget, and compares rankings on matched candidate sets. It includes later pagination and within-run learning rather than evaluating only the first deck. The report distinguishes the mixed candidate pool from its popularity-only subset; personalized retrieval yield is descriptive and cannot estimate causal improvements from unobserved alternative titles.
 
-The baseline represents confidence as well as preference. A few passes are shrunk toward neutral. Profiles are rebuilt from event history after corrections, while current-session decisions are applied separately from durable cross-session taste.
+Reports include shortlist/save mean reciprocal rank and recall at 5/10, review retention, observed cards before the first save, per-category metadata coverage, historical lookup-budget coverage, and per-source/lane unique candidate and outcome counts. Low or unresolved metadata coverage excludes predictions and must be considered when reading metrics. Provider metadata is current, browser clocks are approximate, and historical choices reflect the displayed policy. These comparisons are observational, not causal. Do not tune weights from low-coverage traces or pool accounts without appropriate consent.
+
+The baseline represents confidence as well as preference. A few passes are shrunk toward neutral. The same corrected event reducer serves discovery, the account profile, and replay; pending client events merge with persisted events by ID and never count twice.
 
 ### 3. Score for two outcomes
 
@@ -79,11 +85,15 @@ The discovery record remains a mutable session snapshot for UI restore. A separa
 - whether an action was undone or later restored;
 - the algorithm version that ordered the item.
 
-Feed-load and shown-item events also retain ordered provider item IDs for chronological replay. They do not retain titles or provider metadata. `content-v2` records these candidate snapshots while the API continues accepting queued `content-v1` events.
+`content-v3` records occurrence timestamps separately from receipt timestamps. `candidate_batch` events record provider, popular/personalized lane, retrieval-group ID, and up to 100 ordered provider IDs per fetched batch. `item_shown` records the actual locked card first and up to 99 remaining candidates. No event contains titles or provider metadata. Each browser run has a fresh event session ID independent of the restored UI snapshot; there is no active-session exclusion.
 
-Keep the current saved/shortlist snapshot for fast UI restore. Treat the event history as the source for preference learning. Store only the fields needed to explain and reproduce those preferences. The account page can clear this history without deleting the active session snapshot.
+`POST /api/recommendation-events` acknowledges valid events individually and identifies rejected events by ID/index/code. The client bounds batches by encoded bytes, splits oversized requests, retries transient failures, and quarantines permanently rejected events with a visible error so they cannot block later choices. The outbox uses `choice-fatigue-learning-v3-<userId>`; quarantine uses `choice-fatigue-learning-quarantine-<userId>`.
 
-Profile reads are category-scoped; durable swipe signals exclude the active session so current decisions are not counted twice. Saved-title signals and same-review comparisons are separate evidence and can affect the active session after a save. Explicit undo retracts the targeted initial decision; shortlist withdrawal and review removal preserve the original consideration signal. Saved and removed titles in the same review contribute a bounded pairwise similarity comparison. Adult choices never influence Movies or Shows. Media metadata must be resolved from provider IDs on demand and remain transient; do not add title, genre, rating, synopsis, artwork, or provider-response snapshots to persistent history.
+The development migration `20261031050000_recommendations_v3` replaces old learning traces and mutable discovery decisions, preserves saved provider IDs, and seeds saved retention events. No legacy event contract is accepted. It is intentionally a breaking development migration, not a production-history conversion.
+
+Keep the current saved/shortlist snapshot for fast UI restore. Treat the event history as the source for preference learning. Store only the fields needed to explain and reproduce those preferences. The account page can clear this history without deleting saved titles or the active UI snapshot. Those retained IDs no longer train taste until new deliberate actions provide evidence.
+
+Profile reads return category-scoped events, transient features by item ID, and coverage. All preference evidence comes from events; UI decisions only restore/filter the deck. Saved-title signals and same-review comparisons are separate evidence and can affect the active session after a save. Explicit undo retracts the targeted initial decision; shortlist withdrawal and review removal preserve the original consideration signal. Saved and removed titles in the same review contribute a bounded pairwise similarity comparison. Adult choices never influence Movies or Shows. Media metadata must be resolved from provider IDs on demand and remain transient; do not add title, genre, rating, synopsis, artwork, or provider-response snapshots to persistent history.
 
 ## Adult-section boundary
 
@@ -91,7 +101,7 @@ Keep the Adult profile, signals, candidates, and retrieval isolated from general
 
 ## Evaluation and rollout
 
-1. **Implemented baseline:** corrected swipe semantics, bounded transient provider-ID feature lookup, confidence shrinkage, saved-title retention, and same-review comparisons.
+1. **Implemented baseline:** one corrected history, bounded provider hydration, confidence shrinkage, saved retention, same-review comparisons, profile-aware retrieval, and independent source pagination/failures.
 2. **Establish baselines:** candidate and shown-order IDs are now logged. Compare provider popularity order, the current heuristic, and confidence-aware variants using chronological replay. Avoid future leakage and re-resolve features only as current-source approximations.
 3. **Measure the choice funnel:** shortlist rate, review retention, saves, cards before first shortlist/final save, variety, and a lightweight satisfaction response. Check calibration only when there are enough examples.
 4. **Run an opt-in randomized comparison** after logs capture policy assignment, shown positions, and selection probabilities; retain a reset/disable control.

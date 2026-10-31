@@ -4,14 +4,18 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { useRouter } from "next/navigation";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
-import { rankSessionRecommendations, recommendationSignalsFromHistory, type RecommendationComparison, type RecommendationSignal } from "@/lib/recommendations";
+import { rankRecommendations, buildRecommendationProfile, mergeRecommendationEvents, recommendationFeatureKeys, shownCandidateIds, type RecommendationFeatures } from "@/lib/recommendations";
+import { isValidRecommendationEvent, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
+import { recommendationEventBatch, settleRecommendationBatch } from "@/lib/recommendation-outbox";
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
 import { createClientUuid } from "@/lib/client-uuid";
-import type { CategoryFeedStatus } from "@/lib/catalogue";
+import { deduplicateTitles, type DiscoveryFeed, type CandidateBatch } from "@/lib/discovery-feed";
 
 type Decision = "keep" | "pass" | "seen";
-type TmdbCategory = "Movies" | "Shows";
-type DiscoveryPageState = Record<TmdbCategory, { hasMore: boolean; loading: boolean; error: string }>;
+type DiscoveryPageState = Record<Category, { feed: DiscoveryFeed; loading: boolean; error: string }>;
+function discoveryPageState(feed: DiscoveryFeed) {
+  return { feed, loading: false, error: feed.sources.some(source => source.outcome === "unavailable") ? "A metadata source could not load. Try again to request more titles." : "" };
+}
 interface SessionState {
   sessionId: string;
   eventSequence: number;
@@ -27,7 +31,7 @@ interface SessionState {
   view: "discover" | "review";
   ageVerified: boolean;
 }
-type LearningEvent = { id: string; sessionId: string; reviewId: string | null; sequence: number; itemId: string | null; candidateIds?: string[] | null; category: Category; eventType: string; decision: Decision | null; rating: number | null; targetEventId: string | null; algorithmVersion: "content-v2" };
+type LearningEvent = RecommendationEventInput;
 const initialState = (): SessionState => ({ sessionId:"", eventSequence:0, reviewId:null, category:"Movies", lockedItemId:null, decisions:{}, ratings:{}, shortlisted:[], saved:[], history:[], reviewRemoved:[], view:"discover", ageVerified:false });
 const seerrAvailabilityLabels: Record<string, string> = {
   "not-listed": "No matching result in Seerr",
@@ -108,13 +112,12 @@ interface DiscoveryClientProps {
   isAdmin: boolean;
   adultSectionEnabled: boolean;
   mediaItems: MediaItem[];
-  catalogueNotice: string;
-  categoryOutcomes: Record<Category, CategoryFeedStatus>;
+  initialFeeds: Record<Category, DiscoveryFeed>;
   seerrConnections: Array<{ id: string; name: string }>;
   plexConnections: Array<{ id: string; name: string }>;
 }
 
-export default function DiscoveryClient({ appName, userName, userId, isAdmin, adultSectionEnabled, mediaItems, catalogueNotice, categoryOutcomes, seerrConnections, plexConnections }: DiscoveryClientProps) {
+export default function DiscoveryClient({ appName, userName, userId, isAdmin, adultSectionEnabled, mediaItems, initialFeeds, seerrConnections, plexConnections }: DiscoveryClientProps) {
   const router = useRouter();
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
@@ -127,12 +130,11 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const [savedOpen, setSavedOpen] = useState(false);
   const [resolvedSavedItems, setResolvedSavedItems] = useState<Record<string, MediaItem>>({});
   const [catalogueItems, setCatalogueItems] = useState(mediaItems);
-  const [discoveryPages, setDiscoveryPages] = useState<DiscoveryPageState>(() => ({
-    Movies: { hasMore: categoryOutcomes.Movies.outcome === "ready", loading: false, error: "" },
-    Shows: { hasMore: categoryOutcomes.Shows.outcome === "ready", loading: false, error: "" },
-  }));
-  const nextDiscoveryPage = useRef<Record<TmdbCategory, number>>({ Movies: 3, Shows: 3 });
-  const discoveryPagesInFlight = useRef(new Set<TmdbCategory>());
+  const [discoveryPages, setDiscoveryPages] = useState<DiscoveryPageState>(() => Object.fromEntries(
+    categories.map(category => [category, discoveryPageState(initialFeeds[category])]),
+  ) as DiscoveryPageState);
+  const discoveryPagesInFlight = useRef(new Set<Category>());
+  const feedCursors = useRef<Record<Category, string | null>>({ Movies: initialFeeds.Movies.cursor, Shows: initialFeeds.Shows.cursor, Adult: initialFeeds.Adult.cursor });
   const resolvingSavedIds = useRef(new Set<string>());
   const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
   const [selectedPlexId, setSelectedPlexId] = useState(plexConnections[0]?.id ?? "");
@@ -158,55 +160,50 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const learningQueue = useRef<LearningEvent[]>([]);
   const learningWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const learningSequence = useRef(0);
-  const [historicalProfile, setHistoricalProfile] = useState<{ category: Category; sessionId: string; signals: RecommendationSignal[]; comparisons: RecommendationComparison[]; consideredIds: string[] }>({ category: "Movies", sessionId: "", signals: [], comparisons: [], consideredIds: [] });
-  const activeRecommendationContext = useRef({ category: session.category, sessionId: session.sessionId });
-  activeRecommendationContext.current = { category: session.category, sessionId: session.sessionId };
+  const runId = useRef("");
+  const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
+  const [featuresByItemId, setFeaturesByItemId] = useState<RecommendationFeatures>({});
+  const [learningError, setLearningError] = useState("");
+  const [loadedProfileCategories, setLoadedProfileCategories] = useState<Set<Category>>(() => new Set());
+  const activeCategory = useRef(session.category);
+  activeCategory.current = session.category;
   const catalogue = catalogueItems.filter(item => adultSectionEnabled || item.category !== "Adult");
   const categoryItems = catalogue.filter(item => item.category === session.category);
-  const categoryItemSignature = categoryItems.map(item => item.id).join(",");
-  const historicalSignals = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.signals : [];
-  const historicalComparisons = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.comparisons : [];
-  const historicalConsideredIds = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.consideredIds : [];
-  const savedIds = new Set(session.saved);
-  const recommendationSignals = [
-    ...historicalSignals.filter(signal => !(signal.weight === 1.5 && savedIds.has(signal.itemId))),
-    ...[...savedIds].map(itemId => ({ itemId, decision: "keep" as const, weight: 1.5 })),
-  ];
-  const recommendations = rankSessionRecommendations(categoryItems, session.decisions, session.ratings, recommendationSignals, historicalComparisons);
+  const localFeatures = Object.fromEntries([...catalogue, ...Object.values(resolvedSavedItems)].map(item => [item.id, recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type })]));
+  const profile = buildRecommendationProfile(learningEvents, { ...featuresByItemId, ...localFeatures }, session.category);
+  const recommendations = rankRecommendations(categoryItems, profile.signals, profile.comparisons);
   const items = recommendations.items;
-  const queuedConsideredIds = recommendationSignalsFromHistory(learningQueue.current, null, session.category).map(signal => signal.itemId);
-  const previouslyConsideredIds = new Set([...historicalSignals.map(signal => signal.itemId), ...historicalConsideredIds, ...queuedConsideredIds]);
-  const remainingItems = items.filter(candidate => !session.decisions[candidate.id] && !previouslyConsideredIds.has(candidate.id));
-  const item = remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0];
+  const previouslyConsideredIds = new Set(profile.consideredIds);
+  const retainedIds = new Set([...session.saved, ...session.shortlisted]);
+  const remainingItems = items.filter(candidate => !session.decisions[candidate.id] && !retainedIds.has(candidate.id) && !previouslyConsideredIds.has(candidate.id));
+  const categoryOutcomes = Object.fromEntries(categories.map(category => [category, discoveryPages[category].feed.status])) as Record<Category, DiscoveryFeed["status"]>;
+  const catalogueNotice = discoveryPages[session.category].feed.sources.some(source => source.outcome === "unavailable") ? "A metadata source is temporarily unavailable. Available titles are still shown." : "";
+  const item = loadedProfileCategories.has(session.category) ? remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0] : undefined;
   const nextItem = remainingItems.find(candidate => candidate.id !== item?.id);
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const seenCount = categoryItems.length - categoryItems.filter(candidate => !session.decisions[candidate.id]).length;
 
-  useEffect(() => setCatalogueItems(mediaItems), [mediaItems]);
-
-  async function loadMoreDiscoveries(category: TmdbCategory) {
-    if (discoveryPagesInFlight.current.has(category) || !discoveryPages[category].hasMore) return;
+  async function loadMoreDiscoveries(category: Category, refresh = false) {
+    if (discoveryPagesInFlight.current.has(category) || (!refresh && !discoveryPages[category].feed.hasMore)) return;
     discoveryPagesInFlight.current.add(category);
     setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], loading: true, error: "" } }));
-    const page = nextDiscoveryPage.current[category];
     try {
-      const response = await fetch(`/api/discovery-feed?category=${category}&page=${page}`, { cache: "no-store" });
+      const query = new URLSearchParams({ category });
+      const cursor = feedCursors.current[category];
+      if (cursor) query.set("cursor", cursor);
+      if (refresh) query.set("refresh", "1");
+      const response = await fetch(`/api/discovery-feed?${query}`, { cache: "no-store" });
       if (response.status === 401) { window.location.replace("/sign-in"); return; }
-      const result = await response.json() as { items?: MediaItem[]; hasMore?: boolean; error?: string };
-      if (!response.ok || !Array.isArray(result.items) || typeof result.hasMore !== "boolean") throw new Error(result.error || "More titles could not be loaded.");
-      nextDiscoveryPage.current[category] = page + 1;
-      setCatalogueItems(current => {
-        const knownIds = new Set(current.map(candidate => candidate.id));
-        const additions = result.items!.filter(candidate => {
-          if (candidate.category !== category || knownIds.has(candidate.id)) return false;
-          knownIds.add(candidate.id);
-          return true;
-        });
-        return [...current, ...additions];
-      });
-      setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], hasMore: result.hasMore === true } }));
+      const result = await response.json() as DiscoveryFeed & { error?: string };
+      if (!response.ok || !Array.isArray(result.items) || !Array.isArray(result.batches) || !result.status) throw new Error(result.error || "More titles could not be loaded.");
+      feedCursors.current[category] = result.cursor;
+      const retrievalId = createClientUuid();
+      for (const batch of result.batches) recordCandidateBatch(category, batch, retrievalId);
+      setCatalogueItems(current => deduplicateTitles([...current, ...result.items.filter(candidate => candidate.category === category)]));
+      const failed = result.sources.some(source => source.outcome === "unavailable");
+      setDiscoveryPages(current => ({ ...current, [category]: { feed: { ...result, status: current[category].feed.status.hasTitles ? { ...result.status, outcome: "ready", hasTitles: true } : result.status }, loading: false, error: failed ? "A metadata source could not load. Available titles are still shown." : "" } }));
     } catch (error) {
       setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], error: error instanceof Error ? error.message : "More titles could not be loaded." } }));
     } finally {
@@ -217,10 +214,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
 
   useEffect(() => {
     const category = session.category;
-    if ((category === "Movies" || category === "Shows") && session.view === "discover" && remainingItems.length <= 5 && discoveryPages[category].hasMore && !discoveryPages[category].loading && !discoveryPages[category].error) {
+    if (ready && loadedProfileCategories.has(category) && session.view === "discover" && remainingItems.length <= 5 && discoveryPages[category].feed.hasMore && !discoveryPages[category].loading && !discoveryPages[category].error) {
       void loadMoreDiscoveries(category);
     }
-  }, [session.category, session.view, remainingItems.length, discoveryPages]);
+  }, [ready, loadedProfileCategories, session.category, session.view, remainingItems.length, discoveryPages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,21 +231,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
         const serverLoaded = { ...initialState(), ...serverStored };
         stateRevision.current = Number(response.headers.get("x-discovery-state-revision") ?? 0);
         serverBaseState.current = JSON.parse(JSON.stringify(serverLoaded)) as SessionState;
-        let stored: Partial<SessionState> = serverStored;
-        let hasLegacyState = false;
-        if (response.headers.get("x-discovery-state-exists") === "false") {
-          try {
-            const legacy = localStorage.getItem("elsewhere-discovery-v1");
-            if (legacy) {
-              const parsed = JSON.parse(legacy) as Omit<Partial<SessionState>, "category"> & { category?: Category | "TV" | "Anime" };
-              const validShape = parsed && ["Movies", "Shows", "TV", "Anime", "Adult"].includes(parsed.category ?? "") && typeof parsed.decisions === "object" && parsed.decisions !== null && Array.isArray(parsed.shortlisted) && Array.isArray(parsed.saved) && Array.isArray(parsed.history) && Array.isArray(parsed.reviewRemoved) && (parsed.view === "discover" || parsed.view === "review") && typeof parsed.ageVerified === "boolean";
-              if (validShape) { stored = { ...parsed, category: parsed.category === "Anime" || parsed.category === "TV" ? "Shows" : parsed.category }; hasLegacyState = true; }
-            }
-          } catch { /* Ignore invalid browser-local data and start clean. */ }
-        }
         if (cancelled) return;
-        const next = { ...initialState(), ...stored };
-        if (!next.sessionId) next.sessionId = createClientUuid();
+        const next = { ...initialState(), ...serverStored };
+        if (!runId.current) runId.current = createClientUuid();
+        next.sessionId = runId.current;
         if (typeof next.eventSequence !== "number" || next.eventSequence < 0) next.eventSequence = 0;
         if (typeof next.reviewId !== "string") next.reviewId = null;
         learningSequence.current = next.eventSequence;
@@ -257,7 +243,6 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
         const availableIds = new Set(catalogue.map(candidate => candidate.id));
         if (next.lockedItemId && (!availableIds.has(next.lockedItemId) || next.decisions[next.lockedItemId] || !catalogue.some(candidate => candidate.id === next.lockedItemId && candidate.category === next.category))) next.lockedItemId = null;
         setSession(next);
-        if (hasLegacyState) { try { localStorage.setItem("choice-fatigue-legacy-pending", "1"); } catch { /* Continue without browser-local migration bookkeeping. */ } }
         setReady(true);
       } catch {
         if (!cancelled) setLoadError("We couldn’t load your discovery session. Check your connection and try again.");
@@ -267,32 +252,30 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     return () => { cancelled = true; };
   }, [adultSectionEnabled, loadAttempt]);
 
+  const loadedOutbox = useRef(false);
   useEffect(() => {
-    if (!ready || !session.sessionId) return;
-    async function loadLearningData() {
-      const queueKey = `choice-fatigue-learning-${userId}`;
+    if (!ready) return;
+    if (!loadedOutbox.current) {
+      loadedOutbox.current = true;
       try {
-        const storedQueue = localStorage.getItem(queueKey);
-        if (storedQueue) {
-          const parsed = JSON.parse(storedQueue) as LearningEvent[];
-          if (Array.isArray(parsed)) {
-            learningQueue.current = parsed.filter(event => event && typeof event.id === "string" && typeof event.sessionId === "string");
-            const currentSessionSequence = learningQueue.current.filter(event => event.sessionId === session.sessionId).reduce((latest, event) => Math.max(latest, event.sequence + 1), 0);
-            learningSequence.current = Math.max(learningSequence.current, currentSessionSequence);
-          }
+        const stored = JSON.parse(localStorage.getItem(`choice-fatigue-learning-v3-${userId}`) ?? "[]") as unknown;
+        if (Array.isArray(stored)) {
+          learningQueue.current = mergeRecommendationEvents(learningQueue.current, stored.filter(isValidRecommendationEvent));
+          setLearningEvents(current => mergeRecommendationEvents(current, learningQueue.current));
         }
-      } catch { /* Keep any in-memory queued events when browser storage is unavailable. */ }
-      if (learningQueue.current.length) {
-        const context = { category: session.category, sessionId: session.sessionId };
-        const queuedSignals = recommendationSignalsFromHistory(learningQueue.current, context.sessionId, context.category);
-        const queuedConsideredIds = recommendationSignalsFromHistory(learningQueue.current, null, context.category).map(signal => signal.itemId);
-        setHistoricalProfile({ ...context, signals: queuedSignals, comparisons: [], consideredIds: queuedConsideredIds });
-        await flushLearningQueue();
-      }
-      await refreshHistoricalProfile();
+      } catch { /* The outbox still works in memory when storage is unavailable. */ }
     }
-    void loadLearningData();
-  }, [ready, session.sessionId, session.category, userId, adultSectionEnabled]);
+    void flushLearningQueue().then(() => refreshHistoricalProfile());
+  }, [ready, session.category, userId, adultSectionEnabled]);
+
+  useEffect(() => {
+    const retry = () => {
+      if (learningQueue.current.some(event => adultSectionEnabled || event.category !== "Adult")) void flushLearningQueue().then(() => refreshHistoricalProfile());
+    };
+    const timer = window.setInterval(retry, 15_000);
+    window.addEventListener("online", retry);
+    return () => { window.clearInterval(timer); window.removeEventListener("online", retry); };
+  }, [userId, adultSectionEnabled]);
 
   async function persistSnapshot(snapshot: SessionState, version: number) {
     let local = JSON.parse(JSON.stringify(snapshot)) as SessionState;
@@ -317,70 +300,77 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
       if (!response.ok) throw new Error("Discovery state save failed.");
       stateRevision.current = Number(response.headers.get("x-discovery-state-revision") ?? stateRevision.current + 1);
       serverBaseState.current = JSON.parse(JSON.stringify(local)) as SessionState;
-      try {
-        if (localStorage.getItem("choice-fatigue-legacy-pending") === "1") {
-          localStorage.removeItem("elsewhere-discovery-v1");
-          localStorage.removeItem("choice-fatigue-legacy-pending");
-        }
-      } catch { /* Browser storage is optional once the server copy is saved. */ }
       if (version === saveVersion.current) setSaveStatus("saved");
       return;
     }
     throw new Error("Discovery state kept changing in another tab. Try again.");
   }
 
+  function persistOutbox() {
+    try { localStorage.setItem(`choice-fatigue-learning-v3-${userId}`, JSON.stringify(learningQueue.current)); } catch { /* Server delivery is still attempted. */ }
+  }
+
   function flushLearningQueue() {
     learningWriteQueue.current = learningWriteQueue.current.catch(() => undefined).then(async () => {
-      const batch = learningQueue.current.filter(event => adultSectionEnabled || event.category !== "Adult").slice(0, 500);
-      if (!batch.length) return;
-      const response = await fetch("/api/recommendation-events", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ events: batch }),
-      });
-      if (!response.ok) return;
-      const data = await response.json() as { acceptedIds?: string[] };
-      const accepted = new Set(data.acceptedIds ?? []);
-      learningQueue.current = learningQueue.current.filter(event => !accepted.has(event.id));
-      try { localStorage.setItem(`choice-fatigue-learning-${userId}`, JSON.stringify(learningQueue.current)); } catch { /* Event delivery is already confirmed by the server. */ }
-    }).catch(() => undefined);
+      let byteLimit = 240 * 1024;
+      while (true) {
+        const deliverable = learningQueue.current.filter(event => adultSectionEnabled || event.category !== "Adult");
+        if (!deliverable.length) return;
+        const batch = recommendationEventBatch(deliverable, byteLimit);
+        if (!batch.length) { setLearningError("A learning event is too large to sync. Your choices are still saved in this browser."); return; }
+        const response = await fetch("/api/recommendation-events", {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events: batch }),
+        });
+        if (response.status === 401) { window.location.replace("/sign-in"); return; }
+        if (response.status === 413 && batch.length > 1) { byteLimit = Math.floor(new TextEncoder().encode(JSON.stringify({ events: batch })).byteLength / 2); continue; }
+        if (!response.ok) { setLearningError("Couldn’t sync recommendation learning. Your choices will retry automatically."); return; }
+        const data = await response.json() as { acceptedIds: string[]; rejected: RejectedRecommendationEvent[] };
+        const result = settleRecommendationBatch(batch, data.acceptedIds, data.rejected);
+        const settledIds = new Set([...result.confirmed, ...result.quarantined].map(event => event.id));
+        if (!settledIds.size) return;
+        learningQueue.current = learningQueue.current.filter(event => !settledIds.has(event.id));
+        persistOutbox();
+        if (result.quarantined.length) {
+          try {
+            const key = `choice-fatigue-learning-quarantine-${userId}`;
+            const stored = JSON.parse(localStorage.getItem(key) ?? "[]");
+            localStorage.setItem(key, JSON.stringify([...(Array.isArray(stored) ? stored : []), ...result.quarantined]));
+          } catch { /* The error remains visible even when storage is unavailable. */ }
+          setLearningError("Some recommendation events were rejected. Other choices continue to sync; rejected events are retained in this browser.");
+        } else setLearningError(current => current.startsWith("Some recommendation") ? current : "");
+      }
+    }).catch(() => { setLearningError("Couldn’t sync recommendation learning. Your choices will retry automatically."); });
     return learningWriteQueue.current;
   }
 
   async function refreshHistoricalProfile() {
-    const context = { ...activeRecommendationContext.current };
-    if (!context.sessionId) return;
+    const category = activeCategory.current;
     try {
-      const query = new URLSearchParams({ category: context.category, excludeSessionId: context.sessionId });
-      for (const candidate of catalogue.filter(item => item.category === context.category).slice(0, 100)) query.append("candidateId", candidate.id);
+      const query = new URLSearchParams({ category });
+      for (const candidate of catalogue.filter(item => item.category === category).slice(0, 100)) query.append("candidateId", candidate.id);
       const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = await response.json() as { signals?: RecommendationSignal[]; comparisons?: RecommendationComparison[]; consideredIds?: string[] };
-      const current = activeRecommendationContext.current;
-      if (current.category === context.category && current.sessionId === context.sessionId) {
-        const savedSignals = Array.isArray(data.signals) ? data.signals : [];
-        const queuedSignals = recommendationSignalsFromHistory(learningQueue.current, context.sessionId, context.category);
-        const queuedConsideredIds = recommendationSignalsFromHistory(learningQueue.current, null, context.category).map(signal => signal.itemId);
-        setHistoricalProfile({
-          ...context,
-          signals: [...savedSignals, ...queuedSignals],
-          comparisons: Array.isArray(data.comparisons) ? data.comparisons : [],
-          consideredIds: [...new Set([...(Array.isArray(data.consideredIds) ? data.consideredIds : []), ...queuedConsideredIds])],
-        });
-      }
-    } catch { /* Discovery continues with the current session's signals. */ }
+      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures };
+      setLearningEvents(current => mergeRecommendationEvents(current, data.events, learningQueue.current));
+      setFeaturesByItemId(current => ({ ...current, ...data.featuresByItemId }));
+    } catch { /* Local decisions remain usable while profile resolution is unavailable. */ }
+    finally { setLoadedProfileCategories(current => new Set([...current, category])); }
   }
 
-  function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null) {
+  function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null, source: LearningEvent["source"] = null, lane: LearningEvent["lane"] = null, retrievalId: string | null = null) {
     const event: LearningEvent = {
-      id: createClientUuid(), sessionId: session.sessionId, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
-      eventType, decision, rating, targetEventId, algorithmVersion: "content-v2",
+      id: createClientUuid(), sessionId: runId.current, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
+      eventType, decision, rating, targetEventId, algorithmVersion: "content-v3", occurredAt: new Date().toISOString(), retrievalId, source, lane,
     };
     learningQueue.current = [...learningQueue.current, event];
-    try { localStorage.setItem(`choice-fatigue-learning-${userId}`, JSON.stringify(learningQueue.current)); } catch { /* The server write below is still attempted. */ }
-    setSession(current => ({ ...current, eventSequence: Math.max(current.eventSequence, event.sequence + 1) }));
+    setLearningEvents(current => mergeRecommendationEvents(current, [event]));
+    persistOutbox();
     void flushLearningQueue();
     return event;
+  }
+
+  function recordCandidateBatch(category: Category, batch: CandidateBatch, retrievalId: string) {
+    enqueueLearningEvent("candidate_batch", null, category, null, null, null, null, batch.candidateIds, batch.source, batch.lane, retrievalId);
   }
 
   useEffect(() => {
@@ -417,22 +407,36 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     }).catch(() => undefined).finally(() => unresolved.forEach(id => resolvingSavedIds.current.delete(id)));
   }, [savedOpen, session.view, session.shortlisted.length, savedLookupKey]);
 
-  const recordedCandidateSets = useRef(new Set<string>());
+  const previousInitialFeeds = useRef(initialFeeds);
   useEffect(() => {
-    if (!ready || !session.sessionId || !categoryItems.length) return;
-    const key = `${session.sessionId}:${session.category}:${categoryItemSignature}`;
-    if (recordedCandidateSets.current.has(key)) return;
-    recordedCandidateSets.current.add(key);
-    enqueueLearningEvent("candidate_set", null, session.category, null, null, null, null, categoryItems.map(candidate => candidate.id));
-  }, [ready, session.sessionId, session.category, categoryItemSignature]);
+    if (previousInitialFeeds.current === initialFeeds) return;
+    previousInitialFeeds.current = initialFeeds;
+    setCatalogueItems(mediaItems);
+    setDiscoveryPages(Object.fromEntries(categories.map(category => [category, discoveryPageState(initialFeeds[category])])) as DiscoveryPageState);
+    feedCursors.current = { Movies: initialFeeds.Movies.cursor, Shows: initialFeeds.Shows.cursor, Adult: initialFeeds.Adult.cursor };
+    if (ready) for (const category of categories) if (category !== "Adult" || adultSectionEnabled) {
+      const retrievalId = createClientUuid();
+      for (const batch of initialFeeds[category].batches) recordCandidateBatch(category, batch, retrievalId);
+    }
+  }, [initialFeeds, mediaItems, ready, adultSectionEnabled]);
+
+  const recordedInitialBatches = useRef(false);
+  useEffect(() => {
+    if (!ready || recordedInitialBatches.current) return;
+    recordedInitialBatches.current = true;
+    for (const category of categories) if (category !== "Adult" || adultSectionEnabled) {
+      const retrievalId = createClientUuid();
+      for (const batch of initialFeeds[category].batches) recordCandidateBatch(category, batch, retrievalId);
+    }
+  }, [ready, initialFeeds, adultSectionEnabled]);
 
   useEffect(() => {
     if (!ready || session.view !== "discover" || !item) return;
-    const key = `${session.sessionId}:${session.history.length}:${session.shortlisted.length}:${item.id}`;
+    const key = `${runId.current}:${session.history.length}:${session.shortlisted.length}:${item.id}`;
     if (shownItemKey.current === key) return;
     shownItemKey.current = key;
-    enqueueLearningEvent("item_shown", item.id, item.category, null, null, null, null, remainingItems.map(candidate => candidate.id));
-  }, [ready, session.view, session.sessionId, item?.id, session.history.length, session.shortlisted.length]);
+    enqueueLearningEvent("item_shown", item.id, item.category, null, null, null, null, shownCandidateIds(item.id, remainingItems.map(candidate => candidate.id)));
+  }, [ready, session.view, item?.id, session.history.length, session.shortlisted.length]);
 
   useEffect(() => {
     if (ratingSelectorOpen) ratingInput.current?.focus();
@@ -621,12 +625,13 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     const count=picks.length;
     const visiblePickIds=picks.map(pick=>pick.id);
     for (const pick of picks) {
-      enqueueLearningEvent("review_kept", pick.id, pick.category);
-      enqueueLearningEvent("saved", pick.id, pick.category);
+      const targetEventId = [...session.history].reverse().find(entry => entry.id === pick.id && entry.decision === "keep")?.eventId ?? null;
+      enqueueLearningEvent("review_kept", pick.id, pick.category, null, null, targetEventId);
+      enqueueLearningEvent("saved", pick.id, pick.category, null, null, targetEventId);
     }
     setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), view:"discover"}));
     setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
-    void flushLearningQueue().then(refreshHistoricalProfile);
+    void flushLearningQueue().then(async () => { await refreshHistoricalProfile(); await loadMoreDiscoveries(session.category, true); });
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;
@@ -721,7 +726,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     window.location.replace("/sign-in");
   }
 
-  if (!ready) return <div className="shell"><main className="main"><section className="content-area"><div className="empty-state" role={loadError ? "alert" : "status"}>
+  if (!ready || !loadedProfileCategories.has(session.category)) return <div className="shell"><main className="main"><section className="content-area"><div className="empty-state" role={loadError ? "alert" : "status"}>
     <div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div>
     <h2>{loadError ? "Your session didn’t load." : "Picking up where you left off…"}</h2>
     <p>{loadError || "Loading your saved choices."}</p>
@@ -757,10 +762,11 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
               {renderMediaCard(item, true)}
             </div>
             <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Pass, left arrow key"><span><Icon name="left"/></span><small>Pass</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last swipe" title="Undo last swipe"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Shortlist, right arrow key"><small>Shortlist</small><span><Icon name="right"/></span></button></div>
-            {(session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].error && <p className="feed-load-error" role="alert">{discoveryPages[session.category].error} <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as TmdbCategory)}>Try again</button></p>}
+            {discoveryPages[session.category].error && <p className="feed-load-error" role="alert">{discoveryPages[session.category].error} <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again</button></p>}
           </div> : <div className="empty-state"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
-            {(session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : (session.category === "Movies" || session.category === "Shows") && discoveryPages[session.category].error ? <><h2>More titles couldn’t load.</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as TmdbCategory)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}
+            {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}
           </div>}
+          {learningError && <p className="sync-error" role="alert">{learningError}</p>}
           {saveStatus === "error" && <p className="sync-error" role="alert">Couldn’t sync your choices. They’ll retry automatically.</p>}
         </div>}
       </section>

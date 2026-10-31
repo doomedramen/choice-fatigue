@@ -1,33 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isValidRecommendationEvent, recommendationEventMatchesCategory, recommendationProviderCategoryForId } from "../src/lib/recommendation-event-validation";
+import { isValidRecommendationEvent, partitionRecommendationEvents, recommendationEventMatchesCategory, recommendationProviderCategoryForId, type RecommendationEventInput } from "../src/lib/recommendation-event-validation";
+import { recommendationEventBatch, settleRecommendationBatch } from "../src/lib/recommendation-outbox";
 
-const baseEvent = {
-  id: "event-1", sessionId: "session-1", reviewId: null, sequence: 1, itemId: null, category: "Movies",
-  eventType: "candidate_set", decision: null, rating: null, targetEventId: null, algorithmVersion: "content-v2",
-} as const;
+const base: RecommendationEventInput = { id: "event-1", sessionId: "session-1", reviewId: null, sequence: 1, itemId: null, category: "Movies", eventType: "candidate_batch", decision: null, rating: null, targetEventId: null, algorithmVersion: "content-v3", occurredAt: "2026-10-31T10:00:00.000Z", retrievalId: "fetch-1", source: "tmdb", lane: "popular", candidateIds: ["tmdb-movie-12", "tmdb-movie-13"] };
+const decision: RecommendationEventInput = { ...base, id: "decision", eventType: "decision", itemId: "tmdb-movie-12", decision: "keep", candidateIds: null, retrievalId: null, source: null, lane: null };
 
-test("accepts bounded ordered candidate IDs and legacy events without candidate IDs", () => {
-  assert.equal(isValidRecommendationEvent({ ...baseEvent, candidateIds: ["tmdb-movie-12", "tmdb-movie-13"] }), true);
-  const legacyShown = { ...baseEvent, itemId: "tmdb-movie-12", eventType: "item_shown" };
-  delete (legacyShown as { candidateIds?: string[] }).candidateIds;
-  assert.equal(isValidRecommendationEvent(legacyShown), true);
+test("accepts v3 source batches and actual shown order; rejects old contracts and metadata", () => {
+  assert.equal(isValidRecommendationEvent(base), true);
+  assert.equal(isValidRecommendationEvent({ ...decision, eventType: "item_shown", decision: null, candidateIds: ["tmdb-movie-12", "tmdb-movie-13"] }), true);
+  for (const change of [{ algorithmVersion: "content-v2" }, { occurredAt: "bad" }, { title: "Cached metadata" }, { candidateIds: ["tmdb-movie-12", "tmdb-movie-12"] }, { candidateIds: Array.from({ length: 101 }, (_, i) => `tmdb-movie-${i + 1}`) }, { source: "stashdb" }]) {
+    assert.equal(isValidRecommendationEvent({ ...base, ...change }), false);
+  }
+  assert.equal(isValidRecommendationEvent({ ...decision, eventType: "item_shown", decision: null, candidateIds: ["tmdb-movie-13", "tmdb-movie-12"] }), false);
 });
-
-test("rejects duplicate, oversized, misordered, and metadata-bearing candidate events", () => {
-  assert.equal(isValidRecommendationEvent({ ...baseEvent, candidateIds: ["tmdb-movie-12", "tmdb-movie-12"] }), false);
-  assert.equal(isValidRecommendationEvent({ ...baseEvent, candidateIds: Array.from({ length: 101 }, (_, i) => `tmdb-movie-${i + 1}`) }), false);
-  assert.equal(isValidRecommendationEvent({ ...baseEvent, eventType: "item_shown", itemId: "tmdb-movie-12", candidateIds: ["tmdb-movie-13"] }), false);
-  assert.equal(isValidRecommendationEvent({ ...baseEvent, candidateIds: ["tmdb-movie-12"], title: "Cached title" }), false);
-});
-
-test("classifies provider IDs into strict media categories", () => {
+test("strict provider IDs prevent category mixing", () => {
   assert.equal(recommendationProviderCategoryForId("tmdb-movie-12"), "Movies");
   assert.equal(recommendationProviderCategoryForId("tmdb-tv-12"), "Shows");
-  assert.equal(recommendationProviderCategoryForId("theporndb-scene-ab12"), "Adult");
+  assert.equal(recommendationProviderCategoryForId("tmdb-movie-0"), null);
   assert.equal(recommendationProviderCategoryForId("stashdb-ab12"), "Adult");
-  assert.equal(recommendationProviderCategoryForId("unknown-12"), null);
-  assert.equal(recommendationEventMatchesCategory({ ...baseEvent, candidateIds: ["tmdb-movie-12"] }, new Map()), true);
-  assert.equal(recommendationEventMatchesCategory({ ...baseEvent, category: "Adult", candidateIds: ["tmdb-movie-12"] } as never), false);
-  assert.equal(recommendationEventMatchesCategory({ ...baseEvent, category: "Adult", candidateIds: ["theporndb-scene-ab12"] } as never), true);
+  assert.equal(recommendationEventMatchesCategory({ ...base, category: "Adult" }), false);
+});
+test("an invalid trace or disabled Adult event cannot block valid decisions", () => {
+  const invalid = { ...base, candidateIds: Array.from({ length: 120 }, (_, i) => `tmdb-movie-${i + 1}`) };
+  const adult = { ...decision, id: "adult", category: "Adult", itemId: "stashdb-abc" };
+  const partition = partitionRecommendationEvents([invalid, decision, adult], false);
+  assert.deepEqual(partition.accepted.map(event => event.id), ["decision"]);
+  assert.deepEqual(partition.rejected.map(event => event.code), ["invalid", "adult_disabled"]);
+});
+test("outbox byte limits and partial acknowledgement allow later events to proceed", () => {
+  const events = [base, decision];
+  const oneSize = new TextEncoder().encode(JSON.stringify({ events: [base] })).byteLength;
+  assert.equal(recommendationEventBatch(events, oneSize).length, 1);
+  const result = settleRecommendationBatch(events, ["decision"], [{ id: base.id, index: 0, code: "invalid" }]);
+  assert.deepEqual(result.confirmed, [decision]);
+  assert.deepEqual(result.quarantined, [base]);
+  assert.deepEqual(result.remaining, []);
+  assert.deepEqual(settleRecommendationBatch(events, [], []).remaining, events);
 });

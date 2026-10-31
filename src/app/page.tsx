@@ -17,7 +17,7 @@ export default async function HomePage() {
     prisma.user.findUnique({ where: { id: session.user.id }, select: { adultAllowed: true } }),
   ]);
   const canAccessAdult = adultAccessEnabled(settings.adultSectionEnabled, user?.adultAllowed === true);
-  const catalogue = await getDiscoveryCatalogue(canAccessAdult);
+  const catalogue = await getDiscoveryCatalogue(session.user.id, canAccessAdult);
   return <DiscoveryClient
     appName={settings.appName}
     userName={session.user.name}
@@ -25,8 +25,7 @@ export default async function HomePage() {
     isAdmin={session.user.role === "admin"}
     adultSectionEnabled={canAccessAdult}
     mediaItems={catalogue.items.filter(item => canAccessAdult || item.category !== "Adult")}
-    catalogueNotice={catalogue.notice}
-    categoryOutcomes={catalogue.categoryOutcomes}
+    initialFeeds={catalogue.feeds}
     seerrConnections={seerrConnections}
     plexConnections={plexConnections}
   />;

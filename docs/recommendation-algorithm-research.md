@@ -58,15 +58,15 @@ More novelty or variety is not automatically better. A human-centered movie-reco
 
 Contextual bandits such as LinUCB combine feature context, reward estimates, and uncertainty to balance exploitation and exploration. The cited news recommender's reward is clicks, and its setup has abundant repeated users/items; those assumptions do not directly fit this private, sparse, explicit-choice app. Bandit exploration should therefore wait until Choice Fatigue has a defined user-value outcome and logs the selection probability needed for evaluation. [Li et al., “A Contextual-Bandit Approach to Personalized News Article Recommendation”](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/p661.pdf)
 
-## Audit of the current implementation
+## Audit of the current implementation (updated for content-v3)
 
 The implementation in [`src/lib/recommendations.ts`](../src/lib/recommendations.ts) is a deterministic content heuristic: keep is `+1`, pass is `−0.5`, a 1–5 rating maps to a hand-set scale, genre is weighted `1.0`, decade and type `0.25`, and feature evidence is shrunk toward neutral. Provider ratings do not affect ranking. Saved outcomes and same-review comparisons add retention evidence. The score is still uncalibrated and unevaluated against Choice Fatigue's final outcome.
 
-Historical events persist item IDs and actions only, as required by the product's data-retention rule. Profile reads now resolve a bounded set of historic IDs that are absent from the current feed directly through provider APIs, then discard metadata after deriving feature keys. Provider lookup failure degrades personalization without preventing discovery. The bounded lookup means older or unresolved events can still be omitted from an active profile.
+Historical events persist item IDs, source/lane identifiers, occurrence timestamps and actions only, as required by the product's data-retention rule. Profile reads now resolve a bounded set of historic IDs that are absent from the current feed directly through provider APIs, then discard metadata after deriving feature keys. Provider lookup failure degrades personalization without preventing discovery. The bounded lookup means older or unresolved events can still be omitted from an active profile.
 
 Other current limitations:
 
-- Historical signals have no timestamps at the ranker boundary, so they cannot be aged or separated into recent and long-term evidence.
+- V3 events retain occurrence and receipt timestamps, but scoring does not yet apply recency decay or fit separate short- and long-term models.
 - Neutral shrinkage reduces the effect of low-count features, but its prior strength is hand-set and not validated.
 - Genres, decade, and type are averaged separately even when they co-occur on the same item. Their hand-set weights do not account for feature correlation or missing metadata.
 - The ranking function ignores provider order after scoring ties, except for stable original order, and has no explicit diversity reranker or repeat suppression policy.
@@ -80,8 +80,8 @@ This is a project-specific direction to validate, not a demand to adopt a comple
 
 ### Stage A: reliable, transparent baseline
 
-1. **Candidate generation:** fetch current provider-popular items on demand. With no profile, preserve provider rank. Filter eligibility and Adult access before ranking.
-2. **Profile reconstruction:** for the selected category, replay corrected explicit outcomes from the account's history. Keep current-session and cross-session evidence separate. Resolve old IDs through provider ID lookups when they are absent from the current feed; keep metadata only in request memory.
+1. **Candidate generation:** fetch provider-popular items plus qualified genre/tag lanes on demand. With no profile, preserve provider rank. Filter eligibility and Adult access before ranking.
+2. **Profile reconstruction:** for the selected category, replay corrected explicit outcomes from the account's history. Merge pending and persisted evidence by event ID; keep UI shortlist membership separate from taste. Resolve old IDs through provider ID lookups when they are absent from the current feed; keep metadata only in request memory.
 3. **Feature scoring:** use a small content vector (first genres, year bucket, media type, and available provider tags). Normalize provider-specific values into a shared vocabulary only where mappings are reliable. Fit a regularized linear preference model or a confidence-shrunk feature score; start at neutral so one pass cannot create certainty. Do not use exposure alone as negative feedback.
 4. **Outcome scoring:** estimate consideration and retention separately. Use explicit pass/keep/rating for consideration; use review-kept/save for retention and within-review kept-over-removed comparisons for relative evidence.
 5. **Reranking:** select the next card by user-fit with a modest novelty/diversity penalty against recent cards. Keep stable provider order as a tie-break and cold-start prior. Add exploration only as an explicitly randomized, logged treatment.

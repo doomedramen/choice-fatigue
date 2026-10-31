@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth-client";
-import { recommendationPreferenceProfile, type RecommendationSignal } from "@/lib/recommendations";
+import { buildRecommendationProfile, recommendationPreferenceProfile, type RecommendationFeatures, type RecommendationSignal } from "@/lib/recommendations";
+import type { RecommendationEventInput } from "@/lib/recommendation-event-validation";
 import "./account.css";
 
 type PreferenceCategory = "Movies" | "Shows" | "Adult";
@@ -32,7 +33,7 @@ function TasteProfile({ revision }: { revision: number }) {
       const loaded: PreferenceProfile[] = [];
       for (const category of ["Movies", "Shows", "Adult"] as const) {
         try {
-          const query = new URLSearchParams({ category, profile: "1" });
+          const query = new URLSearchParams({ category });
           const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
           if (response.status === 401) { window.location.replace("/sign-in"); return; }
           if (category === "Adult" && response.status === 403) continue;
@@ -40,8 +41,8 @@ function TasteProfile({ revision }: { revision: number }) {
             loaded.push({ category, signals: [], failed: true });
             continue;
           }
-          const data = await response.json() as { signals?: RecommendationSignal[] };
-          loaded.push({ category, signals: Array.isArray(data.signals) ? data.signals : [], failed: false });
+          const data = await response.json() as { events: RecommendationEventInput[]; featuresByItemId: RecommendationFeatures };
+          loaded.push({ category, signals: buildRecommendationProfile(data.events, data.featuresByItemId, category).signals, failed: false });
         } catch {
           loaded.push({ category, signals: [], failed: true });
         }
@@ -76,7 +77,7 @@ function TasteProfile({ revision }: { revision: number }) {
         </article>;
       })}
     </div>}
-    <p className="taste-profile-footnote">Title details are fetched when needed and aren’t saved as a local catalogue. Each category summarizes up to four recent titles whose details are available.</p>
+    <p className="taste-profile-footnote">Title details are fetched when needed and aren’t saved as a local catalogue. Each category summarizes up to twelve recent titles whose details are available.</p>
   </section>;
 }
 
@@ -113,16 +114,16 @@ export default function AccountClient({ userId, name, email, isAdmin }: { userId
   }
 
   async function clearRecommendationHistory() {
-    if (!window.confirm("Clear your saved recommendation history? Your current discovery session will continue to influence this session only.")) return;
+    if (!window.confirm("Clear your recommendation history? Saved titles and your shortlist will be kept, but will stop shaping your preferences.")) return;
     setResettingRecommendations(true);
     setRecommendationNotice("");
     try {
       const response = await fetch("/api/recommendation-events", { method: "DELETE" });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "Recommendation history could not be cleared.");
-      try { localStorage.removeItem(`choice-fatigue-learning-${userId}`); } catch { /* Local storage is optional. */ }
+      try { localStorage.removeItem(`choice-fatigue-learning-v3-${userId}`); } catch { /* Local storage is optional. */ }
       setProfileRevision(revision => revision + 1);
-      setRecommendationNotice("Saved recommendation history cleared. Current-session choices still apply until you start a fresh session.");
+      setRecommendationNotice("Saved recommendation history cleared. New choices will build a fresh profile.");
     } catch (cause) {
       setRecommendationNotice(cause instanceof Error ? cause.message : "Recommendation history could not be cleared.");
     } finally {

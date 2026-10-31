@@ -1,4 +1,5 @@
 import "server-only";
+import { requestProviderJson } from "@/lib/providers/request";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
@@ -20,7 +21,7 @@ type ThePornDBRecord = {
   rating?: unknown;
 };
 
-type ThePornDBPayload = { data?: ThePornDBRecord[] | ThePornDBRecord };
+type ThePornDBPayload = { data?: ThePornDBRecord[] | ThePornDBRecord; meta?: { last_page?: number; current_page?: number }; links?: { next?: string | null } };
 
 export class ThePornDBNotEnabledError extends Error {}
 export class ThePornDBRequestError extends Error {}
@@ -39,27 +40,10 @@ async function accessToken() {
 }
 
 async function requestThePornDB<T>(path: string, token: string): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const baseUrl = process.env.NODE_ENV !== "production" ? process.env.THEPORNDB_API_BASE_URL || "https://api.theporndb.net" : "https://api.theporndb.net";
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/${path}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-        "User-Agent": "ChoiceFatigue/0.1",
-      },
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!response.ok) throw new ThePornDBRequestError();
-    return await response.json() as T;
-  } catch (error) {
-    if (error instanceof ThePornDBRequestError) throw error;
-    throw new ThePornDBRequestError();
-  } finally {
-    clearTimeout(timeout);
-  }
+  const baseUrl = process.env.NODE_ENV !== "production" ? process.env.THEPORNDB_API_BASE_URL || "https://api.theporndb.net" : "https://api.theporndb.net";
+  return requestProviderJson<T>("theporndb", `${baseUrl.replace(/\/$/, "")}/${path}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "User-Agent": "ChoiceFatigue/0.1" },
+  });
 }
 
 function text(value: unknown) {
@@ -140,16 +124,17 @@ function popularItem(record: ThePornDBRecord, kind: ThePornDBKind): MediaItem | 
   };
 }
 
-/** Load ThePornDB's relevance-ranked scene and movie feeds on demand. */
-export async function getPopularThePornDBCatalogue(): Promise<MediaItem[]> {
+/** A page from each collection advances independently; provider links are never followed. */
+export async function getThePornDBCataloguePage(kind: ThePornDBKind, page: number) {
+  if (!Number.isSafeInteger(page) || page < 1 || page > 500) throw new ThePornDBRequestError();
   const token = await accessToken();
-  const load = async (kind: ThePornDBKind) => {
-    const params = new URLSearchParams({ orderBy: "most_relevant", per_page: "25", page: "1" });
-    const payload = await requestThePornDB<ThePornDBPayload>(`${apiPath(kind)}?${params.toString()}`, token);
-    return recordsFrom(payload).map(record => popularItem(record, kind)).filter((item): item is MediaItem => item !== null);
-  };
-  const [scenes, movies] = await Promise.all([load("scene"), load("movie")]);
-  return [...scenes, ...movies];
+  const params = new URLSearchParams({ orderBy: "most_relevant", per_page: "25", page: String(page) });
+  const payload = await requestThePornDB<ThePornDBPayload>(`${apiPath(kind)}?${params}`, token);
+  if (!Array.isArray(payload.data)) throw new ThePornDBRequestError();
+  const records = payload.data;
+  const hasMore = typeof payload.meta?.last_page === "number" ? page < payload.meta.last_page
+    : payload.links && "next" in payload.links ? Boolean(payload.links.next) : records.length === 25;
+  return { items: records.map(record => popularItem(record, kind)).filter((item): item is MediaItem => item !== null), hasMore: records.length > 0 && page < 500 && hasMore };
 }
 
 /** Resolve one saved ThePornDB ID on demand without retaining its metadata. */

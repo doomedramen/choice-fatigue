@@ -1,4 +1,5 @@
 import "server-only";
+import { requestProviderJson } from "@/lib/providers/request";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
@@ -33,23 +34,10 @@ export class TmdbAdultResultError extends Error {}
 export { TmdbConfigurationError, TmdbNotEnabledError };
 
 async function requestTmdb<T>(path: string, token: string): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const baseUrl = process.env.NODE_ENV !== "production" ? process.env.TMDB_API_BASE_URL || "https://api.themoviedb.org/3" : "https://api.themoviedb.org/3";
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
-      headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!response.ok) throw new TmdbRequestError();
-    return await response.json() as T;
-  } catch (error) {
-    if (error instanceof TmdbRequestError) throw error;
-    throw new TmdbRequestError();
-  } finally {
-    clearTimeout(timeout);
-  }
+  const baseUrl = process.env.NODE_ENV !== "production" ? process.env.TMDB_API_BASE_URL || "https://api.themoviedb.org/3" : "https://api.themoviedb.org/3";
+  return requestProviderJson<T>("tmdb", `${baseUrl.replace(/\/$/, "")}${path}`, {
+    headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
+  });
 }
 
 function text(value: unknown) {
@@ -133,7 +121,7 @@ export async function getTmdbRecommendationFeatures(mediaType: TmdbMediaType, tm
 
 function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder: number, genresById: Map<number, string>) {
   const mediaType = mediaTypeFor(record, category);
-  if (!mediaType || record.adult === true || typeof record.id !== "number" || record.id < 1) return null;
+  if (!mediaType || record.adult === true || typeof record.id !== "number" || !Number.isSafeInteger(record.id) || record.id < 1) return null;
   const title = titleFor(record, mediaType);
   if (!title) return null;
 
@@ -198,48 +186,28 @@ function catalogueItemsFromRecords(records: TmdbRecord[], category: TmdbCategory
 
 async function getCatalogueGenres(category: TmdbCategory, token: string) {
   const payload = await requestTmdb<TmdbGenrePayload>(`/genre/${category === "Movies" ? "movie" : "tv"}/list?language=en-US`, token);
-  return new Map<number, string>((payload.genres ?? [])
+  if (!Array.isArray(payload.genres)) throw new TmdbRequestError();
+  return new Map<number, string>(payload.genres
     .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
     .map(genre => [genre.id as number, text(genre.name)]));
 }
 
 /** Load one further page of popular titles after the initial discovery batch. */
-export async function getPopularTmdbCataloguePage(category: TmdbCategory, page: number) {
+export async function getTmdbCataloguePage(category: TmdbCategory, page: number, featureKeys: string[] = []) {
   if (!Number.isSafeInteger(page) || page < 1 || page > 500) throw new TmdbRequestError();
   const token = await getEnabledTmdbToken();
   const mediaType = category === "Movies" ? "movie" : "tv";
-  const [genres, payload] = await Promise.all([
-    getCatalogueGenres(category, token),
-    requestTmdb<TmdbSearchPayload>(`/discover/${mediaType}?include_adult=false&${mediaType === "movie" ? "include_video=false&" : "include_null_first_air_dates=false&"}language=en-US&page=${page}&sort_by=popularity.desc`, token),
-  ]);
-  const records = Array.isArray(payload.results) ? payload.results : [];
+  const genres = await getCatalogueGenres(category, token);
+  const genreIds = [...genres].filter(([, name]) => featureKeys.includes(`genre:${name.trim().toLowerCase().replace(/\s+/g, " ")}`)).map(([id]) => id);
+  if (featureKeys.length && !genreIds.length) return { items: [], hasMore: false };
+  const filters = genreIds.length ? `&with_genres=${encodeURIComponent(genreIds.join("|"))}` : "";
+  const payload = await requestTmdb<TmdbSearchPayload>(`/discover/${mediaType}?include_adult=false&${mediaType === "movie" ? "include_video=false&" : "include_null_first_air_dates=false&"}language=en-US&page=${page}&sort_by=popularity.desc${filters}`, token);
+  if (!Array.isArray(payload.results)) throw new TmdbRequestError();
+  const records = payload.results;
   const totalPages = typeof payload.total_pages === "number" && Number.isFinite(payload.total_pages)
     ? Math.min(500, Math.max(1, Math.floor(payload.total_pages)))
     : 500;
   return { items: catalogueItemsFromRecords(records, category, genres), hasMore: records.length > 0 && page < totalPages };
-}
-
-/** Fetch the current popular feed on demand without caching or persisting provider metadata. */
-export async function getPopularTmdbCatalogue(): Promise<MediaItem[]> {
-  const token = await getEnabledTmdbToken();
-  const [movieGenres, tvGenres, moviePages, tvPages] = await Promise.all([
-    requestTmdb<TmdbGenrePayload>("/genre/movie/list?language=en-US", token),
-    requestTmdb<TmdbGenrePayload>("/genre/tv/list?language=en-US", token),
-    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/movie?include_adult=false&include_video=false&language=en-US&page=${page}&sort_by=popularity.desc`, token))),
-    Promise.all([1, 2].map(page => requestTmdb<TmdbSearchPayload>(`/discover/tv?include_adult=false&include_null_first_air_dates=false&language=en-US&page=${page}&sort_by=popularity.desc`, token))),
-  ]);
-
-  const movieGenreMap = new Map<number, string>((movieGenres.genres ?? [])
-    .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
-    .map(genre => [genre.id as number, text(genre.name)]));
-  const tvGenreMap = new Map<number, string>((tvGenres.genres ?? [])
-    .filter(genre => typeof genre.id === "number" && typeof genre.name === "string")
-    .map(genre => [genre.id as number, text(genre.name)]));
-
-  return [
-    ...moviePages.flatMap(payload => catalogueItemsFromRecords(Array.isArray(payload.results) ? payload.results : [], "Movies", movieGenreMap)),
-    ...tvPages.flatMap(payload => catalogueItemsFromRecords(Array.isArray(payload.results) ? payload.results : [], "Shows", tvGenreMap)),
-  ];
 }
 
 function formatMinutes(value: unknown) {
