@@ -79,8 +79,9 @@ After 1.0, use self-hosted feedback to choose among collaborative sessions, shar
 
 ## Immediate next steps
 
-1. Confirm the pushed GitHub Actions run passes the browser suite on a clean PostgreSQL service.
-2. Run the chronological provider-order/current-ranker comparison on enough ID-only traces; report coverage and descriptive metrics without causal claims or unsupported weight changes.
-3. Rehearse an app upgrade and HTTPS reverse-proxy setup. Run the LXC installer in a Debian 13 Proxmox environment.
-4. Complete provider-term and request-volume review, especially TMDB's unresolved Adult-section boundary, then perform live smoke checks with operator credentials.
+1. [x] Confirm the pushed GitHub Actions run passes the browser suite on a clean PostgreSQL service (commit `408dfede`, run [41097370113](https://github.com/doomedramen/choice-fatigue/actions/runs/41097370113)).
+2. Run the chronological provider-order/current-ranker comparison on enough ID-only traces; report coverage and descriptive metrics without causal claims or unsupported weight changes. This requires an authorized account export with sufficient traces; none is present in the project files.
+3. Rehearse an app upgrade and HTTPS reverse-proxy setup. The LXC installer now uses the Community Scripts `ct/` and `install/` pair; run it in a Debian 13 Proxmox environment before upstream submission.
+4. [x] Review provider terms and request volume ([review](docs/provider-term-review-2026-10-31.md)). Before release, get written TMDB guidance on a combined TMDB-plus-Adult instance or separate those experiences, confirm account-specific ThePornDB and StashDB terms, and run live smoke checks with operator credentials.
 5. Tag and push `v1.0.0` only after automated checks and external release gates pass.
+6. Add GitHub Actions publishing for GHCR images, then validate the image-based Compose deployment documented in `README.md`.

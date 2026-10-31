@@ -4,6 +4,69 @@ A responsive media discovery app built with Next.js and TypeScript. It includes 
 
 For self-hosting, see [Docker Compose and Proxmox LXC setup](docs/self-hosting.md).
 
+## Install on Proxmox VE
+
+From a root shell on the Proxmox VE host, run this command to create a new Debian 13 LXC and install Choice Fatigue with the Community Scripts tooling:
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/doomedramen/choice-fatigue/main/ct/choicefatigue.sh)"
+```
+
+The installer prompts for the public HTTPS URL and uses the Community Scripts defaults of 2 CPU cores, 4 GB RAM, and 20 GB disk. Read [the Proxmox setup notes](docs/self-hosting.md) before running it.
+
+## Deploy with Docker Compose
+
+For a deployment that pulls the published image from GitHub Container Registry (GHCR), copy `deploy/env.compose.example` to `deploy/env.compose`, replace its example secrets, and save this file as `docker-compose.ghcr.yml` in the repository root:
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: choice_fatigue
+      POSTGRES_USER: choice_fatigue
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/env.compose}
+    volumes:
+      - choice_fatigue_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U choice_fatigue -d choice_fatigue"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    image: ghcr.io/doomedramen/choice-fatigue:${CHOICE_FATIGUE_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://choice_fatigue:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/env.compose}@postgres:5432/choice_fatigue?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in deploy/env.compose}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set BETTER_AUTH_URL in deploy/env.compose}
+      INTEGRATION_CREDENTIALS_KEY: ${INTEGRATION_CREDENTIALS_KEY:?Set INTEGRATION_CREDENTIALS_KEY in deploy/env.compose}
+    ports:
+      - "${APP_PORT:-4173}:4173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  choice_fatigue_data:
+```
+
+Start it from the repository root with:
+
+```sh
+docker compose --env-file deploy/env.compose -f docker-compose.ghcr.yml up -d
+```
+
+The GHCR image reference is ready for the planned GitHub Actions publishing workflow; it cannot be pulled until that workflow publishes the image. For now, the existing [`docker-compose.release.yml`](docker-compose.release.yml) builds the app image locally from source.
+
 ## Run locally
 
 Requirements: Node.js 22 or newer, pnpm 12.16.1, and Docker Compose. If you use Volta, install the project tool versions with:

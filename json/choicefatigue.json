@@ -1,0 +1,56 @@
+{
+  "name": "Choice Fatigue",
+  "slug": "choicefatigue",
+  "categories": [13],
+  "date_created": "2026-10-31",
+  "type": "ct",
+  "updateable": true,
+  "privileged": false,
+  "platforms": [
+    "pve"
+  ],
+  "architectures": [
+    "amd64",
+    "arm64"
+  ],
+  "interface_port": 4173,
+  "documentation": "https://github.com/doomedramen/choice-fatigue/blob/main/docs/self-hosting.md",
+  "repository": "https://github.com/doomedramen/choice-fatigue",
+  "description": "Choice Fatigue is a self-hosted media discovery app with account-scoped recommendation learning, saved lists, and optional Adult discovery.",
+  "app_vars": [
+    {
+      "name": "var_public_url",
+      "label": "Public HTTPS URL",
+      "type": "text",
+      "default": ""
+    }
+  ],
+  "install_methods": [
+    {
+      "type": "default",
+      "script": "ct/choicefatigue.sh",
+      "config_path": "/opt/choice-fatigue/.env",
+      "resources": {
+        "cpu": 2,
+        "ram": 4096,
+        "hdd": 20,
+        "os": "Debian",
+        "version": "13"
+      }
+    }
+  ],
+  "default_credentials": {
+    "username": null,
+    "password": null
+  },
+  "notes": [
+    {
+      "text": "Configure an HTTPS reverse proxy to the container on port 4173 before remote access. The URL entered during setup must match the browser-facing HTTPS origin.",
+      "type": "info"
+    },
+    {
+      "text": "The first account becomes the administrator. Create a database and deployment-secret backup before upgrades or restores.",
+      "type": "info"
+    }
+  ]
+}
