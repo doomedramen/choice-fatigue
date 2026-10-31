@@ -146,13 +146,22 @@ export default function AdminClient({ userName, userId, initialTab = "providers"
     }
   }
 
+  // Sections are in-page panels; the URL follows along so a reload or shared link opens the same one.
+  function selectSection(id: Tab) {
+    setTab(id);
+    setNotice("");
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", id);
+    window.history.replaceState(null, "", url);
+  }
+
   return <div className="admin-shell">
     <header className="admin-header"><a className="admin-brand" href="/">✳ <span>{settings.appName.toLowerCase()}</span></a><div className="admin-header-actions"><span className="admin-user">{userName}</span><a className="admin-back" href="/">← Back to discovery</a></div></header>
     <main className="admin-main">
       <div className="admin-heading"><div><p className="admin-eyebrow">CHOICE FATIGUE / ADMIN</p><h1>Admin settings</h1><p>Manage app defaults, metadata sources, shared services, and accounts.</p></div><span className="admin-badge">ADMIN ONLY</span></div>
       {loadError && <div className="admin-alert" role="alert"><strong>Couldn’t load settings</strong><span>{loadError}</span><button type="button" onClick={() => window.location.reload()}>Retry</button></div>}
       <div className="admin-layout">
-        <nav className="admin-nav" aria-label="Admin sections">{([['providers', 'Metadata sources'], ['services', 'Services'], ['settings', 'Global settings'], ['users', 'Users']] as const).map(([id, label]) => <button key={id} type="button" className={tab === id ? "selected" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => { setTab(id); setNotice(""); }}>{label}<span aria-hidden="true">→</span></button>)}</nav>
+        <nav className="admin-nav" aria-label="Admin sections">{([['providers', 'Metadata sources'], ['services', 'Services'], ['settings', 'Global settings'], ['users', 'Users']] as const).map(([id, label]) => <button key={id} type="button" className={tab === id ? "selected" : ""} aria-pressed={tab === id} onClick={() => selectSection(id)}>{label}<span aria-hidden="true">→</span></button>)}</nav>
         <section className="admin-content" aria-labelledby="admin-section-title">
           {tab === "providers" && <>
             <div className="admin-section-head"><div><p className="admin-eyebrow">LIVE PROVIDER FEEDS</p><h2 id="admin-section-title">Metadata sources</h2><p>Configure provider access here. Discovery requests current popular titles directly from enabled sources; media details are not saved to the local catalogue.</p></div></div>

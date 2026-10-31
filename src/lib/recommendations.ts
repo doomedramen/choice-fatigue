@@ -213,7 +213,8 @@ export function rankRecommendations(
 
   const signalCount = countedSignals.length;
   const baseline = recommendationBaseline(countedSignals);
-  const credits = creditPreferences(historicalSignals, recommendationBaseline(historicalSignals));
+  // Genres and credits are two parts of one score, so both are centred on the same baseline.
+  const credits = creditPreferences(historicalSignals, baseline);
   const featureScores = new Map([...featureEvidence].map(([feature, evidence]) => [feature, shrunkenScore(evidence, baseline)]));
 
   const comparisons = historicalComparisons.map(comparison => ({
@@ -253,7 +254,34 @@ export function rankRecommendations(
     })
     .sort((a, b) => b.score - a.score || a.originalIndex - b.originalIndex);
 
-  return { items: ranked.map(entry => entry.item), signalCount };
+  // Cold start keeps the provider's order untouched; only learned rankings get the run cap.
+  return { items: (signalCount ? capGenreRuns(ranked) : ranked).map(entry => entry.item), signalCount };
+}
+
+const genreRunLength = 2;
+const genreRunScoreTolerance = 0.15;
+
+/**
+ * Light diversity: after two titles in a row share a primary genre, the next title of that genre is
+ * deferred if a different-genre title scores within 0.15 of it. An unvalidated default; it never
+ * promotes a clearly worse match.
+ */
+export function capGenreRuns<T extends { item: MediaItem; score: number }>(ranked: T[]): T[] {
+  const primary = (entry: T) => normalized(entry.item.genre[0] ?? "");
+  const pending = [...ranked];
+  const result: T[] = [];
+  while (pending.length) {
+    const recent = result.slice(-genreRunLength).map(primary);
+    const runGenre = recent.length === genreRunLength && recent[0] && recent.every(genre => genre === recent[0]) ? recent[0] : "";
+    let pick = 0;
+    if (runGenre && primary(pending[0]) === runGenre) {
+      for (let index = 1; index < pending.length && pending[0].score - pending[index].score <= genreRunScoreTolerance; index++) {
+        if (primary(pending[index]) !== runGenre) { pick = index; break; }
+      }
+    }
+    result.push(pending.splice(pick, 1)[0]);
+  }
+  return result;
 }
 
 
@@ -302,9 +330,13 @@ export function recommendationFeatureItemIds(events: RecommendationHistoryEvent[
   return [...new Set([...history].reverse().flatMap(event => event.itemId && eligible.has(event.itemId) ? [event.itemId] : []))];
 }
 
-/** Cached credits count toward the recent-title budget, even when no request is needed. */
-export function recentUnresolvedFeatureIds(eligibleIds: string[], resolvedIds: Set<string>, limit = 12): string[] {
-  return eligibleIds.slice(0, limit).filter(id => !resolvedIds.has(id));
+/**
+ * The next titles to hydrate, most recent first, skipping any the caller already holds or tried.
+ * Each read moves further back through history, so older taste is covered over successive reads
+ * without storing provider-derived features.
+ */
+export function recentUnresolvedFeatureIds(eligibleIds: string[], knownIds: Set<string>, limit = 12): string[] {
+  return eligibleIds.filter(id => !knownIds.has(id)).slice(0, limit);
 }
 
 export function shownCandidateIds(itemId: string, remainingIds: string[]): string[] {

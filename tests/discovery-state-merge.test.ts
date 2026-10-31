@@ -68,3 +68,14 @@ test("preserves unchanged scalar state from the remote snapshot", () => {
   assert.equal(merged.eventSequence, 5);
   assert.deepEqual(merged.saved, ["tmdb-movie-1"]);
 });
+
+test("merged lists stay consistent: saved beats shortlisted, removed is not shortlisted, shortlisted means keep", () => {
+  const base = empty();
+  const local: MergeableDiscoveryState = { ...base, saved: ["a"], shortlisted: ["b"], decisions: { b: "keep" } };
+  const remote: MergeableDiscoveryState = { ...base, shortlisted: ["a", "c"], reviewRemoved: ["b"], decisions: { a: "keep", c: "pass" } };
+  const merged = mergeDiscoveryState(base, local, remote);
+  assert.deepEqual(merged.saved, ["a"]);
+  assert.deepEqual(merged.shortlisted, ["c"]);
+  assert.deepEqual(merged.reviewRemoved, ["b"]);
+  assert.equal(merged.decisions.c, "keep");
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { invalidUndoTargetIds, isValidRecommendationEvent, partitionRecommendationEvents, recommendationEventMatchesCategory, recommendationProviderCategoryForId, type RecommendationEventInput } from "../src/lib/recommendation-event-validation";
+import { invalidUndoTargetIds, isValidRecommendationEvent, partitionRecommendationEvents, unverifiedSaveTargetIds, recommendationEventMatchesCategory, recommendationProviderCategoryForId, type RecommendationEventInput } from "../src/lib/recommendation-event-validation";
 import { recommendationEventBatch, settleRecommendationBatch } from "../src/lib/recommendation-outbox";
 
 const base: RecommendationEventInput = { id: "event-1", sessionId: "session-1", reviewId: null, sequence: 1, itemId: null, category: "Movies", eventType: "candidate_batch", decision: null, rating: null, targetEventId: null, algorithmVersion: "content-v3", occurredAt: "2026-10-31T10:00:00.000Z", retrievalId: "fetch-1", source: "tmdb", lane: "popular", candidateIds: ["tmdb-movie-12", "tmdb-movie-13"] };
@@ -88,4 +88,19 @@ test("v6 snapshots accept only bounded category-specific IDs and real resolution
   assert.equal(isValidRecommendationEvent({ ...snapshot, provenance: { ...snapshot.provenance, candidateResolvedIds: ["tmdb-movie-13"] } }), false);
   assert.equal(isValidRecommendationEvent({ ...snapshot, provenance: { ...snapshot.provenance, historicalRequestedIds: ["tmdb-tv-1"] } }), false);
   assert.equal(isValidRecommendationEvent({ ...snapshot, algorithmVersion: "content-v5" }), false);
+});
+
+test("a save keeps its decision link only when that decision is the same user's, for the same title", () => {
+  const save = { ...decision, id: "save", eventType: "saved" as const, decision: null, targetEventId: "decision" };
+  assert.deepEqual([...unverifiedSaveTargetIds([decision, save], [])], [], "the decision may come earlier in the batch");
+  assert.deepEqual([...unverifiedSaveTargetIds([save], [{ id: "decision", itemId: "tmdb-movie-12", eventType: "decision" }])], []);
+  assert.deepEqual([...unverifiedSaveTargetIds([save], [{ id: "decision", itemId: "tmdb-movie-99", eventType: "decision" }])], ["save"]);
+  assert.deepEqual([...unverifiedSaveTargetIds([save], [])], ["save"], "another account's or a missing event is never linked");
+  assert.deepEqual([...unverifiedSaveTargetIds([{ ...save, targetEventId: null }], [])], []);
+});
+
+test("future timestamps are allowed only a minute of clock skew", () => {
+  const at = (offsetMs: number) => partitionRecommendationEvents([{ ...decision, algorithmVersion: "content-v7", occurredAt: new Date(receivedAt + offsetMs).toISOString() }], false, receivedAt).rejected.map(event => event.code);
+  assert.deepEqual(at(50_000), []);
+  assert.deepEqual(at(90_000), ["occurred_at_out_of_range"]);
 });

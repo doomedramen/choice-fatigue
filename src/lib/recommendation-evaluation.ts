@@ -160,6 +160,7 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
     const batches = new Map<string, Array<{ ids: string[]; lane: string; source: string; provenance?: RelatedProvenance | null; version: string }>>();
     const snapshots = new Map<string, string[]>();
     const creditsBySession = new Map<string, Set<string>>();
+    const attemptedBySession = new Map<string, Set<string>>();
     let snapshotCount = 0, incompleteImpressions = 0;
     const traces: Parameters<typeof compareRankings>[0] = [];
     const contentTraces: Parameters<typeof compareRankings>[0] = [];
@@ -234,8 +235,14 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
         }
         const availableIds = new Set(available.map(item => item.id));
         const missing = recommendationFeatureItemIds(prior, category).filter(id => !availableIds.has(id));
-        const selected = missing.slice(0, 12);
-        const featureItems = [...available, ...selected.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])];
+        // v7 clients rotate the twelve-title window across reads and keep what they fetched; older versions refetched the newest twelve.
+        const attempted = attemptedBySession.get(event.sessionId) ?? new Set<string>();
+        const rotating = event.algorithmVersion === "content-v7";
+        const selected = rotating ? missing.filter(id => !attempted.has(id)).slice(0, 12) : missing.slice(0, 12);
+        selected.forEach(id => attempted.add(id));
+        attemptedBySession.set(event.sessionId, attempted);
+        const held = rotating ? missing.filter(id => attempted.has(id)) : selected;
+        const featureItems = [...available, ...held.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])];
         const resolved = creditsBySession.get(event.sessionId) ?? new Set<string>();
         const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type }), ...((["content-v6", "content-v7"].includes(event.algorithmVersion) ? resolved.has(item.id) : !availableIds.has(item.id) || creditRequested.has(item.id)) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
         featureEligible += missing.length; featureRequested += selected.length; featureResolved += selected.filter(id => metadata.has(id)).length;

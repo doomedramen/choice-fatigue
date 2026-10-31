@@ -86,8 +86,8 @@ button:active:not(:disabled) { transform: scale(.98); }
 .deck-meta small { color: #8794aa; font-size: 12px; }
 .card-stack { position: relative; isolation: isolate; display: grid; padding: 0 11px 10px; touch-action: pan-y; }
 .stack-shadow { position: absolute; z-index: 0; top: 0; bottom: 10px; left: 50%; width: min(calc(100% - 22px), 450px); border: 1px solid #38445c; border-radius: 16px; box-shadow: 0 14px 30px #0005; pointer-events: none; transform-origin: center; }
-.stack-shadow-one { background: #a44b3e; transform: translateX(-50%) translateY(26px) scale(.97); }
-.stack-shadow-two { background: #b87928; transform: translateX(-50%) translateY(14px) scale(.985); }
+.stack-shadow-one { background: #1c2435; transform: translateX(-50%) translateY(26px) scale(.97); }
+.stack-shadow-two { background: #232c3f; transform: translateX(-50%) translateY(14px) scale(.985); }
 .media-card { position: relative; z-index: 2; display: grid; width: min(100%, 380px); justify-self: center; grid-area: 1 / 1; grid-template-rows: auto minmax(170px, max-content); aspect-ratio: auto; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
 .media-card.control-exit { transition: box-shadow 160ms ease-out, transform 230ms var(--ease-out), opacity 170ms ease-out; }
 .media-card.card-under { z-index: 1; box-shadow: 0 12px 26px #0004; pointer-events: none; transform: none; }
@@ -460,3 +460,17 @@ button:active:not(:disabled) { transform: scale(.98); }
 .button-danger:hover { background: #6d2e27; }
 .confirm-modal p { margin-bottom: 22px; }
 .saved-modal > .saved-undo { display: flex; max-width: none; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; padding: 8px 8px 8px 14px; border: 1px solid #56647e; border-radius: 10px; background: #202a3b; color: #fff; font-size: 14px; font-weight: 700; }
+
+/* Loading placeholder shaped like the deck card; the shimmer is off under reduced motion. */
+.card-skeleton { display: grid; width: min(100%, 380px); gap: 10px; margin: 18px auto 0; padding: 12px; border: 1px solid #2e384c; border-radius: 16px; background: #131a28; }
+.card-skeleton span { display: block; height: 14px; border-radius: 6px; background: linear-gradient(90deg, #1c2435 0%, #263046 50%, #1c2435 100%); background-size: 200% 100%; animation: skeleton-shimmer 1.4s ease-in-out infinite; }
+.card-skeleton span:first-child { height: auto; aspect-ratio: 2 / 3; max-height: max(200px, calc(100dvh - 500px)); }
+.card-skeleton span:last-child { width: 60%; }
+@keyframes skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .card-skeleton span { animation: none; } }
+@media (min-width: 720px) { .card-skeleton { width: min(100%, 450px); } }
+
+/* While a notice shows, keep the page's last controls clear of the fixed toast. */
+.shell.has-toast .main { padding-bottom: 96px; }
+/* On wide screens the review list fills the lower page, so its toast sits in the empty space beside the heading instead. */
+@media (min-width: 720px) { .shell.in-review .toast { top: 92px; bottom: auto; } }

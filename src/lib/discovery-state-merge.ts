@@ -68,10 +68,22 @@ function mergeRecord(base: Record<string, unknown>, local: Record<string, unknow
   return result;
 }
 
+/**
+ * The lists merge independently, so restore the rules between them: a saved title is no longer on the
+ * shortlist or in review removals, a removed title is not shortlisted, and every shortlisted title is a keep.
+ */
+export function normalizeDiscoveryLists<T extends MergeableDiscoveryState>(state: T): T {
+  const saved = new Set(state.saved);
+  const reviewRemoved = state.reviewRemoved.filter(id => !saved.has(id));
+  const removed = new Set(reviewRemoved);
+  const shortlisted = state.shortlisted.filter(id => !saved.has(id) && !removed.has(id));
+  return { ...state, shortlisted, reviewRemoved, decisions: { ...state.decisions, ...Object.fromEntries(shortlisted.map(id => [id, "keep"])) } };
+}
+
 /** Rebase local user actions made from `base` onto a newer server snapshot. */
 export function mergeDiscoveryState<T extends MergeableDiscoveryState>(base: T, local: T, remote: T): T {
   const scalar = <K extends keyof T>(key: K) => sameValue(base[key], local[key]) ? remote[key] : local[key];
-  return {
+  return normalizeDiscoveryLists({
     ...remote,
     sessionId: scalar("sessionId"),
     eventSequence: Math.max(base.eventSequence ?? 0, local.eventSequence ?? 0, remote.eventSequence ?? 0),
@@ -86,5 +98,5 @@ export function mergeDiscoveryState<T extends MergeableDiscoveryState>(base: T, 
     reviewRemoved: mergeSet(base.reviewRemoved, local.reviewRemoved, remote.reviewRemoved),
     view: scalar("view"),
     ageVerified: scalar("ageVerified"),
-  } as T;
+  } as T);
 }

@@ -103,6 +103,7 @@ model RecommendationEvent {
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, category, occurredAt])
+  @@index([userId, category, eventType, occurredAt])
   @@index([userId, sessionId, sequence])
   @@index([userId, targetEventId])
 }

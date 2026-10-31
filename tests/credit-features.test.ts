@@ -6,10 +6,11 @@ import type { MediaItem } from "../src/data";
 const event = (id: string, itemId: string, changes: Partial<RecommendationHistoryEvent> = {}): RecommendationHistoryEvent => ({ id, itemId, sessionId: "s", category: "Shows", eventType: "decision", decision: "seen", rating: 8, targetEventId: null, occurredAt: `2026-10-31T10:00:0${id}.000Z`, algorithmVersion: "content-v4", ...changes });
 const item = (id: string): MediaItem => ({ id, title: id, category: "Shows", type: "Series", genre: [], runtime: "—", rating: "—", synopsis: "", label: id, art: "mist", palette: ["", "", ""] });
 
-test("cached history does not expand the twelve-title hydration window", () => {
-  const ids = Array.from({ length: 20 }, (_, i) => `tmdb-movie-${i + 1}`);
-  const requested = recentUnresolvedFeatureIds(ids, new Set(ids.slice(0, 10)));
-  assert.deepEqual(requested, ids.slice(10, 12));
+test("hydration fetches twelve titles per read and moves back through history as titles become known", () => {
+  const ids = Array.from({ length: 30 }, (_, i) => `tmdb-movie-${i + 1}`);
+  assert.deepEqual(recentUnresolvedFeatureIds(ids, new Set()), ids.slice(0, 12));
+  assert.deepEqual(recentUnresolvedFeatureIds(ids, new Set(ids.slice(0, 12))), ids.slice(12, 24), "the next read covers older titles");
+  assert.deepEqual(recentUnresolvedFeatureIds(ids, new Set(ids.slice(0, 24))), ids.slice(24, 30));
 });
 
 test("normalizes and bounds role-specific credit identifiers", () => {

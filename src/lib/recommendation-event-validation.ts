@@ -12,7 +12,7 @@ export const currentRecommendationAlgorithmVersion: RecommendationAlgorithmVersi
 export const writableRecommendationAlgorithmVersions: readonly RecommendationAlgorithmVersion[] = ["content-v6", "content-v7"];
 /** Client clocks order history, so writes must fall near the time the server received them. */
 export const recommendationEventMaxAgeMs = 30 * 24 * 60 * 60 * 1000;
-export const recommendationEventMaxFutureMs = 5 * 60 * 1000;
+export const recommendationEventMaxFutureMs = 60 * 1000;
 
 export type RelatedProvenance = { seedItemId: string; seedEventId: string; endpoint: "recommendations"; page: number; positions: number[] };
 export type RetrievalSnapshot = { candidateRequestedIds: string[]; candidateResolvedIds: string[]; historicalRequestedIds: string[]; historicalResolvedIds: string[] };
@@ -105,4 +105,21 @@ export function invalidUndoTargetIds(events: RecommendationEventInput[], storedT
     if (!invalid.has(event.id)) targets.set(event.id, event);
   }
   return invalid;
+}
+
+/**
+ * A save may name the decision that shortlisted it. A target that is not this user's decision for the
+ * same title is not trusted; the route drops the link and keeps the save, which still counts on its own.
+ */
+export function unverifiedSaveTargetIds(events: RecommendationEventInput[], storedTargets: UndoTarget[]) {
+  const targets = new Map<string, UndoTarget>(storedTargets.map(target => [target.id, target]));
+  const unverified = new Set<string>();
+  for (const event of events) {
+    if (event.eventType === "saved" && event.targetEventId) {
+      const target = targets.get(event.targetEventId);
+      if (!target || target.eventType !== "decision" || target.itemId !== event.itemId) unverified.add(event.id);
+    }
+    targets.set(event.id, event);
+  }
+  return unverified;
 }

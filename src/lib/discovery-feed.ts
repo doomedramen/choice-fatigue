@@ -52,13 +52,33 @@ export function feedRetryDelay(sources: FeedSourceStatus[], now = Date.now()): n
   return waiting.length ? Math.max(0, Math.min(...waiting)) : null;
 }
 
+const sourceNames: Record<RecommendationSource, string> = { tmdb: "TMDB", theporndb: "ThePornDB", stashdb: "StashDB" };
+const laneNames: Record<RecommendationLane, string> = { popular: "", personalized: "personalised picks", related: "related shows", person: "people picks", company: "studio picks" };
+
+/** Readable names for the sources that failed, e.g. "TMDB related shows". */
+export function failedSourceNames(sources: FeedSourceStatus[]): string[] {
+  return [...new Set(sources.filter(source => source.outcome === "unavailable").map(source => [sourceNames[source.source], laneNames[source.lane]].filter(Boolean).join(" ")))];
+}
+
+function listNames(names: string[]) {
+  return names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/** The blocking message when a category has nothing to show because sources failed. */
+export function feedFailureMessage(sources: FeedSourceStatus[]): string {
+  const names = failedSourceNames(sources);
+  return names.length ? `${listNames(names)} could not load.` : "A metadata source could not load.";
+}
+
 /**
  * One non-blocking line for a deck that still has titles while a source is down or the latest page
  * failed. A countdown would go stale between renders, so the retry is described, not timed.
  */
 export function degradedFeedNotice(sources: FeedSourceStatus[], pageFailed = false): string {
-  if (!pageFailed && !sources.some(source => source.outcome === "unavailable")) return "";
-  return "A metadata source is temporarily unavailable. Showing the titles that loaded; more will be retried automatically.";
+  const names = failedSourceNames(sources);
+  if (!pageFailed && !names.length) return "";
+  const subject = names.length ? `${listNames(names)} ${names.length === 1 ? "is" : "are"}` : "A metadata source is";
+  return `${subject} temporarily unavailable. Showing the titles that loaded; more will be retried automatically.`;
 }
 
 /** Independent source failures must not discard successful pages or advance failed cursors. */

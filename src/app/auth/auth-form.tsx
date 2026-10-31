@@ -60,7 +60,8 @@ export function AuthForm({ mode, firstAccount = false }: { mode: AuthMode; first
   return <div className="auth-page">
     <header className="auth-header">
       <Link className="auth-brand" href="/" aria-label="Choice Fatigue home"><span className="auth-brand-mark" aria-hidden="true">✳</span>Choice Fatigue</Link>
-      <Link className="auth-back" href="/">← Back</Link>
+      {/* Signed-out visitors to "/" are sent to sign-in, so Back is only useful from sign-up. */}
+      {isSignUp && <Link className="auth-back" href="/sign-in">← Back to sign in</Link>}
     </header>
     <main className="auth-main">
       <section className="auth-card" aria-labelledby="auth-title">

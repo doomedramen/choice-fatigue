@@ -97,21 +97,21 @@ test("first run, account access, provider discovery, saved state and account con
   await expect(page.getByRole("dialog").getByText("The Lead")).toBeVisible();
   await page.getByRole("button", { name: "Close details" }).click();
   await page.getByRole("button", { name: "Want to see", exact: true }).click();
-  await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
+  await expect(page.getByText("1 title in your shortlist")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.getByRole("button", { name: "Undo last choice" }).first().click();
-  await expect(page.getByText("0 titles in the maybe pile")).toBeVisible();
+  await expect(page.getByText("0 titles in your shortlist")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 0, decisionCount: 0 });
   await page.getByRole("button", { name: "Want to see", exact: true }).click();
-  await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
+  await expect(page.getByText("1 title in your shortlist")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.reload();
-  await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
+  await expect(page.getByText("1 title in your shortlist")).toBeVisible();
   await page.getByRole("button", { name: "Review & compare" }).click();
   await page.getByRole("button", { name: "Remove from shortlist" }).click();
   await expect(page.getByText("Removed for now")).toBeVisible();
   await page.getByRole("button", { name: "Restore" }).click();
-  await page.getByRole("button", { name: "Save 1 pick" }).click();
+  await page.getByRole("button", { name: "Save 1 title" }).click();
   await expect(page.getByRole("heading", { name: "Saved for later" })).toBeVisible();
   await expect(page.getByRole("dialog").getByText("Mock Movie One").first()).toBeVisible();
   await page.getByRole("button", { name: "Close saved titles" }).click();
@@ -480,7 +480,7 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
   await expect(shortlistCount).toHaveText("1");
 
   await page.getByRole("button", { name: "Review & compare" }).click();
-  await page.getByRole("button", { name: "Save 1 pick" }).click();
+  await page.getByRole("button", { name: "Save 1 title" }).click();
   await expect(page.getByRole("dialog", { name: "Saved for later" })).toBeVisible();
   const undoSave = page.getByRole("dialog").getByRole("button", { name: "Undo" });
   for (let index = 0; index < 6 && !(await undoSave.evaluate(button => button === document.activeElement)); index++) await page.keyboard.press("Tab");
@@ -490,7 +490,7 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
   await expect(shortlistCount).toHaveText("1");
 
   await page.getByRole("button", { name: "Review & compare" }).click();
-  await page.getByRole("button", { name: "Save 1 pick" }).click();
+  await page.getByRole("button", { name: "Save 1 title" }).click();
   await page.getByRole("button", { name: "Remove Mock Movie One from saved" }).click();
   await expect(page.getByText("Your saved list is empty.", { exact: false })).toBeVisible();
   await expect.poll(async () => page.evaluate(async () => {
@@ -519,4 +519,68 @@ test("arrow keys decide from the first card, and rating keys move focus without 
     const history = (await (await fetch("/api/account/export")).json()).recommendationHistory as Array<{ eventType: string; itemId: string; rating: number | null }>;
     return history.find(event => event.eventType === "decision" && event.itemId === "tmdb-movie-102")?.rating ?? null;
   })).toBe(5);
+});
+
+test("review removals survive leaving review, and swipes are announced to screen readers", async ({ page }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await page.goto("/");
+  const announcer = page.locator("p.sr-only[aria-live=polite]");
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await expect(announcer).toHaveText("Shortlisted Mock Movie One");
+  await page.getByRole("button", { name: "Want to see", exact: true }).click();
+  await expect(announcer).toHaveText("Shortlisted Mock Movie Two");
+  await page.getByRole("button", { name: "Review & compare" }).click();
+  await page.getByRole("button", { name: "Remove from shortlist" }).first().click();
+  await expect(page.getByText("Removed for now", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to exploring" }).click();
+  await page.getByRole("button", { name: "Review & compare" }).click();
+  await expect(page.getByText("Removed for now", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
+});
+
+test("the header stays available while the session loads", async ({ page }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await page.route("**/api/discovery-state", async route => {
+    if (route.request().method() === "GET") await new Promise(resolve => setTimeout(resolve, 2000));
+    await route.continue();
+  });
+  await page.goto("/");
+  await expect(page.getByText("Picking up where you left off…")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Media categories" })).toBeVisible();
+  await expect(page.locator("summary.avatar")).toBeVisible();
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One", { timeout: 15_000 });
+});
+
+test("event writes reject other accounts' IDs and Adult without access, and are rate limited", async ({ page, browser }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  const post = (target: import("@playwright/test").Page, events: unknown[]) => target.evaluate(async rows => {
+    const response = await fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events: rows }) });
+    return { status: response.status, body: await response.json() };
+  }, events);
+  const shared = { ...learningDecision("tmdb-movie-900", 0), id: "shared-event-id" };
+  expect((await post(page, [shared])).body.acceptedIds).toEqual(["shared-event-id"]);
+  const adult = { ...learningDecision("stashdb-stash-scene-1", 1, "keep", "Adult"), id: "adult-event" };
+  expect((await post(page, [adult])).body.rejected).toMatchObject([{ id: "adult-event", code: "adult_disabled" }]);
+
+  const memberContext = await browser.newContext();
+  const member = await memberContext.newPage();
+  await member.goto("/sign-up");
+  await member.locator('input[name="name"]').fill("Event Member");
+  await member.locator('input[name="inviteCode"]').fill("playwright-invite");
+  await member.locator('input[name="email"]').fill("event-member@example.test");
+  await member.locator('input[name="password"]').fill(password);
+  await member.locator('input[name="confirmPassword"]').fill(password);
+  await member.getByRole("button", { name: "Create account" }).click();
+  await expect(member).toHaveURL(/\/$/, { timeout: 30_000 });
+  const foreign = await post(member, [shared]);
+  expect(foreign.body.acceptedIds).toEqual([]);
+  expect(foreign.body.rejected).toMatchObject([{ id: "shared-event-id", code: "duplicate" }]);
+  await memberContext.close();
+
+  const statuses: number[] = [];
+  for (let index = 0; index < 25; index++) statuses.push((await post(page, [])).status);
+  expect(statuses).toContain(429);
 });

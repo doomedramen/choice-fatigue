@@ -1,22 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import { useRouter } from "next/navigation";
 import { Modal } from "@/app/modal";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 import { rankRecommendations, buildRecommendationProfile, mergeRecommendationEvents, recommendationFeatureKeys, shownCandidateIds, type RecommendationFeatures } from "@/lib/recommendations";
-import { currentRecommendationAlgorithmVersion, isValidRecommendationEvent, isRelatedProvenance, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
+import { currentRecommendationAlgorithmVersion, isValidRecommendationEvent, isRelatedProvenance, recommendationEventMaxAgeMs, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
 import { recommendationEventBatch, settleRecommendationBatch } from "@/lib/recommendation-outbox";
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
 import { createClientUuid } from "@/lib/client-uuid";
-import { deduplicateTitles, degradedFeedNotice, feedRetryDelay, type DiscoveryFeed, type CandidateBatch } from "@/lib/discovery-feed";
+import { deduplicateTitles, degradedFeedNotice, feedFailureMessage, feedRetryDelay, type DiscoveryFeed, type CandidateBatch } from "@/lib/discovery-feed";
 import type { MediaPerson } from "@/lib/media-people";
 
 type Decision = "keep" | "pass" | "seen";
 type DiscoveryPageState = Record<Category, { feed: DiscoveryFeed; loading: boolean; error: string }>;
 function discoveryPageState(feed: DiscoveryFeed) {
-  return { feed, loading: false, error: feed.status.outcome === "unavailable" ? "A metadata source could not load." : "" };
+  return { feed, loading: false, error: feed.status.outcome === "unavailable" ? feedFailureMessage(feed.sources) : "" };
 }
 interface SessionState {
   sessionId: string;
@@ -165,7 +164,6 @@ interface DiscoveryClientProps {
 }
 
 export default function DiscoveryClient({ appName, userName, userId, isAdmin, integrationsReadOnly, adultSectionEnabled, mediaItems, initialFeeds, seerrConnections, plexConnections }: DiscoveryClientProps) {
-  const router = useRouter();
   const [session, setSession] = useState<SessionState>(initialState);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -198,6 +196,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const [plexAvailabilityCheckingKey, setPlexAvailabilityCheckingKey] = useState("");
   const [plexAvailabilityResults, setPlexAvailabilityResults] = useState<Record<string, { inLibrary: boolean; message: string }>>({});
   const [notice, setNotice] = useState<{ message: string; action?: NoticeAction } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const refocusCard = useRef(false);
   const noticeTimer = useRef<number | null>(null);
   const [cardExiting, setCardExiting] = useState(false);
   // The swipe hint shows until this account's first decision in this browser.
@@ -235,6 +235,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const resolvedCreditIds = useRef(new Set(Object.values(initialFeeds).flatMap(feed => Object.keys(feed.candidateFeatures ?? {}))));
   const lastHistoricalSnapshot = useRef("");
   const [learningError, setLearningError] = useState("");
+  // Titles decided before the server's capped profile window: excluded from the deck, never trained on.
+  const [olderConsideredIds, setOlderConsideredIds] = useState<Record<Category, string[]>>({ Movies: [], Shows: [], Adult: [] });
   const [loadedProfileCategories, setLoadedProfileCategories] = useState<Set<Category>>(() => new Set());
   const activeCategory = useRef(session.category);
   activeCategory.current = session.category;
@@ -251,7 +253,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   }
   const recommendations = rankRecommendations(categoryItems, profile.signals, profile.comparisons, combinedFeatures, relatedRanks);
   const items = recommendations.items;
-  const previouslyConsideredIds = new Set(profile.consideredIds);
+  const previouslyConsideredIds = new Set([...profile.consideredIds, ...olderConsideredIds[session.category]]);
   const retainedIds = new Set([...session.saved, ...session.shortlisted]);
   const remainingItems = items.filter(candidate => !session.decisions[candidate.id] && !retainedIds.has(candidate.id) && !previouslyConsideredIds.has(candidate.id));
   const categoryOutcomes = Object.fromEntries(categories.map(category => [category, discoveryPages[category].feed.status])) as Record<Category, DiscoveryFeed["status"]>;
@@ -262,6 +264,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   // Shown only while the deck still has cards; an empty deck explains the failure itself.
   const catalogueNotice = item ? degradedFeedNotice(discoveryPages[session.category].feed.sources, Boolean(discoveryPages[session.category].error)) : "";
   const picks = session.shortlisted.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
+  // The deck counter is per category; the shortlist panel shows the total across categories.
+  const categoryPicks = picks.filter(pick => pick.category === session.category).length;
   const removed = session.reviewRemoved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const saved = session.saved.map(id => catalogue.find(candidate => candidate.id === id) ?? resolvedSavedItems[id] ?? unavailableSavedItem(id));
   const seenCount = categoryItems.length - categoryItems.filter(candidate => !session.decisions[candidate.id]).length;
@@ -293,7 +297,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       recordFeedSnapshot(category, result, retrievalId, mergedItems.filter(candidate => !previousIds.has(candidate.id)).map(candidate => candidate.id));
       setCatalogueItems(mergedItems);
       const failed = result.status.outcome === "unavailable";
-      setDiscoveryPages(current => ({ ...current, [category]: { feed: { ...result, status: current[category].feed.status.hasTitles ? { ...result.status, outcome: "ready", hasTitles: true } : result.status }, loading: false, error: failed ? "A metadata source could not load." : "" } }));
+      setDiscoveryPages(current => ({ ...current, [category]: { feed: { ...result, status: current[category].feed.status.hasTitles ? { ...result.status, outcome: "ready", hasTitles: true } : result.status }, loading: false, error: failed ? feedFailureMessage(result.sources) : "" } }));
       return !failed;
     } catch (error) {
       setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], error: error instanceof Error ? error.message : "More titles could not be loaded." } }));
@@ -320,6 +324,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     }, 800);
     return () => window.clearTimeout(timer);
   }, [ready, refreshRevision, discoveryPages]);
+
+  /** Every "Try again" goes through here: continue the feed when it has titles, otherwise start it afresh. */
+  function retryCategory(category: Category) {
+    const page = discoveryPages[category];
+    void loadMoreDiscoveries(category, !page.feed.status.hasTitles || !page.feed.hasMore);
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -388,21 +398,40 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
 
   const loadedOutbox = useRef(false);
   const heldOutboxKey = `choice-fatigue-learning-held-${userId}`;
+  function requeueHeldEvents() {
+    try {
+      const held = JSON.parse(localStorage.getItem(heldOutboxKey) ?? "[]") as unknown;
+      if (!Array.isArray(held) || !held.length) return;
+      localStorage.removeItem(heldOutboxKey);
+      const valid = held.filter(isValidRecommendationEvent);
+      // The server refuses events older than its window; keep those in this browser rather than sending them to be rejected.
+      const tooOld = valid.filter(event => Date.parse(event.occurredAt) < Date.now() - recommendationEventMaxAgeMs);
+      const resend = valid.filter(event => !tooOld.includes(event));
+      if (tooOld.length) {
+        const key = `choice-fatigue-learning-quarantine-${userId}`;
+        const quarantined = JSON.parse(localStorage.getItem(key) ?? "[]");
+        localStorage.setItem(key, JSON.stringify([...(Array.isArray(quarantined) ? quarantined : []), ...tooOld]));
+        setLearningError("Some Adult choices made while access was off are too old to sync. They are kept in this browser.");
+      }
+      learningQueue.current = mergeRecommendationEvents(learningQueue.current, resend);
+      setLearningEvents(current => mergeRecommendationEvents(current, resend));
+      persistOutbox();
+    } catch { /* Held events stay stored when this browser cannot read them now. */ }
+  }
   useEffect(() => {
     if (!ready) return;
     if (!loadedOutbox.current) {
       loadedOutbox.current = true;
       try {
         const stored = JSON.parse(localStorage.getItem(`choice-fatigue-learning-v3-${userId}`) ?? "[]") as unknown;
-        // Adult events held while access was off are offered again once it is back on.
-        const held = adultSectionEnabled ? JSON.parse(localStorage.getItem(heldOutboxKey) ?? "[]") as unknown : [];
-        if (Array.isArray(stored) || Array.isArray(held) && held.length) {
-          learningQueue.current = mergeRecommendationEvents(learningQueue.current, Array.isArray(stored) ? stored.filter(isValidRecommendationEvent) : [], Array.isArray(held) ? held.filter(isValidRecommendationEvent) : []);
+        if (Array.isArray(stored)) {
+          learningQueue.current = mergeRecommendationEvents(learningQueue.current, stored.filter(isValidRecommendationEvent));
           setLearningEvents(current => mergeRecommendationEvents(current, learningQueue.current));
-          if (Array.isArray(held) && held.length) { localStorage.removeItem(heldOutboxKey); persistOutbox(); }
         }
       } catch { /* The outbox still works in memory when storage is unavailable. */ }
     }
+    // Adult events held while access was off are offered again whenever access is on, not only on first load.
+    if (adultSectionEnabled) requeueHeldEvents();
     void flushLearningQueue().then(() => refreshHistoricalProfile());
   }, [ready, session.category, userId, adultSectionEnabled]);
 
@@ -461,6 +490,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
         });
         if (response.status === 401) { window.location.replace("/sign-in"); return; }
         if (response.status === 413 && batch.length > 1) { byteLimit = Math.floor(new TextEncoder().encode(JSON.stringify({ events: batch })).byteLength / 2); continue; }
+        // Rate-limited: the 15-second retry picks the queue up again, so there is nothing to report.
+        if (response.status === 429) return;
         if (!response.ok) { setLearningError("Couldn’t sync recommendation learning. Your choices will retry automatically."); return; }
         const data = await response.json() as { acceptedIds: string[]; rejected: RejectedRecommendationEvent[] };
         const result = settleRecommendationBatch(batch, data.acceptedIds, data.rejected);
@@ -494,10 +525,11 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       for (const id of [...resolvedCreditIds.current].filter(id => categoryForId(id) === category).slice(-200)) query.append("knownFeatureId", id);
       const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures; resolvedCreditItemIds?: string[]; requestedCreditItemIds?: string[]; attemptedFeatureItemIds?: string[] };
+      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures; resolvedCreditItemIds?: string[]; requestedCreditItemIds?: string[]; attemptedFeatureItemIds?: string[]; olderConsideredIds?: string[] };
       data.resolvedCreditItemIds?.forEach(id => resolvedCreditIds.current.add(id));
       // A failed lookup is retried on the next page load, not on every refresh.
       data.attemptedFeatureItemIds?.forEach(id => resolvedCreditIds.current.add(id));
+      if (data.olderConsideredIds?.length) setOlderConsideredIds(current => ({ ...current, [category]: data.olderConsideredIds! }));
       setLearningEvents(current => mergeRecommendationEvents(current, data.events, learningQueue.current));
       setFeaturesByItemId(current => ({ ...current, ...data.featuresByItemId }));
       const snapshotKey = `${category}:${(data.requestedCreditItemIds ?? []).join(",")}`;
@@ -726,14 +758,22 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     const nextItemId = nextItem?.id ?? null;
     const event = enqueueLearningEvent("decision", currentItem.id, currentItem.category, decision, decision === "seen" ? rating! : null, null, null);
     const historyEntry = decision === "seen" ? {id:currentItem.id, decision, rating:rating!, eventId:event.id} : {id:currentItem.id, decision, eventId:event.id};
+    setAnnouncement(decision === "keep" ? `Shortlisted ${currentItem.title}` : decision === "pass" ? `Passed ${currentItem.title}` : `Rated ${currentItem.title} ${rating} out of 10`);
+    keepCardFocus();
     setSession(current => ({
       ...current,
       lockedItemId:nextItemId && !current.decisions[nextItemId] && catalogue.some(candidate => candidate.id === nextItemId && candidate.category === current.category) ? nextItemId : null,
       decisions:{...current.decisions, [currentItem.id]:decision},
       ratings:decision === "seen" ? {...current.ratings, [currentItem.id]:rating!} : current.ratings,
       shortlisted:decision === "keep" ? [...current.shortlisted.filter(id => id !== currentItem.id), currentItem.id] : current.shortlisted,
+      reviewRemoved:current.reviewRemoved.filter(id => id !== currentItem.id),
       history:[...current.history, historyEntry],
     }));
+  }
+  /** A decision replaces the card, so move focus to the new one if it was on (or lost with) the old one. */
+  function keepCardFocus() {
+    const active = document.activeElement;
+    refocusCard.current = !active || active === document.body || Boolean(mediaCard.current?.contains(active));
   }
   function transitionDecision(decision:Decision, source:"drag"|"control"="control", rating?:number) {
     if (swipeExit.current || !item) return;
@@ -763,6 +803,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   function undo() {
     const last = session.history.at(-1);
     if (last?.eventId) enqueueLearningEvent("decision_undone", last.id, categoryForId(last.id), null, null, last.eventId, null);
+    if (last) setAnnouncement(`Restored ${catalogue.find(candidate => candidate.id === last.id)?.title ?? "the last title"}`);
+    keepCardFocus();
     setSession(current => {
       if (!last) return current;
       const decisions={...current.decisions}; delete decisions[last.id];
@@ -788,11 +830,12 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   function beginReview() {
     const reviewId = createClientUuid();
     enqueueLearningEvent("review_started", null, session.category, null, null, null, reviewId);
-    setSession(current=>({...current, reviewId, reviewRemoved:[], view:"review"}));
+    setSession(current=>({...current, reviewId, view:"review"}));
   }
   function leaveReview() {
     enqueueLearningEvent("review_abandoned", null, session.category);
-    setSession(current=>({...current, reviewId:null, reviewRemoved:[], view:"discover"}));
+    // Removals stay listed until the shortlist is saved, so leaving review never makes them permanent.
+    setSession(current=>({...current, reviewId:null, view:"discover"}));
   }
   function removeFromReview(id:string) {
     const targetEventId = [...session.history].reverse().find(entry => entry.id === id)?.eventId ?? null;
@@ -834,7 +877,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     }
     // Saved titles leave the swipe history: undoing a save is a separate, explicit action, not a swipe undo.
     const savedHistory = session.history.filter(entry=>visiblePickIds.includes(entry.id));
-    setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), history:current.history.filter(entry=>!visiblePickIds.includes(entry.id)), view:"discover"}));
+    setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:[], history:current.history.filter(entry=>!visiblePickIds.includes(entry.id)), view:"discover"}));
     setSavedOpen(true);
     // The Saved dialog opens with its own Undo: a toast behind an open dialog is outside its focus trap.
     setJustSaved({ ids: visiblePickIds, history: savedHistory });
@@ -934,7 +977,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
             </div>
           </div>
         </div>
-      {active && <><div className="swipe-stamp stamp-keep">KEEP</div><div className="swipe-stamp stamp-pass">PASS</div></>}
+      {active && <><div className="swipe-stamp stamp-keep">SHORTLIST</div><div className="swipe-stamp stamp-pass">PASS</div></>}
     </article>;
   }
 
@@ -963,67 +1006,78 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     window.location.replace("/sign-in");
   }
 
-  if (!ready || !loadedProfileCategories.has(session.category)) return <div className="shell"><main className="main"><section className="content-area"><div className="empty-state" role={loadError ? "alert" : "status"}>
+  useEffect(() => {
+    if (!refocusCard.current) return;
+    refocusCard.current = false;
+    mediaCard.current?.focus();
+  }, [item?.id]);
+
+  // The header stays on screen while the session loads, so navigation and sign-out are never hidden.
+  function renderTopbar() {
+    return <header className="topbar">
+      <a className="brand" href="/" aria-label={`${appName} home`}><span className="brand-symbol">✳</span><span>{appName.toLowerCase()}</span></a>
+      <nav className="category-nav" aria-label="Media categories">{categories.filter(category=>adultSectionEnabled || category!=="Adult").map(category=>{const index=categories.indexOf(category); return <button key={category} className={`nav-item ${session.category===category?"active":""} ${category==="Adult"?"adult-nav":""}`} onClick={()=>changeCategory(category)} disabled={!ready} aria-pressed={session.category===category}>{category==="Adult"?<><Icon name="lock"/><span>Adult</span></>:<><span className={`nav-dot dot-${index}`}/><span>{category}</span></>}</button>;})}</nav>
+      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} disabled={!ready} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details ref={accountMenu} className="account-menu"><summary className="avatar" aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
+    </header>;
+  }
+
+  if (!ready || !loadedProfileCategories.has(session.category)) return <div className="shell">{renderTopbar()}<main className="main"><section className="content-area"><div className="empty-state" role={loadError ? "alert" : "status"}>
     <div className="eyebrow"><span className="live-dot"/> YOUR DISCOVERY SESSION</div>
     <h2>{loadError ? "Your session didn’t load." : "Picking up where you left off…"}</h2>
     <p>{loadError || "Loading your saved choices."}</p>
     {loadError && <button className="button button-dark" onClick={() => setLoadAttempt(value => value + 1)}>Try again <Icon name="rewind"/></button>}
-  </div></section></main></div>;
+  </div>{!loadError && <div className="card-skeleton" aria-hidden="true"><span/><span/><span/></div>}</section></main></div>;
 
-  const modalOpen = Boolean(details) || ageOpen || savedOpen;
-  return <div className="shell">
-    <header className="topbar" inert={modalOpen}>
-      <a className="brand" href="/" aria-label={`${appName} home`}><span className="brand-symbol">✳</span><span>{appName.toLowerCase()}</span></a>
-      <nav className="category-nav" aria-label="Media categories">{categories.filter(category=>adultSectionEnabled || category!=="Adult").map(category=>{const index=categories.indexOf(category); return <button key={category} className={`nav-item ${session.category===category?"active":""} ${category==="Adult"?"adult-nav":""}`} onClick={()=>changeCategory(category)} aria-pressed={session.category===category}>{category==="Adult"?<><Icon name="lock"/><span>Adult</span></>:<><span className={`nav-dot dot-${index}`}/><span>{category}</span></>}</button>;})}</nav>
-      <div className="header-right"><button className="saved-link" onClick={()=>setSavedOpen(true)} aria-label={`Saved ${saved.length}` }><Icon name="bookmark"/><span>Saved</span><b>{saved.length}</b></button><details ref={accountMenu} className="account-menu"><summary className="avatar" aria-label={`Account menu for ${userName}`}>{userName.trim().charAt(0).toUpperCase()}</summary><div className="account-dropdown"><strong>{userName}</strong><a href="/account">Account settings</a>{isAdmin&&<a href="/admin?section=services">Service connections</a>}<a href="/credits">About &amp; credits</a>{isAdmin&&<a href="/admin">Admin settings</a>}<button type="button" onClick={handleSignOut}>Sign out</button></div></details></div>
-    </header>
-    <main className={`main ${session.view==="review"?"review-mode":""}`} inert={modalOpen}>
+  return <div className={`shell ${notice ? "has-toast" : ""} ${session.view === "review" ? "in-review" : ""}`}>
+    <p className="sr-only" aria-live="polite">{announcement}</p>
+    {renderTopbar()}
+    <main className={`main ${session.view==="review"?"review-mode":""}`}>
       <section className="content-area">
         {session.view === "review" ? <div className="review-page">
-          <div className="review-head"><button className="back-button" onClick={leaveReview}><Icon name="left"/> Back to exploring</button><div className="eyebrow"><span className="live-dot"/> THE SECOND LOOK</div><h1>Review your<br/><em>shortlist.</em></h1><p>Compare your picks, remove any you’re unsure about, then save the ones you want to keep.</p></div>
+          <div className="review-head"><button className="back-button" onClick={leaveReview}><Icon name="left"/> Back to exploring</button><div className="eyebrow"><span className="live-dot"/> THE SECOND LOOK</div><h1>Review your<br/><em>shortlist.</em></h1><p>Compare your shortlist, remove any titles you’re unsure about, then save the rest.</p></div>
           {picks.length ? <>
-            <div className="review-bar"><span>{picks.length} {picks.length===1?"contender":"contenders"}</span><span>Remove any titles you don’t want to save</span></div>
+            <div className="review-bar"><span>{picks.length} {picks.length===1?"title":"titles"} shortlisted</span><span>Remove any titles you don’t want to save</span></div>
             <div className="review-grid">{picks.map(pick=><article className="review-card" key={pick.id}><Poster item={pick} className="review-poster"/><div className="review-card-info"><div className="card-overline"><span>{pick.category.toUpperCase()} · {pick.year}</span><span><Icon name="spark"/> {pick.rating}</span></div><h3>{pick.title}</h3><div className="tag-row">{pick.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}</div><p>{pick.synopsis}</p><button className="remove-review" onClick={()=>removeFromReview(pick.id)}><Icon name="close"/> Remove from shortlist</button></div></article>)}</div>
             {removed.length>0&&<div className="restored-list"><div><strong>Removed for now</strong><span>Changed your mind? Add any title back.</span></div>{removed.map(pick=><div className="restore-row" key={pick.id}><Poster item={pick} className="restore-poster"/><span>{pick.title}</span><button onClick={()=>restorePick(pick.id)}><Icon name="back"/> Restore</button></div>)}</div>}
-            <div className="review-actions"><button className="text-button" onClick={leaveReview}><Icon name="left"/> Keep browsing</button><button className="button button-accent" onClick={savePicks}>Save {picks.length} {picks.length===1?"pick":"picks"} <Icon name="arrow"/></button></div>
+            <div className="review-actions"><button className="text-button" onClick={leaveReview}><Icon name="left"/> Keep browsing</button><button className="button button-accent" onClick={savePicks}>Save {picks.length} {picks.length===1?"title":"titles"} <Icon name="arrow"/></button></div>
           </> : removed.length ? <>
-            <div className="review-bar"><span>No picks left in your maybe pile</span><span>Your removals are reversible</span></div><div className="restored-list">{removed.map(pick=><div className="restore-row" key={pick.id}><Poster item={pick} className="restore-poster"/><span>{pick.title}</span><button onClick={()=>restorePick(pick.id)}><Icon name="back"/> Restore</button></div>)}</div><div className="review-actions"><button className="text-button" onClick={leaveReview}><Icon name="left"/> Keep browsing</button></div>
-          </> : <div className="review-empty"><div className="empty-orbit"><Icon name="spark"/></div><h2>No picks in the maybe pile.</h2><p>Keep browsing and shortlist anything that catches your eye.</p><button className="button button-dark" onClick={leaveReview}>Keep browsing <Icon name="arrow"/></button></div>}
-          <div className="review-footnote">You can keep browsing before saving your picks.</div>
+            <div className="review-bar"><span>No titles left in your shortlist</span><span>Your removals are reversible</span></div><div className="restored-list">{removed.map(pick=><div className="restore-row" key={pick.id}><Poster item={pick} className="restore-poster"/><span>{pick.title}</span><button onClick={()=>restorePick(pick.id)}><Icon name="back"/> Restore</button></div>)}</div><div className="review-actions"><button className="text-button" onClick={leaveReview}><Icon name="left"/> Keep browsing</button></div>
+          </> : <div className="review-empty"><div className="empty-orbit"><Icon name="spark"/></div><h2>Your shortlist is empty.</h2><p>Keep browsing and shortlist anything that catches your eye.</p><button className="button button-dark" onClick={leaveReview}>Keep browsing <Icon name="arrow"/></button></div>}
+          <div className="review-footnote">You can keep browsing before saving your shortlist.</div>
         </div> : <div className="discover-layout">
-          {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}{discoveryPages[session.category].error && <> <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try now</button></>}</p>}
+          {catalogueNotice && <p className="catalogue-source-note" role="status">{catalogueNotice}{discoveryPages[session.category].error && <> <button className="text-button" onClick={() => retryCategory(session.category)}>Try now</button></>}</p>}
           <div className="discover-intro"><h1>{session.category}</h1></div>
-          {item ? <div className="deck-wrap"><div className="deck-meta"><span>{seenCount} reviewed <small>· {picks.length} shortlisted</small></span></div>
+          {item ? <div className="deck-wrap"><div className="deck-meta"><span>{seenCount} reviewed <small>· {categoryPicks} shortlisted</small></span></div>
             <div className={`card-stack ${nextItem ? "has-stack" : ""}`} aria-label="Media discovery card">
               {nextItem && <><span className="stack-shadow stack-shadow-one" aria-hidden="true"/><span className="stack-shadow stack-shadow-two" aria-hidden="true"/></>}
               {nextItem && renderMediaCard(nextItem, false)}
               {renderMediaCard(item, true)}
             </div>
-            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-keyshortcuts="ArrowLeft"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last swipe" title="Undo last swipe"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-keyshortcuts="ArrowRight"><small>Want to see</small><span><Icon name="right"/></span></button></div>
+            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-keyshortcuts="ArrowLeft"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last choice"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-keyshortcuts="ArrowRight"><small>Want to see</small><span><Icon name="right"/></span></button></div>
             <p id="card-controls-hint" className="sr-only">Press Enter for details. Use the left and right arrow keys to pass or shortlist.</p>
             {showSwipeHint && <p className="swipe-hint" aria-hidden="true">Drag the card, or use <kbd>←</kbd> <kbd>→</kbd></p>}
           </div> : <div className="empty-state" role="status"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
-            {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}
+            {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>More titles are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>{feedFailureMessage(discoveryPages[session.category].feed.sources)} Your saved choices are safe; try again in a moment.</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => retryCategory(session.category)}>Try again <Icon name="rewind"/></button></>}
           </div>}
           {learningError && <p className="sync-error" role="alert">{learningError}</p>}
           {saveStatus === "error" && <p className="sync-error" role="alert">Couldn’t sync your choices. They’ll retry automatically.</p>}
         </div>}
       </section>
-      {session.view==="discover"&&<aside className="shortlist-panel"><div className="panel-heading"><div><div className="eyebrow">YOUR SHORTLIST</div><h2>Your shortlist <span>{picks.length}</span></h2></div><button className="undo-button" onClick={undo} aria-label="Undo last choice" disabled={!session.history.length}><Icon name="rewind"/> Undo</button></div><p className="panel-copy">Temporary picks to compare before saving.</p>
+      {session.view==="discover"&&<aside className="shortlist-panel"><div className="panel-heading"><div><div className="eyebrow">YOUR SHORTLIST</div><h2>Your shortlist <span>{picks.length}</span></h2></div><button className="undo-button" onClick={undo} aria-label="Undo last choice" disabled={!session.history.length}><Icon name="rewind"/> Undo</button></div><p className="panel-copy">Titles to compare before saving.</p>
         <div className="tray-list">{picks.length?picks.slice(-4).reverse().map(pick=><div className="tray-item" key={pick.id}><Poster item={pick} className="tray-poster"/><div><strong>{pick.title}</strong><small>{pick.year} · {pick.type}</small></div><button onClick={()=>removePick(pick.id)} aria-label={`Remove ${pick.title} from shortlist`}><Icon name="close"/></button></div>):<div className="tray-empty"><div className="tray-spark">✳</div><span>Shortlisted titles<br/>will appear here.</span></div>}</div>
         {picks.length>4&&<div className="more-picks">+ {picks.length-4} more in your shortlist</div>}
-        <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in the maybe pile</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
+        <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in your shortlist</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
       </aside>}
     </main>
     {details&&<Modal className="details-modal" labelledBy="modal-title" onClose={()=>setDetails(null)}><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{displayMetadata(details, true)}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}{details.rating !== "—" && <span>★ {details.rating}</span>}</div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}{
       item?.id===details.id&&!session.shortlisted.includes(details.id)&&!session.saved.includes(details.id)
-        ? <button className="button button-accent" onClick={()=>{decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button>
+        ? <button className="button button-accent" onClick={()=>{decide("keep");setDetails(null);showNotice("Added to your shortlist");}}>Add to shortlist <Icon name="arrow"/></button>
         : <p className="details-status" role="status">{session.saved.includes(details.id) ? "Saved for later." : session.shortlisted.includes(details.id) ? "Already in your shortlist." : ""}</p>
     }</div></Modal>}
     {ageOpen&&<Modal className="age-modal" labelledBy="age-title" onClose={()=>setAgeOpen(false)}><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes and may display explicit artwork.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></Modal>}
     {savedOpen && <Modal className="saved-modal" labelledBy="saved-title" onClose={() => setSavedOpen(false)}>
         <button className="modal-close" onClick={() => setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close" /></button>
-        <div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div>
+        <div className="eyebrow">YOUR SAVED TITLES</div>
         <h2 id="saved-title">Saved for later</h2>
         {justSaved && <p className="saved-undo" role="status">{justSaved.ids.length} {justSaved.ids.length===1?"title":"titles"} saved. <button className="toast-action" type="button" onClick={() => { withdrawSaved(justSaved.ids, true, justSaved.history); setSavedOpen(false); }}>Undo</button></p>}
         <p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>

@@ -7,7 +7,7 @@ import { getTmdbCreditFeatures, getTmdbRecommendationFeatures } from "@/lib/prov
 import { getThePornDBRecommendationFeatures } from "@/lib/providers/theporndb";
 import { getStashDbRecommendationMetadata } from "@/lib/providers/stashdb";
 import type { RecommendationCategory, RecommendationEventInput } from "@/lib/recommendation-event-validation";
-import { recommendationProfileQuery } from "@/lib/recommendation-profile-query";
+import { recommendationConsideredBeforeQuery, recommendationProfileHistoryLimit, recommendationProfileQuery } from "@/lib/recommendation-profile-query";
 
 /**
  * The caller must authorize Adult access before entering this function.
@@ -16,6 +16,10 @@ import { recommendationProfileQuery } from "@/lib/recommendation-profile-query";
  */
 export async function loadRecommendationProfile(userId: string, category: RecommendationCategory, knownFeatureIds: string[] = [], hydrate = true) {
   const rows = (await prisma.recommendationEvent.findMany(recommendationProfileQuery(userId, category))).reverse();
+  // Only a full window can have older history; its titles stay excluded from the deck without training it.
+  const olderConsideredIds = rows.length >= recommendationProfileHistoryLimit
+    ? (await prisma.recommendationEvent.findMany(recommendationConsideredBeforeQuery(userId, category, rows[0].occurredAt))).flatMap(row => row.itemId ? [row.itemId] : [])
+    : [];
   const events: RecommendationEventInput[] = rows.map(row => ({
     id: row.id, sessionId: row.sessionId, reviewId: row.reviewId, sequence: row.sequence, itemId: row.itemId,
     candidateIds: null, category, eventType: row.eventType as RecommendationEventInput["eventType"],
@@ -61,6 +65,7 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
     creditCoverage: { requested: creditRequested, resolved: creditResolved }, resolvedCreditItemIds, requestedCreditItemIds,
     // Successful or not, these were tried; callers pass them back so a failing title is not refetched on every read.
     attemptedFeatureItemIds: requestedIds,
+    olderConsideredIds,
     creditFeatures: creditPreferences(profile.signals).filter(feature => feature.positiveTitles >= 2 && feature.score > 0),
     retrievalFeatures, stashTagIds: retrievalFeatures.flatMap(key => stashTags[key] ? [stashTags[key]] : []),
   };

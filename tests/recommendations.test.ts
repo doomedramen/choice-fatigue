@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MediaItem } from "../src/data";
-import { buildRecommendationProfile, effectiveRecommendationEvents, mergeRecommendationEvents, rankRecommendations, recommendationBaseline, recommendationComparisonsFromHistory, recommendationFeatureItemIds, recommendationRetrievalFeatures, recommendationSignalsFromHistory, relatedShowSeeds, reviewRatingWeights, shownCandidateIds, type RecommendationHistoryEvent } from "../src/lib/recommendations";
+import { buildRecommendationProfile, capGenreRuns, effectiveRecommendationEvents, mergeRecommendationEvents, rankRecommendations, recommendationBaseline, recommendationComparisonsFromHistory, recommendationFeatureItemIds, recommendationRetrievalFeatures, recommendationSignalsFromHistory, relatedShowSeeds, reviewRatingWeights, shownCandidateIds, type RecommendationHistoryEvent } from "../src/lib/recommendations";
 
 const item = (id: string, genre: string, rating = "—"): MediaItem => ({ id, title: id, type: "Movie", runtime: "90m", rating, genre: genre ? [genre] : [], synopsis: "", palette: ["#000", "#111", "#222"], art: "mist", label: id, category: "Movies" });
 const event = (overrides: Partial<RecommendationHistoryEvent> = {}): RecommendationHistoryEvent => ({ id: "e", sessionId: "run", reviewId: null, itemId: "old", category: "Movies", eventType: "decision", decision: "keep", rating: null, targetEventId: null, occurredAt: "2026-10-31T10:00:00.000Z", ...overrides });
@@ -107,4 +107,13 @@ test("shown traces put the locked card first and bound accumulated catalogues", 
   assert.deepEqual(ranked.map(row => row.id), ["c", "b"]);
   assert.deepEqual(shownCandidateIds("b", ranked.map(row => row.id)), ["b", "c"]);
   assert.equal(shownCandidateIds("locked", Array.from({ length: 120 }, (_, index) => String(index))).length, 100);
+});
+test("learned rankings break up long same-genre runs only among near-equal scores", () => {
+  const entry = (id: string, genre: string, score: number) => ({ item: item(id, genre), score });
+  const ranked = [entry("d1", "Drama", 1), entry("d2", "Drama", 0.95), entry("d3", "Drama", 0.9), entry("c1", "Comedy", 0.85), entry("h1", "Horror", 0.2)];
+  assert.deepEqual(capGenreRuns(ranked).map(row => row.item.id), ["d1", "d2", "c1", "d3", "h1"]);
+  const farBehind = [entry("d1", "Drama", 1), entry("d2", "Drama", 0.95), entry("d3", "Drama", 0.9), entry("c1", "Comedy", 0.5)];
+  assert.deepEqual(capGenreRuns(farBehind).map(row => row.item.id), ["d1", "d2", "d3", "c1"], "a clearly worse match is never promoted");
+  const coldStart = [item("a", "Drama"), item("b", "Drama"), item("c", "Drama"), item("d", "Comedy")];
+  assert.deepEqual(rankRecommendations(coldStart).items.map(row => row.id), ["a", "b", "c", "d"], "provider order is untouched without signals");
 });
