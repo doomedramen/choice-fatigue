@@ -90,7 +90,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .card-stack.has-next-card::before, .card-stack.has-next-card::after { position: absolute; z-index: 0; top: 4px; right: calc(var(--card-inset) - 5px); bottom: 0; left: calc(var(--card-inset) + 5px); border: 1px solid #38445c; border-radius: 16px; content: ""; pointer-events: none; }
 .card-stack.has-next-card::before { background: #202a3d; box-shadow: 0 12px 26px #0004; transform: rotate(.9deg); }
 .card-stack.has-next-card::after { top: 2px; right: calc(var(--card-inset) - 9px); bottom: -1px; left: calc(var(--card-inset) + 9px); background: #192234; box-shadow: 0 14px 30px #0005; transform: rotate(1.7deg); }
-.media-card { position: relative; z-index: 2; display: grid; width: min(100%, 380px); justify-self: center; grid-area: 1 / 1; grid-template-rows: auto 170px; aspect-ratio: auto; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
+.media-card { position: relative; z-index: 2; display: grid; width: min(100%, 380px); justify-self: center; grid-area: 1 / 1; grid-template-rows: auto minmax(170px, max-content); aspect-ratio: auto; min-width: 0; overflow: hidden; border: 1px solid #38445c; border-radius: 16px; background: var(--surface); box-shadow: 0 18px 40px #0005; touch-action: pan-y; user-select: none; transition: box-shadow 160ms ease-out, transform 150ms ease-out, opacity 110ms ease-out; }
 .media-card.control-exit { transition: box-shadow 160ms ease-out, transform 230ms var(--ease-out), opacity 170ms ease-out; }
 .media-card.card-under { z-index: 1; box-shadow: none; pointer-events: none; }
 .media-card.card-under .card-poster, .media-card.card-under .card-content { pointer-events: none; }
@@ -327,7 +327,7 @@ button:active:not(:disabled) { transform: scale(.98); }
   .main { display: grid; grid-template-columns: minmax(0,1fr) 290px; gap: 0 28px; padding: 0 4%; }
   .main.review-mode { grid-template-columns: minmax(0,1fr); }
   .content-area { order: 0; min-height: calc(100vh - 76px); padding: 34px 0 25px; }
-  .discover-layout { min-height: calc(100vh - 135px); }
+  .discover-layout { max-width: none; min-height: calc(100vh - 135px); }
   .discover-intro { margin-bottom: 22px; }
   .discover-intro h1, .review-head h1 { font-size: clamp(42px, 5vw, 58px); }
   .discover-intro p, .review-head p { font-size: 16px; }
