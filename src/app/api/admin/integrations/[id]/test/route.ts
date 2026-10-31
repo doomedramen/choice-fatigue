@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (!(await getGlobalSettings()).adultSectionEnabled) return jsonError("Enable the Adult section before checking this service.", 403);
     }
     const endpoint = row.service === "seerr"
-      ? "api/v1/settings/network"
+      ? "api/v1/settings/public"
       : row.service === "radarr" || row.service === "sonarr"
         ? "api"
         : row.service === "plex"
