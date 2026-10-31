@@ -176,6 +176,10 @@ button:active:not(:disabled) { transform: scale(.98); }
 .decision-button small { font-size: 13px; font-weight: 800; letter-spacing: .1px; }
 .decision-button.pass:hover > span { background: #703d42; }
 .decision-button.keep:hover > span { background: #44337b; }
+.undo-swipe-button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid #47536a; border-radius: 11px; background: #121a29; color: #c7d0df; font-size: 13px; font-weight: 750; transition: background 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out; }
+.undo-swipe-button svg { width: 17px; height: 17px; }
+.undo-swipe-button:hover:not(:disabled) { border-color: #7860bd; background: #202941; color: #fff; }
+.undo-swipe-button:disabled { opacity: .4; }
 .small-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #47536a; border-radius: 12px; background: #1a2333; color: #e7eaf1; }
 .small-icon svg { width: 18px; height: 18px; }
 .small-icon:disabled { opacity: .4; }
