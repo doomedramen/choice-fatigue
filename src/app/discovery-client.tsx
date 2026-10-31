@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { useRouter } from "next/navigation";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
-import { rankSessionRecommendations, type RecommendationComparison, type RecommendationSignal } from "@/lib/recommendations";
+import { rankSessionRecommendations, recommendationSignalsFromHistory, type RecommendationComparison, type RecommendationSignal } from "@/lib/recommendations";
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
 import { createClientUuid } from "@/lib/client-uuid";
 import type { CategoryFeedStatus } from "@/lib/catalogue";
@@ -158,7 +158,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const learningQueue = useRef<LearningEvent[]>([]);
   const learningWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const learningSequence = useRef(0);
-  const [historicalProfile, setHistoricalProfile] = useState<{ category: Category; sessionId: string; signals: RecommendationSignal[]; comparisons: RecommendationComparison[] }>({ category: "Movies", sessionId: "", signals: [], comparisons: [] });
+  const [historicalProfile, setHistoricalProfile] = useState<{ category: Category; sessionId: string; signals: RecommendationSignal[]; comparisons: RecommendationComparison[]; consideredIds: string[] }>({ category: "Movies", sessionId: "", signals: [], comparisons: [], consideredIds: [] });
   const activeRecommendationContext = useRef({ category: session.category, sessionId: session.sessionId });
   activeRecommendationContext.current = { category: session.category, sessionId: session.sessionId };
   const catalogue = catalogueItems.filter(item => adultSectionEnabled || item.category !== "Adult");
@@ -166,6 +166,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const categoryItemSignature = categoryItems.map(item => item.id).join(",");
   const historicalSignals = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.signals : [];
   const historicalComparisons = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.comparisons : [];
+  const historicalConsideredIds = historicalProfile.category === session.category && historicalProfile.sessionId === session.sessionId ? historicalProfile.consideredIds : [];
   const savedIds = new Set(session.saved);
   const recommendationSignals = [
     ...historicalSignals.filter(signal => !(signal.weight === 1.5 && savedIds.has(signal.itemId))),
@@ -173,7 +174,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   ];
   const recommendations = rankSessionRecommendations(categoryItems, session.decisions, session.ratings, recommendationSignals, historicalComparisons);
   const items = recommendations.items;
-  const previouslyConsideredIds = new Set(historicalSignals.map(signal => signal.itemId));
+  const queuedConsideredIds = recommendationSignalsFromHistory(learningQueue.current, null, session.category).map(signal => signal.itemId);
+  const previouslyConsideredIds = new Set([...historicalSignals.map(signal => signal.itemId), ...historicalConsideredIds, ...queuedConsideredIds]);
   const remainingItems = items.filter(candidate => !session.decisions[candidate.id] && !previouslyConsideredIds.has(candidate.id));
   const item = remainingItems.find(candidate => candidate.id === session.lockedItemId) ?? remainingItems[0];
   const nextItem = remainingItems.find(candidate => candidate.id !== item?.id);
@@ -280,8 +282,14 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
           }
         }
       } catch { /* Keep any in-memory queued events when browser storage is unavailable. */ }
+      if (learningQueue.current.length) {
+        const context = { category: session.category, sessionId: session.sessionId };
+        const queuedSignals = recommendationSignalsFromHistory(learningQueue.current, context.sessionId, context.category);
+        const queuedConsideredIds = recommendationSignalsFromHistory(learningQueue.current, null, context.category).map(signal => signal.itemId);
+        setHistoricalProfile({ ...context, signals: queuedSignals, comparisons: [], consideredIds: queuedConsideredIds });
+        await flushLearningQueue();
+      }
       await refreshHistoricalProfile();
-      if (learningQueue.current.length) void flushLearningQueue();
     }
     void loadLearningData();
   }, [ready, session.sessionId, session.category, userId, adultSectionEnabled]);
@@ -347,10 +355,18 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
       for (const candidate of catalogue.filter(item => item.category === context.category).slice(0, 100)) query.append("candidateId", candidate.id);
       const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = await response.json() as { signals?: RecommendationSignal[]; comparisons?: RecommendationComparison[] };
+      const data = await response.json() as { signals?: RecommendationSignal[]; comparisons?: RecommendationComparison[]; consideredIds?: string[] };
       const current = activeRecommendationContext.current;
       if (current.category === context.category && current.sessionId === context.sessionId) {
-        setHistoricalProfile({ ...context, signals: Array.isArray(data.signals) ? data.signals : [], comparisons: Array.isArray(data.comparisons) ? data.comparisons : [] });
+        const savedSignals = Array.isArray(data.signals) ? data.signals : [];
+        const queuedSignals = recommendationSignalsFromHistory(learningQueue.current, context.sessionId, context.category);
+        const queuedConsideredIds = recommendationSignalsFromHistory(learningQueue.current, null, context.category).map(signal => signal.itemId);
+        setHistoricalProfile({
+          ...context,
+          signals: [...savedSignals, ...queuedSignals],
+          comparisons: Array.isArray(data.comparisons) ? data.comparisons : [],
+          consideredIds: [...new Set([...(Array.isArray(data.consideredIds) ? data.consideredIds : []), ...queuedConsideredIds])],
+        });
       }
     } catch { /* Discovery continues with the current session's signals. */ }
   }

@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
       select: { id: true, sessionId: true, reviewId: true, itemId: true, eventType: true, decision: true, rating: true, targetEventId: true, category: true },
     });
     const signals = recommendationSignalsFromHistory(rows, excludeSessionId, category);
+    const consideredIds = [...new Set(recommendationSignalsFromHistory(rows, null, category).map(signal => signal.itemId))];
     // Comparisons are additional evidence, not a duplicate of the current session's decision signals.
     const comparisons = recommendationComparisonsFromHistory(rows, null, category);
     const profileView = request.nextUrl.searchParams.get("profile") === "1";
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
       ...(featureKeysById.has(comparison.preferredItemId) ? { preferredFeatureKeys: featureKeysById.get(comparison.preferredItemId) } : {}),
       ...(featureKeysById.has(comparison.removedItemId) ? { removedFeatureKeys: featureKeysById.get(comparison.removedItemId) } : {}),
     }));
-    return NextResponse.json({ signals: enrichedSignals, comparisons: enrichedComparisons }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ signals: enrichedSignals, comparisons: enrichedComparisons, consideredIds }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return errorResponse(error);
   }
