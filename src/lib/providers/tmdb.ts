@@ -2,6 +2,7 @@ import "server-only";
 import { requestProviderJson } from "@/lib/providers/request";
 import { creditFeatureKeys } from "@/lib/credit-features";
 import { tmdbPeople } from "@/lib/media-people";
+import { hasUsableTmdbDiscoveryMetadata } from "@/lib/tmdb-discovery-quality";
 import type { MediaItem } from "@/data";
 import { recommendationFeatureKeys } from "@/lib/recommendations";
 import { getEnabledTmdbToken, TmdbConfigurationError, TmdbNotEnabledError } from "@/lib/providers/tmdb-config";
@@ -100,7 +101,7 @@ export async function getTmdbMediaItem(mediaType: TmdbMediaType, tmdbId: number)
   if (!title) throw new TmdbRequestError();
   const category: TmdbCategory = mediaType === "movie" ? "Movies" : "Shows";
   const genres = Array.isArray(record.genres) ? record.genres.map(genre => text(genre.name)).filter(Boolean).slice(0, 8) : [];
-  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average) ? Math.min(10, Math.max(0, record.vote_average)).toFixed(1) : "—";
+  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average) && record.vote_average > 0 && record.vote_count !== 0 ? Math.min(10, record.vote_average).toFixed(1) : "—";
   return {
     id: `tmdb-${mediaType}-${tmdbId}`,
     title,
@@ -130,13 +131,14 @@ function discoveryEntry(record: TmdbRecord, category: TmdbCategory, displayOrder
   if (!mediaType || record.adult === true || typeof record.id !== "number" || !Number.isSafeInteger(record.id) || record.id < 1) return null;
   const title = titleFor(record, mediaType);
   if (!title) return null;
+  if (!hasUsableTmdbDiscoveryMetadata(mediaType === "movie" ? record.release_date : record.first_air_date, record.poster_path, record.overview)) return null;
 
   const genreIds = Array.isArray(record.genre_ids) ? record.genre_ids : [];
   const genres = [...new Set(genreIds
     .filter((id): id is number => typeof id === "number")
     .map(id => genresById.get(id))
     .filter((genre): genre is string => Boolean(genre)))].slice(0, 8);
-  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average)
+  const rating = typeof record.vote_average === "number" && Number.isFinite(record.vote_average) && record.vote_average > 0 && record.vote_count !== 0
     ? Math.min(10, Math.max(0, record.vote_average))
     : null;
   const sourceId = `${mediaType}:${record.id}`;

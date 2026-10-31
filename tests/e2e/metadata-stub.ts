@@ -47,7 +47,7 @@ const server = createServer(async (request, response) => {
     const personalized = Boolean(url.searchParams.get("with_genres"));
     const credits = ["with_cast", "with_crew", "with_companies"].some(param => url.searchParams.has(param));
     const result = isMovie ? movie : show;
-    const records = control.emptyTmdb ? [] : credits ? page === 1 ? [result(9920, "Credit Match", 18)] : [] : personalized
+    const records = control.emptyTmdb ? [] : credits ? page === 1 ? [result(9920, "Credit Match", 18), ...(isMovie ? [{ ...movie(9930, "Incomplete Film", 18), release_date: "", overview: "Plot to be announced.", vote_average: 0, vote_count: 0 }, { ...movie(9931, "Unrated Film", 18), vote_average: 0, vote_count: 0 }] : [])] : [] : personalized
       ? page === 1 ? Array.from({ length: 5 }, (_, i) => result(9001 + i, `Niche Animation ${i + 1}`, 16)) : []
       : control.extended ? page <= 8 ? Array.from({ length: 20 }, (_, i) => { const id = 101 + (page - 1) * 20 + i; return result(id, `Paged ${isMovie ? "Movie" : "Show"} ${id}`, id % 3 === 1 ? 35 : 18); }) : []
       : page === 1 ? isMovie ? [movie(101, "Mock Movie One", 18), movie(102, "Mock Movie Two", 35)] : [show(201, "Mock Show One", 18), show(202, "Mock Show Two", 35)] : [];

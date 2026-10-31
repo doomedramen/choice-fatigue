@@ -71,9 +71,14 @@ function Poster({ item, className="", loading="lazy" }: { item: MediaItem; class
   const style = { "--p1":item.palette[0], "--p2":item.palette[1], "--p3":item.palette[2] } as CSSProperties;
   return <div className={`poster art-${item.art} ${source?"has-artwork":""} ${className}`} style={style}>
     {source&&<img className="poster-artwork" src={source} alt="" loading={loading} draggable={false} referrerPolicy="no-referrer" onError={() => setFailedSource(source)}/>}<div className="poster-grain"/><div className="poster-mark" aria-hidden="true"/>
+    {!source && className.split(/\s+/).includes("card-poster") && <span className="poster-unavailable">Artwork unavailable</span>}
     <div className="poster-copy"><span className="poster-kicker">{item.category === "Adult" ? "AFTER DARK · 18+" : item.type.toUpperCase()}</span><strong>{item.title}</strong><small>{item.label}</small></div>
     <span className="poster-year">{item.year}</span>
   </div>;
+}
+
+function displayMetadata(item: MediaItem, includeCategory = false) {
+  return [includeCategory ? item.category.toUpperCase() : "", item.year, item.runtime !== "—" ? item.runtime : ""].filter(Boolean).join(" · ");
 }
 
 function unavailableSavedItem(id: string): MediaItem {
@@ -804,7 +809,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
       <Poster item={candidate} className="card-poster" loading="eager"/>
       <div className="card-poster-tags tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}</div>
       <div className="card-content">
-          <div className="card-overline"><span>{candidate.year} · {candidate.runtime}</span><span><Icon name="spark"/> {candidate.rating}</span></div>
+          <div className="card-overline"><span>{displayMetadata(candidate) || "Details unavailable"}</span>{candidate.rating !== "—" && <span><Icon name="spark"/> {candidate.rating}</span>}</div>
           <h2>{candidate.title}</h2>
           <div className="card-footer">
             <div className="card-actions">
@@ -896,7 +901,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
         <div className="panel-bottom"><div className="panel-count"><span className="count-dot"/>{picks.length} {picks.length===1?"title":"titles"} in the maybe pile</div><button className="button button-dark review-button" onClick={beginReview} disabled={!picks.length}>Review &amp; compare <Icon name="arrow"/></button></div><div className="privacy-note"><Icon name="spark"/> Synced to your account</div>
       </aside>}
     </main>
-    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{details.category.toUpperCase()} · {details.year} · {details.runtime}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}<span>★ {details.rating}</span></div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(item?.id===details.id&&!session.shortlisted.includes(details.id))decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
+    {details&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setDetails(null);}}><section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={()=>setDetails(null)} aria-label="Close details"><Icon name="close"/></button><DetailsBackdrop key={details.id} item={details}/><div className="modal-info"><div className="eyebrow">{displayMetadata(details, true)}</div><h2 id="modal-title">{details.title}</h2><div className="tag-row">{details.genre.map(genre=><span key={genre}>{genre}</span>)}{details.rating !== "—" && <span>★ {details.rating}</span>}</div><p>{details.synopsis}</p><DetailsPeople key={details.id} item={details}/>{details.age&&<div className="age-note"><Icon name="lock"/> Adults only · 18+</div>}<button className="button button-accent" onClick={()=>{if(item?.id===details.id&&!session.shortlisted.includes(details.id))decide("keep");setDetails(null);showNotice("Added to your maybe pile");}}>Add to shortlist <Icon name="arrow"/></button></div></section></div>}
     {ageOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setAgeOpen(false);}}><section className="age-modal" role="dialog" aria-modal="true" aria-labelledby="age-title"><div className="age-icon"><Icon name="lock"/></div><div className="eyebrow">A PRIVATE SECTION</div><h2 id="age-title">Before you step inside</h2><p>This section is for adults aged 18 and over. It contains mature themes and may display explicit artwork.</p><div className="age-actions"><button className="button button-quiet" onClick={()=>setAgeOpen(false)}>Not now</button><button className="button button-accent" onClick={()=>{setSession(current=>({...current,ageVerified:true,category:"Adult",lockedItemId:null}));setAgeOpen(false);}}>I’m 18 or older <Icon name="arrow"/></button></div><small>Your choice is remembered on your account.</small></section></div>}
     {savedOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
       <section className="saved-modal" role="dialog" aria-modal="true" aria-labelledby="saved-title">

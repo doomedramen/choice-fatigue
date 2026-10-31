@@ -126,6 +126,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .card-poster.has-artwork { background: #0b111c; }
 .card-poster .poster-artwork { object-fit: contain; }
 .card-poster .poster-copy, .card-poster .poster-year { display: none; }
+.poster-unavailable { position: absolute; z-index: 1; right: 14px; bottom: 14px; left: 14px; color: #c8d0dc; font-size: 12px; font-weight: 700; text-align: center; }
 .card-content { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: 9px 12px; }
 .card-overline { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #bac4d5; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
 .card-overline svg { width: 15px; height: 15px; margin-right: 3px; color: #b8a4ff; vertical-align: middle; }

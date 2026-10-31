@@ -53,7 +53,7 @@ export async function advanceFeedStreams(
       const result = await load(stream);
       const ids = [...new Set(result.items.map(item => item.id))].slice(0, 100);
       const hash = fingerprint(ids);
-      const repeated = stream.fingerprint === hash;
+      const repeated = ids.length > 0 && stream.fingerprint === hash;
       stream.fingerprint = hash;
       stream.done = repeated || !result.hasMore || stream.page >= 500;
       const fetchedPage = stream.page;

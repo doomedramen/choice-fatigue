@@ -40,6 +40,15 @@ test("a failed source retains its page while successful sources advance", async 
   assert.equal(result.status.outcome, "ready");
   assert.equal(result.sources[0].outcome, "unavailable");
 });
+
+test("empty filtered pages do not stop a stream before a later page", async () => {
+  const load = async (source: FeedStream) => ({ items: source.page < 3 ? [] : [item("later")], hasMore: source.page < 3 });
+  const first = await advanceFeedStreams([stream("tmdb")], load, ids => ids.join(","));
+  const second = await advanceFeedStreams(first.streams, load, ids => ids.join(","));
+  assert.equal(second.streams[0].done, false);
+  const third = await advanceFeedStreams(second.streams, load, ids => ids.join(","));
+  assert.deepEqual(third.items.map(row => row.id), ["later"]);
+});
 test("Adult streams paginate independently, stop repeated pages, and skip exhausted lanes", async () => {
   const first = await advanceFeedStreams([stream("theporndb"), stream("stashdb")], async source => ({ items: [item(source.source)], hasMore: true }), ids => ids.join(","));
   const second = await advanceFeedStreams(first.streams, async source => ({ items: [item(source.source)], hasMore: true }), ids => ids.join(","));

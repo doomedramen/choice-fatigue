@@ -311,6 +311,9 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "personalized")).toBe(true);
   expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "person")).toBe(true);
   expect(personalized.batches.some((batch: { lane: string }) => batch.lane === "company")).toBe(true);
+  expect(personalized.items.some((item: { id: string }) => item.id === "tmdb-movie-9930")).toBe(false);
+  expect(personalized.batches.some((batch: { candidateIds: string[] }) => batch.candidateIds.includes("tmdb-movie-9930"))).toBe(false);
+  expect(personalized.items.find((item: { id: string }) => item.id === "tmdb-movie-9931")?.rating).toBe("—");
   expect(await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status)).toBe(403);
   expect(await page.evaluate(async () => (await fetch("/api/recommendation-events?category=Adult")).status)).toBe(403);
   expect(await page.evaluate(async () => (await fetch("/api/media/people?id=stashdb-stash-scene-1")).status)).toBe(403);

@@ -12,3 +12,6 @@ npm-debug.log*
 !.env.example
 deploy/env.compose
 /test-results
+/.agents
+/.claude
+/.windsurf
