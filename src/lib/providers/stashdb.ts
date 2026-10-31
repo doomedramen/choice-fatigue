@@ -1,5 +1,6 @@
 import "server-only";
 import { requestProviderJson } from "@/lib/providers/request";
+import { providerArtworkUrl } from "@/lib/provider-artwork";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
@@ -18,6 +19,7 @@ type StashScene = {
   duration?: unknown;
   tags?: StashTag[];
   studio?: StashStudio;
+  images?: Array<{ url?: unknown } | null>;
 };
 
 type GraphqlResponse<T> = { data?: T; errors?: Array<{ message?: unknown }> };
@@ -80,6 +82,7 @@ function normalizeScene(scene: StashScene) {
     synopsis: stringValue(scene.details).slice(0, 3000),
     ...(runtimeFrom(scene.duration) ? { runtime: runtimeFrom(scene.duration) } : {}),
     genres,
+    artworkUrl: providerArtworkUrl(...(Array.isArray(scene.images) ? scene.images.map(image => image?.url) : [])),
   };
 }
 
@@ -92,6 +95,7 @@ const findQuery = `query FindSceneById($id: ID!) {
     duration
     tags { id name }
     studio { name }
+    images { url }
   }
 }`;
 
@@ -106,6 +110,7 @@ const popularQuery = `query PopularScenes($input: SceneQueryInput!) {
       duration
       tags { id name }
       studio { name }
+      images { url }
     }
   }
 }`;
@@ -132,6 +137,7 @@ function stashDbMediaItem(scene: NonNullable<ReturnType<typeof normalizeScene>>)
     id: `stashdb-${scene.sourceId}`,
     title: scene.title,
     ...(scene.year ? { year: scene.year } : {}),
+    ...(scene.artworkUrl ? { artworkUrl: scene.artworkUrl } : {}),
     type: "Scene",
     runtime: scene.runtime ?? "—",
     rating: "—",

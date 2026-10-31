@@ -1,5 +1,6 @@
 import "server-only";
 import { requestProviderJson } from "@/lib/providers/request";
+import { providerArtworkUrl } from "@/lib/provider-artwork";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { getEnabledAdultMetadataProviderConfig } from "@/lib/providers/adult-metadata-config";
 import type { MediaItem } from "@/data";
@@ -19,6 +20,8 @@ type ThePornDBRecord = {
   tags?: unknown;
   type?: unknown;
   rating?: unknown;
+  image?: unknown;
+  poster?: unknown;
 };
 
 type ThePornDBPayload = { data?: ThePornDBRecord[] | ThePornDBRecord; meta?: { last_page?: number; current_page?: number }; links?: { next?: string | null } };
@@ -106,10 +109,12 @@ function popularItem(record: ThePornDBRecord, kind: ThePornDBKind): MediaItem | 
   const rating = typeof record.rating === "number" && Number.isFinite(record.rating)
     ? Math.min(10, Math.max(0, record.rating))
     : null;
+  const artworkUrl = providerArtworkUrl(record.poster, record.image);
   return {
     id: `theporndb-${kind}-${result.sourceId}`,
     title: result.title,
     ...(result.year ? { year: result.year } : {}),
+    ...(artworkUrl ? { artworkUrl } : {}),
     type: kind === "movie" ? "Movie" : "Scene",
     runtime: result.runtime ?? "—",
     rating: rating === null ? "—" : rating.toFixed(1),

@@ -321,6 +321,8 @@ test("profiles retrieve niche candidates, Adult access gates hydration, and prov
   await request.post("http://127.0.0.1:4199/__control", { data: { extended: true } });
   const adult = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).json());
   expect(adult.items.some((item: { id: string }) => item.id === "stashdb-stash-personalized")).toBe(true);
+  expect(adult.items.some((item: { id: string; artworkUrl?: string }) => item.id.startsWith("stashdb-") && item.artworkUrl === "https://images.example.test/stash.jpg")).toBe(true);
+  expect(adult.items.some((item: { id: string; artworkUrl?: string }) => item.id.startsWith("theporndb-") && item.artworkUrl === "https://images.example.test/poster.jpg")).toBe(true);
   expect(adult.cursor).toBeTruthy();
   const next = await page.evaluate(async cursor => (await fetch(`/api/discovery-feed?category=Adult&cursor=${encodeURIComponent(cursor)}`)).json(), adult.cursor);
   expect(next.items.some((item: { id: string }) => item.id === "theporndb-scene-adult-scene-26")).toBe(true);
