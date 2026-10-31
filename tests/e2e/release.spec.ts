@@ -117,7 +117,7 @@ test("first run, account access, provider discovery, saved state and account con
   await page.getByRole("button", { name: "Close saved titles" }).click();
   await expect(page.getByRole("heading", { name: "Mock Movie Two" })).toBeVisible();
   await page.getByRole("button", { name: "Seen it: rate Mock Movie Two" }).click();
-  await page.getByRole("radio", { name: "10 out of 10" }).click({ force: true });
+  await page.getByRole("button", { name: "10 out of 10", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Movies", exact: true })).toBeVisible();
 
   const exportData = await page.evaluate(async () => (await fetch("/api/account/export")).json());
@@ -390,7 +390,7 @@ test("a high show rating refreshes related discovery without moving the locked c
   await page.getByRole("navigation", { name: "Media categories" }).getByRole("button", { name: "Shows" }).click();
   await expect(page.locator(".card-active h2")).toHaveText("Mock Show One");
   await page.getByRole("button", { name: "Seen it: rate Mock Show One" }).click();
-  await page.getByRole("radio", { name: "9 out of 10" }).click({ force: true });
+  await page.getByRole("button", { name: "9 out of 10", exact: true }).click();
   await expect(page.locator(".card-active h2")).toHaveText("Mock Show Two");
   await expect.poll(async () => page.evaluate(async () => {
     const events = (await (await fetch("/api/account/export")).json()).recommendationHistory;
@@ -398,7 +398,7 @@ test("a high show rating refreshes related discovery without moving the locked c
   }), { timeout: 30_000 }).toBe(true);
   await expect(page.locator(".card-active h2")).toHaveText("Mock Show Two");
   await page.getByRole("button", { name: "Seen it: rate Mock Show Two" }).click();
-  await page.getByRole("radio", { name: "9 out of 10" }).click({ force: true });
+  await page.getByRole("button", { name: "9 out of 10", exact: true }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const events = (await (await fetch("/api/account/export")).json()).recommendationHistory;
     return events.some((event: { lane: string }) => event.lane === "person") && events.some((event: { lane: string }) => event.lane === "company");
@@ -456,6 +456,7 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
   await page.goto("/");
   await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
   await expect(page.getByText(/Drag the card, or use/)).toBeVisible();
+  expect(await page.locator(".decision-row").evaluate(row => row.getBoundingClientRect().bottom <= window.innerHeight), "Pass and Keep fit above the fold").toBe(true);
 
   const details = page.getByRole("button", { name: "Details for Mock Movie One" });
   await details.click();
@@ -481,7 +482,10 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
   await page.getByRole("button", { name: "Review & compare" }).click();
   await page.getByRole("button", { name: "Save 1 pick" }).click();
   await expect(page.getByRole("dialog", { name: "Saved for later" })).toBeVisible();
-  await page.locator(".toast").getByRole("button", { name: "Undo" }).click();
+  const undoSave = page.getByRole("dialog").getByRole("button", { name: "Undo" });
+  for (let index = 0; index < 6 && !(await undoSave.evaluate(button => button === document.activeElement)); index++) await page.keyboard.press("Tab");
+  await expect(undoSave).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "Saved for later" })).toHaveCount(0);
   await expect(shortlistCount).toHaveText("1");
 
@@ -494,4 +498,25 @@ test("dialogs hold keyboard focus, and saves and removals can be undone on a pho
     return history.filter(event => event.eventType === "save_withdrawn").length;
   })).toBe(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("arrow keys decide from the first card, and rating keys move focus without committing", async ({ page }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await page.goto("/");
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie One");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie Two");
+  await expect(page.locator(".panel-heading h2 span")).toHaveText("1");
+  await page.getByRole("button", { name: "Seen it: rate Mock Movie Two" }).click();
+  await expect(page.getByRole("button", { name: "1 out of 10", exact: true })).toBeFocused();
+  for (let index = 0; index < 4; index++) await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: "5 out of 10", exact: true })).toBeFocused();
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Movie Two");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Mock Movie Two" })).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async () => {
+    const history = (await (await fetch("/api/account/export")).json()).recommendationHistory as Array<{ eventType: string; itemId: string; rating: number | null }>;
+    return history.find(event => event.eventType === "decision" && event.itemId === "tmdb-movie-102")?.rating ?? null;
+  })).toBe(5);
 });

@@ -175,6 +175,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const [ratingSelectorOpen, setRatingSelectorOpen] = useState(false);
   const [ageOpen, setAgeOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
+  const [justSaved, setJustSaved] = useState<{ ids: string[]; history: SessionState["history"] } | null>(null);
+  useEffect(() => { if (!savedOpen) setJustSaved(null); }, [savedOpen]);
   const [resolvedSavedItems, setResolvedSavedItems] = useState<Record<string, MediaItem>>({});
   const [catalogueItems, setCatalogueItems] = useState(mediaItems);
   const catalogueItemsRef = useRef(mediaItems);
@@ -215,7 +217,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
   const dragFrame = useRef<number | null>(null);
   const dragOffset = useRef(0);
   const mediaCard = useRef<HTMLElement|null>(null);
-  const ratingInput = useRef<HTMLInputElement|null>(null);
+  const ratingInput = useRef<HTMLButtonElement|null>(null);
+  const windowKeyHandler = useRef<(event:KeyboardEvent) => void>(() => undefined);
   const seenButton = useRef<HTMLButtonElement|null>(null);
   const shownItemKey = useRef("");
   const accountMenu = useRef<HTMLDetailsElement|null>(null);
@@ -833,7 +836,8 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     const savedHistory = session.history.filter(entry=>visiblePickIds.includes(entry.id));
     setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), history:current.history.filter(entry=>!visiblePickIds.includes(entry.id)), view:"discover"}));
     setSavedOpen(true);
-    showNotice(`${count} ${count===1?"title":"titles"} saved for later`, { label: "Undo", run: () => { withdrawSaved(visiblePickIds, true, savedHistory); setSavedOpen(false); } });
+    // The Saved dialog opens with its own Undo: a toast behind an open dialog is outside its focus trap.
+    setJustSaved({ ids: visiblePickIds, history: savedHistory });
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;
@@ -887,6 +891,15 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     card.classList.remove("drag-keep","drag-pass");
   }
 
+  function moveRatingFocus(event:React.KeyboardEvent<HTMLDivElement>) {
+    const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (!step || index < 0) return;
+    event.preventDefault();
+    buttons[Math.max(0, Math.min(buttons.length - 1, index + step))].focus();
+  }
+
   function renderMediaCard(candidate: MediaItem, active: boolean) {
     return <article
       key={candidate.id}
@@ -913,10 +926,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
               {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`}>
                 <legend className="sr-only">Rate {candidate.title} with 1 to 10 to continue.</legend>
                 <div className="seen-rating-header"><span>Your rating <small>/ 10</small></span><button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button></div>
-                <div className="seen-rating-options">{[1,2,3,4,5,6,7,8,9,10].map(stars=><label key={stars}>
-                  <input ref={stars===1?ratingInput:undefined} type="radio" name={`seen-rating-${candidate.id}`} value={stars} aria-label={`${stars} out of 10`} onChange={()=>transitionDecision("seen","control",stars)}/>
-                  <span aria-hidden="true">{stars}</span>
-                </label>)}</div>
+                {/* Buttons, not radios: arrow keys only move focus here, and a rating is saved only on click, Enter, or Space. */}
+                <div className="seen-rating-options" onKeyDown={moveRatingFocus}>{[1,2,3,4,5,6,7,8,9,10].map(stars=>
+                  <button key={stars} ref={stars===1?ratingInput:undefined} type="button" aria-label={`${stars} out of 10`} onClick={()=>transitionDecision("seen","control",stars)}>{stars}</button>
+                )}</div>
               </fieldset> : <><button className="card-details-button" type="button" onClick={()=>setDetails(candidate)} aria-label={`Details for ${candidate.title}`}><Icon name="info"/><span>Details</span></button><button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button></>)}
             </div>
           </div>
@@ -925,17 +938,19 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
     </article>;
   }
 
+  // Reassigned every render, so the listener always sees the current card rather than the one from when it was attached.
+  windowKeyHandler.current = (event:KeyboardEvent) => {
+    if (event.key === "Escape") { if(ratingSelectorOpen)cancelRatingSelector(); else if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
+    if (!ready || session.view !== "discover" || details || savedOpen || ageOpen || cardExiting) return;
+    if (event.target instanceof HTMLElement && event.target.closest("button, input, select, textarea, a, summary, [contenteditable='true']")) return;
+    if (event.key === "ArrowLeft") { event.preventDefault(); transitionDecision("pass"); }
+    if (event.key === "ArrowRight") { event.preventDefault(); transitionDecision("keep"); }
+  };
   useEffect(() => {
-    function onKeyDown(event:KeyboardEvent) {
-      if (event.key === "Escape") { if(ratingSelectorOpen)cancelRatingSelector(); else if(savedOpen)setSavedOpen(false); else if(details)setDetails(null); else if(ageOpen)setAgeOpen(false); return; }
-      if (!ready || session.view !== "discover" || details || savedOpen || ageOpen || cardExiting) return;
-      if (event.target instanceof HTMLElement && event.target.closest("button, input, select, textarea, [contenteditable='true']")) return;
-      if (event.key === "ArrowLeft") { event.preventDefault(); transitionDecision("pass"); }
-      if (event.key === "ArrowRight") { event.preventDefault(); transitionDecision("keep"); }
-    }
+    const onKeyDown = (event:KeyboardEvent) => windowKeyHandler.current(event);
     window.addEventListener("keydown",onKeyDown);
     return ()=>window.removeEventListener("keydown",onKeyDown);
-  },[ready,session,details,savedOpen,ageOpen,cardExiting,ratingSelectorOpen]);
+  },[]);
 
   async function handleSignOut() {
     if (ready) {
@@ -1010,6 +1025,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, in
         <button className="modal-close" onClick={() => setSavedOpen(false)} aria-label="Close saved titles"><Icon name="close" /></button>
         <div className="eyebrow">YOUR KEEPERS · PERMANENTLY SAVED</div>
         <h2 id="saved-title">Saved for later</h2>
+        {justSaved && <p className="saved-undo" role="status">{justSaved.ids.length} {justSaved.ids.length===1?"title":"titles"} saved. <button className="toast-action" type="button" onClick={() => { withdrawSaved(justSaved.ids, true, justSaved.history); setSavedOpen(false); }}>Undo</button></p>}
         <p>These made it through the second look. Your shortlist stays temporary until you save it here.</p>
         {integrationsReadOnly && <p>Service connections are read-only; availability checks are available.</p>}
         {saved.length > 0 && seerrConnections.length > 0 && <label className="saved-connection-select">Seerr server
