@@ -9,6 +9,6 @@ pre-commit:
 
 pre-push:
   commands:
-    release-checks:
-      run: bash scripts/release-checks.sh
-      fail_text: "Push blocked: fix the release check failures above."
+    pre-push-checks:
+      run: bash scripts/pre-push-checks.sh
+      fail_text: "Push blocked: fix the local checks above."

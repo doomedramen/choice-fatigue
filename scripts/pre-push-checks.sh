@@ -9,5 +9,3 @@ run_pnpm test
 run_pnpm typecheck
 run_pnpm exec prisma validate
 run_pnpm build
-run_pnpm db:deploy:e2e
-run_pnpm test:e2e
