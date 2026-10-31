@@ -394,3 +394,16 @@ test("credit hydration skips considered titles and missing credits stay neutral"
   expect(feed.snapshot.candidateResolvedIds).toHaveLength(0);
   expect(feed.creditCoverage.resolved).toBe(0);
 });
+
+test("a provider 429 preserves the cursor and retries after its cooldown", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await request.post("http://127.0.0.1:4199/__control", { data: { throttleMovies: true } });
+  const first = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
+  expect(first.sources.some((source: { retryAt: number | null }) => source.retryAt !== null)).toBe(true);
+  await request.post("http://127.0.0.1:4199/__control", { data: { throttleMovies: false } });
+  await expect.poll(async () => page.evaluate(async cursor => {
+    const feed = await (await fetch(`/api/discovery-feed?category=Movies&cursor=${encodeURIComponent(cursor)}`)).json();
+    return feed.items.length;
+  }, first.cursor), { timeout: 10_000 }).toBeGreaterThan(0);
+});
