@@ -9,7 +9,7 @@ export const recommendationEventTypes = ["candidate_batch", "item_shown", "decis
 export type RecommendationEventInput = {
   id: string; sessionId: string; reviewId: string | null; sequence: number; itemId: string | null; candidateIds: string[] | null;
   category: RecommendationCategory; eventType: (typeof recommendationEventTypes)[number]; decision: "keep" | "pass" | "seen" | null;
-  rating: number | null; targetEventId: string | null; algorithmVersion: "content-v3"; occurredAt: string;
+  rating: number | null; targetEventId: string | null; algorithmVersion: "content-v3" | "content-v4"; occurredAt: string;
   retrievalId: string | null; source: RecommendationSource | null; lane: RecommendationLane | null;
 };
 
@@ -27,9 +27,9 @@ export function isValidRecommendationEvent(value: unknown): value is Recommendat
   if (!(event.candidateIds === null || Array.isArray(event.candidateIds) && event.candidateIds.length <= 100 && event.candidateIds.every(isStringId) && new Set(event.candidateIds).size === event.candidateIds.length)) return false;
   if (!recommendationEventTypes.includes(event.eventType as RecommendationEventInput["eventType"])) return false;
   if (!(event.decision === null || event.decision === "keep" || event.decision === "pass" || event.decision === "seen")) return false;
-  if (!(event.rating === null || Number.isInteger(event.rating) && Number(event.rating) >= 1 && Number(event.rating) <= 5)) return false;
+  if (!(event.rating === null || Number.isInteger(event.rating) && Number(event.rating) >= 1 && Number(event.rating) <= (event.algorithmVersion === "content-v3" ? 5 : 10))) return false;
   if (event.decision !== "seen" && event.rating !== null) return false;
-  if (!(event.targetEventId === null || isStringId(event.targetEventId)) || event.algorithmVersion !== "content-v3") return false;
+  if (!(event.targetEventId === null || isStringId(event.targetEventId)) || !["content-v3", "content-v4"].includes(event.algorithmVersion as string)) return false;
   if (typeof event.occurredAt !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(event.occurredAt) || !Number.isFinite(Date.parse(event.occurredAt))) return false;
   if (event.eventType === "candidate_batch") {
     return isStringId(event.retrievalId) && event.itemId === null && event.decision === null && event.targetEventId === null && event.reviewId === null && Array.isArray(event.candidateIds) && event.candidateIds.length > 0

@@ -10,14 +10,14 @@ import type { RecommendationCategory, RecommendationEventInput } from "@/lib/rec
 /** The caller must authorize Adult access before entering this function. */
 export async function loadRecommendationProfile(userId: string, category: RecommendationCategory, candidateIds: string[] = []) {
   const rows = await prisma.recommendationEvent.findMany({
-    where: { userId, category, algorithmVersion: "content-v3" },
+    where: { userId, category, algorithmVersion: { in: ["content-v3", "content-v4"] } },
     orderBy: [{ occurredAt: "asc" }, { sessionId: "asc" }, { sequence: "asc" }, { id: "asc" }],
   });
   const events: RecommendationEventInput[] = rows.map(row => ({
     id: row.id, sessionId: row.sessionId, reviewId: row.reviewId, sequence: row.sequence, itemId: row.itemId,
     candidateIds: row.candidateIds as string[] | null, category, eventType: row.eventType as RecommendationEventInput["eventType"],
     decision: row.decision as RecommendationEventInput["decision"], rating: row.rating, targetEventId: row.targetEventId,
-    algorithmVersion: "content-v3", occurredAt: row.occurredAt.toISOString(),
+    algorithmVersion: row.algorithmVersion as RecommendationEventInput["algorithmVersion"], occurredAt: row.occurredAt.toISOString(),
     retrievalId: row.retrievalId, source: row.source as RecommendationEventInput["source"], lane: row.lane as RecommendationEventInput["lane"],
   }));
   const known = new Set(candidateIds);

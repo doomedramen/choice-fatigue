@@ -38,3 +38,9 @@ test("outbox byte limits and partial acknowledgement allow later events to proce
   assert.deepEqual(result.remaining, []);
   assert.deepEqual(settleRecommendationBatch(events, [], []).remaining, events);
 });
+
+test("ten-point ratings use v4 while queued v3 ratings retain their original range", () => {
+  assert.equal(isValidRecommendationEvent({ ...decision, algorithmVersion: "content-v4", decision: "seen", rating: 10 }), true);
+  assert.equal(isValidRecommendationEvent({ ...decision, algorithmVersion: "content-v3", decision: "seen", rating: 10 }), false);
+  assert.equal(isValidRecommendationEvent({ ...decision, algorithmVersion: "content-v3", decision: "seen", rating: 5 }), true);
+});

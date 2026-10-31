@@ -79,6 +79,8 @@ After 1.0, use self-hosted feedback to choose among collaborative sessions, shar
 
 ## Immediate next steps
 
+- Revisit personalization: assess why discovery feels dominated by popular titles, and research incorporating writers, directors, studios, and actors alongside related-show retrieval. Validate whether richer signals improve final choices.
+
 1. [x] Confirm the pushed GitHub Actions run passes the browser suite on a clean PostgreSQL service (commit `408dfede`, run [41097370113](https://github.com/doomedramen/choice-fatigue/actions/runs/41097370113)).
 2. Run the chronological provider-order/current-ranker comparison on enough ID-only traces; report coverage and descriptive metrics without causal claims or unsupported weight changes. This requires an authorized account export with sufficient traces; none is present in the project files.
 3. Rehearse an app upgrade and HTTPS reverse-proxy setup. The LXC installer now uses the Community Scripts `ct/` and `install/` pair; run it in a Debian 13 Proxmox environment before upstream submission.

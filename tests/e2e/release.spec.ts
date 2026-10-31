@@ -87,13 +87,16 @@ test("first run, account access, provider discovery, saved state and account con
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Movies", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Mock Movie One" })).toBeVisible();
-  await page.getByRole("button", { name: "Shortlist, right arrow key" }).click();
+  await page.locator(".card-active .card-poster").click();
+  await expect(page.getByRole("dialog", { name: "Mock Movie One" })).toBeVisible();
+  await page.getByRole("button", { name: "Close details" }).click();
+  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
   await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.getByRole("button", { name: "Undo last choice" }).first().click();
   await expect(page.getByText("0 titles in the maybe pile")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 0, decisionCount: 0 });
-  await page.getByRole("button", { name: "Shortlist, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
   await expect(page.getByText("1 title in the maybe pile")).toBeVisible();
   await waitForPersistedState(page, { shortlistCount: 1, decisionCount: 1 });
   await page.reload();
@@ -108,7 +111,7 @@ test("first run, account access, provider discovery, saved state and account con
   await page.getByRole("button", { name: "Close saved titles" }).click();
   await expect(page.getByRole("heading", { name: "Mock Movie Two" })).toBeVisible();
   await page.getByRole("button", { name: "Seen it: rate Mock Movie Two" }).click();
-  await page.getByRole("radio", { name: "5 stars" }).click({ force: true });
+  await page.getByRole("radio", { name: "10 out of 10" }).click({ force: true });
   await expect(page.getByRole("heading", { name: "Movies", exact: true })).toBeVisible();
 
   const exportData = await page.evaluate(async () => (await fetch("/api/account/export")).json());
@@ -241,7 +244,12 @@ test("reranking preserves actual shown order and invalid events do not block val
   await request.post("http://127.0.0.1:4199/__control", { data: { extended: true } });
   await page.goto("/");
   await expect(page.locator(".card-active h2")).toHaveText("Paged Movie 101");
-  await page.getByRole("button", { name: "Pass, left arrow key" }).click();
+  const box = await page.locator(".card-active").boundingBox();
+  if (!box) throw new Error("Missing active card");
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.4);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.4, { steps: 8 });
+  await page.mouse.up();
   await expect(page.locator(".card-active h2")).toHaveText("Paged Movie 102");
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/recommendation-events?category=Movies")).json();
@@ -254,7 +262,7 @@ test("reranking preserves actual shown order and invalid events do not block val
   }, valid);
   expect(posted.acceptedIds).toEqual([valid.id]);
   expect(posted.rejected).toMatchObject([{ id: "invalid-trace", code: "invalid" }]);
-  await page.getByRole("button", { name: "Shortlist, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/account/export")).json();
     return data.recommendationHistory.some((event: { eventType: string; itemId: string; decision: string }) => event.eventType === "decision" && event.itemId === "tmdb-movie-102" && event.decision === "keep");
@@ -271,7 +279,7 @@ test("paging past 100 accumulated candidates keeps traces bounded and learning u
   expect(accepted.acceptedIds).toHaveLength(105);
   await page.goto("/");
   await expect(page.locator(".card-active h2")).toContainText(/Paged Movie 2\d\d/, { timeout: 30_000 });
-  await page.getByRole("button", { name: "Shortlist, right arrow key" }).click();
+  await page.getByRole("button", { name: "Want to see it, right arrow key" }).click();
   await expect.poll(async () => page.evaluate(async () => {
     const data = await (await fetch("/api/account/export")).json();
     return data.recommendationHistory.filter((event: { eventType: string; decision: string }) => event.eventType === "decision" && event.decision === "keep").length;

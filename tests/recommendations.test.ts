@@ -11,8 +11,9 @@ test("cold start preserves provider order and ignores provider ratings", () => {
   assert.deepEqual(rankRecommendations(items).items.map(row => row.id), ["low", "high"]);
 });
 test("seen ratings are centered on neutral; passive exposure does not train", () => {
-  assert.deepEqual(reviewRatingWeights, { 1: -0.5, 2: -0.25, 3: 0, 4: 0.5, 5: 1 });
-  const profile = buildRecommendationProfile([event({ decision: "seen", rating: 5 })], { old: ["genre:comedy"] }, "Movies");
+  assert.deepEqual([2, 4, 6, 8, 10].map(value => reviewRatingWeights[value]), [-0.5, -0.25, 0, 0.5, 1]);
+  assert.equal(buildRecommendationProfile([event({ decision: "seen", rating: 5, algorithmVersion: "content-v3" })], { old: ["genre:comedy"] }, "Movies").signals[0].rating, 10);
+  const profile = buildRecommendationProfile([event({ decision: "seen", rating: 10 })], { old: ["genre:comedy"] }, "Movies");
   assert.equal(rankRecommendations([item("drama", "Drama"), item("comedy", "Comedy")], profile.signals).items[0].id, "comedy");
   assert.deepEqual(recommendationSignalsFromHistory([event({ eventType: "item_shown", decision: null })]), []);
 });

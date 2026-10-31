@@ -146,8 +146,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const [plexAvailabilityResults, setPlexAvailabilityResults] = useState<Record<string, { inLibrary: boolean; message: string }>>({});
   const [notice, setNotice] = useState("");
   const [cardExiting, setCardExiting] = useState(false);
-  const drag = useRef<{ x:number }|null>(null);
+  const drag = useRef<{ x:number; y:number }|null>(null);
   const swipeExit = useRef(false);
+  const dragFrame = useRef<number | null>(null);
+  const dragOffset = useRef(0);
   const mediaCard = useRef<HTMLElement|null>(null);
   const ratingInput = useRef<HTMLInputElement|null>(null);
   const seenButton = useRef<HTMLButtonElement|null>(null);
@@ -360,7 +362,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null, source: LearningEvent["source"] = null, lane: LearningEvent["lane"] = null, retrievalId: string | null = null) {
     const event: LearningEvent = {
       id: createClientUuid(), sessionId: runId.current, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
-      eventType, decision, rating, targetEventId, algorithmVersion: "content-v3", occurredAt: new Date().toISOString(), retrievalId, source, lane,
+      eventType, decision, rating, targetEventId, algorithmVersion: "content-v4", occurredAt: new Date().toISOString(), retrievalId, source, lane,
     };
     learningQueue.current = [...learningQueue.current, event];
     setLearningEvents(current => mergeRecommendationEvents(current, [event]));
@@ -543,7 +545,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   }
   function decide(decision:Decision, rating?:number) {
     if (!item) return;
-    if (decision === "seen" && (!rating || rating < 1 || rating > 5 || !Number.isInteger(rating))) return;
+    if (decision === "seen" && (!rating || rating < 1 || rating > 10 || !Number.isInteger(rating))) return;
     const currentItem = item;
     const nextItemId = nextItem?.id ?? null;
     const event = enqueueLearningEvent("decision", currentItem.id, currentItem.category, decision, decision === "seen" ? rating! : null, null, null);
@@ -559,7 +561,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   }
   function transitionDecision(decision:Decision, source:"drag"|"control"="control", rating?:number) {
     if (swipeExit.current || !item) return;
-    if (decision === "seen" && (!rating || rating < 1 || rating > 5 || !Number.isInteger(rating))) return;
+    if (decision === "seen" && (!rating || rating < 1 || rating > 10 || !Number.isInteger(rating))) return;
     setRatingSelectorOpen(false);
     const element=mediaCard.current;
     if (!element) { decide(decision, rating); return; }
@@ -636,32 +638,46 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;
     if (!mediaCard.current) return;
-    drag.current={x:event.clientX}; event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current={x:event.clientX, y:event.clientY}; event.currentTarget.classList.add("dragging"); event.currentTarget.setPointerCapture(event.pointerId);
   }
   function onCardPointerMove(event:PointerEvent<HTMLElement>) {
     const card = mediaCard.current;
     if (!drag.current || !card) return;
     const dx=event.clientX-drag.current.x;
-    card.style.transform=`translate(${dx}px,${Math.max(-16,Math.abs(dx)*-.025)}px) rotate(${dx*.035}deg)`;
-    card.classList.toggle("drag-keep",dx>20); card.classList.toggle("drag-pass",dx< -20);
+    dragOffset.current = dx;
+    if (dragFrame.current !== null) return;
+    dragFrame.current = requestAnimationFrame(() => {
+      dragFrame.current = null;
+      const offset = dragOffset.current;
+      card.style.transform = `translate(${offset}px,${Math.max(-16,Math.abs(offset)*-.025)}px) rotate(${offset*.035}deg)`;
+      card.classList.toggle("drag-keep", offset > 20);
+      card.classList.toggle("drag-pass", offset < -20);
+    });
   }
   function onCardPointerUp(event:PointerEvent<HTMLElement>) {
     const card = mediaCard.current;
     if (!drag.current || !card) return;
-    const dx=event.clientX-drag.current.x; drag.current=null;
+    const dx=event.clientX-drag.current.x; const dy=event.clientY-drag.current.y; drag.current=null;
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
+    card.classList.remove("dragging");
     const swipeThreshold=Math.max(80,card.clientWidth*.24);
     if (Math.abs(dx)>swipeThreshold) transitionDecision(dx>0?"keep":"pass","drag");
     else {
       card.style.transform="";
       card.style.opacity="";
       card.classList.remove("drag-keep","drag-pass");
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && item && !ratingSelectorOpen) setDetails(item);
     }
   }
 
   function onCardPointerCancel() {
     const card = mediaCard.current;
     drag.current=null;
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
     if (!card) return;
+    card.classList.remove("dragging");
     card.style.transform="";
     card.style.opacity="";
     card.classList.remove("drag-keep","drag-pass");
@@ -674,28 +690,29 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
       className={`media-card ${active ? "card-active" : "card-under"}`}
       tabIndex={active ? 0 : -1}
       aria-hidden={active ? undefined : true}
-      aria-label={active ? `${candidate.title}, ${candidate.year}. Use left and right arrow keys to pass or shortlist, or mark it seen and rate it.` : undefined}
+      aria-label={active ? `${candidate.title}, ${candidate.year}. Press Enter for details, use left and right arrow keys to pass or shortlist, or rate it out of 10.` : undefined}
+      role={active ? "group" : undefined}
+      onKeyDown={active ? event => { if ((event.key === "Enter" || event.key === " ") && !ratingSelectorOpen && event.target === event.currentTarget) { event.preventDefault(); setDetails(candidate); } } : undefined}
       onPointerDown={active ? onCardPointerDown : undefined}
       onPointerMove={active ? onCardPointerMove : undefined}
       onPointerUp={active ? onCardPointerUp : undefined}
       onPointerCancel={active ? onCardPointerCancel : undefined}
     >
       <Poster item={candidate} className="card-poster" loading="eager"/>
+      <div className="card-poster-tags tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}</div>
       <div className="card-content">
-          <div className="card-overline"><span>{candidate.type} · {candidate.year}</span><span><Icon name="spark"/> {candidate.rating}</span></div>
+          <div className="card-overline"><span>{candidate.year} · {candidate.runtime}</span><span><Icon name="spark"/> {candidate.rating}</span></div>
           <h2>{candidate.title}</h2>
           <div className="card-footer">
-            <div className="tag-row">{candidate.genre.slice(0,2).map(genre=><span key={genre}>{genre}</span>)}<span>{candidate.runtime}</span></div>
             <div className="card-actions">
               {active && (ratingSelectorOpen ? <fieldset className="seen-rating" aria-label={`Rate ${candidate.title}`}>
-                <legend className="sr-only">Rate {candidate.title} with 1 to 5 stars to continue.</legend>
-                <div className="seen-rating-options">{[1,2,3,4,5].map(stars=><label key={stars}>
-                  <input ref={stars===1?ratingInput:undefined} type="radio" name={`seen-rating-${candidate.id}`} value={stars} aria-label={`${stars} star${stars===1?"":"s"}`} onChange={()=>transitionDecision("seen","control",stars)}/>
-                  <span aria-hidden="true">★</span>
+                <legend className="sr-only">Rate {candidate.title} with 1 to 10 to continue.</legend>
+                <div className="seen-rating-options">{[1,2,3,4,5,6,7,8,9,10].map(stars=><label key={stars}>
+                  <input ref={stars===1?ratingInput:undefined} type="radio" name={`seen-rating-${candidate.id}`} value={stars} aria-label={`${stars} out of 10`} onChange={()=>transitionDecision("seen","control",stars)}/>
+                  <span aria-hidden="true">{stars}</span>
                 </label>)}</div>
                 <button className="rating-cancel" type="button" onClick={cancelRatingSelector}>Cancel</button>
-              </fieldset> : <button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it</span></button>)}
-              {active && <button className="card-details-button" type="button" onClick={()=>{setRatingSelectorOpen(false);setDetails(candidate);}} aria-label={`More about ${candidate.title}`}><Icon name="info"/><span>Details</span></button>}
+              </fieldset> : <button ref={seenButton} className="card-seen-button" type="button" onClick={()=>setRatingSelectorOpen(true)} aria-label={`Seen it: rate ${candidate.title}`}><Icon name="eye"/><span>Seen it · Rate /10</span></button>)}
             </div>
           </div>
         </div>
@@ -761,7 +778,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
               {nextItem && renderMediaCard(nextItem, false)}
               {renderMediaCard(item, true)}
             </div>
-            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Pass, left arrow key"><span><Icon name="left"/></span><small>Pass</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last swipe" title="Undo last swipe"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Shortlist, right arrow key"><small>Shortlist</small><span><Icon name="right"/></span></button></div>
+            <div className="decision-row"><button className="decision-button pass" onClick={()=>transitionDecision("pass")} disabled={cardExiting} aria-label="Don’t want to see it, left arrow key"><span><Icon name="left"/></span><small>Don’t want to see</small></button><button className="undo-swipe-button" onClick={undo} disabled={!session.history.length || cardExiting} aria-label="Undo last swipe" title="Undo last swipe"><Icon name="rewind"/><small>Undo</small></button><button className="decision-button keep" onClick={()=>transitionDecision("keep")} disabled={cardExiting} aria-label="Want to see it, right arrow key"><small>Want to see</small><span><Icon name="right"/></span></button></div>
             {discoveryPages[session.category].error && <p className="feed-load-error" role="alert">{discoveryPages[session.category].error} <button className="text-button" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again</button></p>}
           </div> : <div className="empty-state"><div className="empty-orbit"><Icon name={categoryOutcomes[session.category].outcome === "ready" ? "spark" : "info"}/></div>
             {discoveryPages[session.category].loading ? <><h2>Finding more titles…</h2><p>Your next picks are on the way.</p></> : discoveryPages[session.category].error ? <><h2>{categoryOutcomes[session.category].outcome === "unavailable" ? "This metadata source is temporarily unavailable." : "More titles couldn’t load."}</h2><p>{discoveryPages[session.category].error}</p><button className="button button-dark" onClick={() => void loadMoreDiscoveries(session.category as Category)}>Try again <Icon name="rewind"/></button></> : categoryOutcomes[session.category].outcome === "ready" ? <><h2>That’s everything for now.</h2><p>You’ve reached the end of the available {session.category.toLowerCase()} feed.</p><button className="button button-dark" onClick={beginReview}>Review your shortlist <Icon name="arrow"/></button></> : categoryOutcomes[session.category].outcome === "unconfigured" ? <><h2>A metadata source needs setup.</h2><p>{isAdmin ? `Connect the provider for ${session.category.toLowerCase()} in your instance settings to start discovering titles.` : `Ask your instance administrator to configure a metadata source for ${session.category.toLowerCase()}.`}</p>{isAdmin && <a className="button button-dark" href="/admin?section=providers">Configure metadata sources <Icon name="arrow"/></a>}</> : categoryOutcomes[session.category].outcome === "unavailable" ? <><h2>This metadata source is temporarily unavailable.</h2><p>Your saved choices are safe. Try loading this category again in a moment.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></> : <><h2>No popular titles are available right now.</h2><p>The provider returned no titles for this category. You can retry to check again.</p><button className="button button-dark" onClick={() => router.refresh()}>Try again <Icon name="rewind"/></button></>}

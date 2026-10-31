@@ -60,7 +60,7 @@ Contextual bandits such as LinUCB combine feature context, reward estimates, and
 
 ## Audit of the current implementation (updated for content-v3)
 
-The implementation in [`src/lib/recommendations.ts`](../src/lib/recommendations.ts) is a deterministic content heuristic: keep is `+1`, pass is `−0.5`, a 1–5 rating maps to a hand-set scale, genre is weighted `1.0`, decade and type `0.25`, and feature evidence is shrunk toward neutral. Provider ratings do not affect ranking. Saved outcomes and same-review comparisons add retention evidence. The score is still uncalibrated and unevaluated against Choice Fatigue's final outcome.
+The implementation in [`src/lib/recommendations.ts`](../src/lib/recommendations.ts) is a deterministic content heuristic: keep is `+1`, pass is `−0.5`, a 1–10 rating maps to a hand-set scale, genre is weighted `1.0`, decade and type `0.25`, and feature evidence is shrunk toward neutral. Provider ratings do not affect ranking. Saved outcomes and same-review comparisons add retention evidence. The score is still uncalibrated and unevaluated against Choice Fatigue's final outcome.
 
 Historical events persist item IDs, source/lane identifiers, occurrence timestamps and actions only, as required by the product's data-retention rule. Profile reads now resolve a bounded set of historic IDs that are absent from the current feed directly through provider APIs, then discard metadata after deriving feature keys. Provider lookup failure degrades personalization without preventing discovery. The bounded lookup means older or unresolved events can still be omitted from an active profile.
 

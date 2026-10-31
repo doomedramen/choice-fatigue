@@ -5,7 +5,7 @@ export interface RecommendationSignal { itemId: string; decision: Recommendation
 export interface RecommendationComparison { preferredItemId: string; removedItemId: string; preferredFeatureKeys?: string[]; removedFeatureKeys?: string[] }
 export interface RecommendationHistoryEvent {
   id: string; sessionId: string; reviewId?: string | null; itemId: string | null; eventType: string;
-  decision: string | null; rating: number | null; targetEventId: string | null; category?: string; occurredAt?: string | Date; sequence?: number;
+  decision: string | null; rating: number | null; targetEventId: string | null; algorithmVersion?: string; category?: string; occurredAt?: string | Date; sequence?: number;
 }
 
 export function recommendationComparisonsFromHistory(events: RecommendationHistoryEvent[], category?: string): Array<Pick<RecommendationComparison, "preferredItemId" | "removedItemId">> {
@@ -46,7 +46,7 @@ export function recommendationSignalsFromHistory(events: RecommendationHistoryEv
   // Review removal changes the shortlist, but does not erase the original first-impression signal.
   const decisions = history
     .filter(event => event.eventType === "decision" && event.itemId && (event.decision === "keep" || event.decision === "pass" || event.decision === "seen") && !withdrawn.has(event.id))
-    .map(event => ({ itemId: event.itemId!, decision: event.decision as RecommendationDecision, rating: event.rating ?? undefined }));
+    .map(event => ({ itemId: event.itemId!, decision: event.decision as RecommendationDecision, rating: event.rating == null ? undefined : event.algorithmVersion === "content-v3" ? event.rating * 2 : event.rating }));
   const savedItemIds = new Set(history.filter(event => event.eventType === "saved" && event.itemId).map(event => event.itemId!));
   const retention = [...savedItemIds].map(itemId => ({ itemId, decision: "keep" as const, weight: 1.5 }));
   return [...decisions, ...retention];
@@ -57,13 +57,10 @@ export const recommendationWeights: Record<Exclude<RecommendationDecision, "seen
   pass: -0.5,
 };
 
-/** A 1–5 star review is explicit preference evidence, centered on neutral. */
+/** A 1–10 point review is explicit preference evidence, centered on neutral. */
 export const reviewRatingWeights: Record<number, number> = {
-  1: -0.5,
-  2: -0.25,
-  3: 0,
-  4: 0.5,
-  5: 1,
+  1: -0.5, 2: -0.5, 3: -0.375, 4: -0.25, 5: -0.125,
+  6: 0, 7: 0.25, 8: 0.5, 9: 0.75, 10: 1,
 };
 
 export interface RecommendationPreference {

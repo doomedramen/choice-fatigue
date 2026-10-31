@@ -132,7 +132,7 @@ async function main() {
   if (!Array.isArray(parsed.recommendationHistory)) throw new Error("Input must be a Choice Fatigue account export with recommendationHistory.");
   const eventKeys = ["id", "sessionId", "reviewId", "sequence", "itemId", "candidateIds", "category", "eventType", "decision", "rating", "targetEventId", "algorithmVersion", "occurredAt", "retrievalId", "source", "lane"];
   const rows = parsed.recommendationHistory.map(row => row && typeof row === "object" ? Object.fromEntries(eventKeys.map(key => [key, (row as Record<string, unknown>)[key]])) : row).filter(isValidRecommendationEvent);
-  if (rows.length !== parsed.recommendationHistory.length) throw new Error("Replay requires content-v3 events; re-export after replacing development learning history.");
+  if (rows.length !== parsed.recommendationHistory.length) throw new Error("Replay requires valid content-v3 or content-v4 events.");
   const allIds = rows.flatMap(row => [...(row.itemId ? [row.itemId] : []), ...(row.candidateIds ?? [])]);
   const metadata = await loadTransientMetadata(allIds, parsed.account?.adultAllowed === true);
   const reports = replayRecommendationEvents(rows, metadata.items);

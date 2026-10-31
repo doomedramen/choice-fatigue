@@ -17,7 +17,7 @@ Keep the kinds of feedback separate. The first version should use only deliberat
 | --- | --- | --- |
 | Pass | Explicit negative signal, but weaker than a positive choice | Start at **−0.5**; reduce the weight of matching genres |
 | Shortlist during discovery | Explicit positive choice | Start at **+1**; raise the weight of matching genres |
-| Seen it + star rating | A watched title with a direct quality/preference judgment | Map 1–5 stars to **−0.5, −0.25, 0, +0.5, +1**; use the score as evidence for matching genres, decade, and type |
+| Seen it + rating | A watched title with a direct quality/preference judgment | Map scores 2, 4, 6, 8, and 10 to **−0.5, −0.25, 0, +0.5, +1**, interpolating between them; use the score as evidence for matching genres, decade, and type |
 | Remove before review | The initial interest was withdrawn | Preserve the original consideration signal; do not count it as a pass |
 | Remove during review | The title was promising, but lost out after seeing alternatives | Preserve the initial signal; compare only with a title saved from the same review |
 | Keep through review | The title remained attractive after comparison | A saved title adds stronger positive retention evidence |
@@ -29,7 +29,7 @@ In particular, a review removal must not be treated like a swipe left. When a re
 
 ## First algorithm: understandable and content-based
 
-The current implementation is a deterministic content heuristic. It uses **shortlist = +1**, **pass = −0.5**, and a 1–5 star review of a seen title mapped to **−0.5, −0.25, 0, +0.5, +1**. Those numbers are initial hand-set values, not results of an experiment. A seen title leaves the active deck after rating; its rating contributes preference evidence for similar titles. A three-star rating is neutral. The current code has not established that this mapping helps people choose.
+The current implementation is a deterministic content heuristic. It uses **shortlist = +1**, **pass = −0.5**, and a 1–10 review of a seen title, interpolated between the previous five-point weights. Those numbers are initial hand-set values, not results of an experiment. A seen title leaves the active deck after rating; its rating contributes preference evidence for similar titles. A score of 6 is neutral, preserving the meaning of an earlier three-star rating. Existing five-point event ratings are interpreted at twice their original value. The current code has not established that this mapping helps people choose.
 
 ### 1. Build an eligible candidate set
 
@@ -54,7 +54,7 @@ Historical profile reads prioritize the most recently acted-on distinct titles, 
 
 Run `pnpm eval:replay -- account-export.json` on a user-authorized account export while the app's `DATABASE_URL` and `INTEGRATION_CREDENTIALS_KEY` are available in `.env`. The evaluator reads only provider IDs, categories, timestamps, decisions, and ordered candidate-ID traces from the export. It resolves current source features transiently from enabled providers, with at most 500 lookups and four concurrent requests, and never writes title metadata to disk or the database. Adult metadata is resolved only when both the exported account grant and instance Adult switch are enabled.
 
-Replay requires a fresh `content-v3` export. At each shown-item event it reconstructs the preceding event history and fetched candidate batches, applies the same correction reducer and twelve-ID historical feature budget, and compares rankings on matched candidate sets. It includes later pagination and within-run learning rather than evaluating only the first deck. The report distinguishes the mixed candidate pool from its popularity-only subset; personalized retrieval yield is descriptive and cannot estimate causal improvements from unobserved alternative titles.
+Replay accepts `content-v3` and `content-v4` events. At each shown-item event it reconstructs the preceding event history and fetched candidate batches, applies the same correction reducer and twelve-ID historical feature budget, and compares rankings on matched candidate sets. It includes later pagination and within-run learning rather than evaluating only the first deck. The report distinguishes the mixed candidate pool from its popularity-only subset; personalized retrieval yield is descriptive and cannot estimate causal improvements from unobserved alternative titles.
 
 Reports include shortlist/save mean reciprocal rank and recall at 5/10, review retention, observed cards before the first save, per-category metadata coverage, historical lookup-budget coverage, and per-source/lane unique candidate and outcome counts. Low or unresolved metadata coverage excludes predictions and must be considered when reading metrics. Provider metadata is current, browser clocks are approximate, and historical choices reflect the displayed policy. These comparisons are observational, not causal. Do not tune weights from low-coverage traces or pool accounts without appropriate consent.
 
@@ -85,7 +85,7 @@ The discovery record remains a mutable session snapshot for UI restore. A separa
 - whether an action was undone or later restored;
 - the algorithm version that ordered the item.
 
-`content-v3` records occurrence timestamps separately from receipt timestamps. `candidate_batch` events record provider, popular/personalized lane, retrieval-group ID, and up to 100 ordered provider IDs per fetched batch. `item_shown` records the actual locked card first and up to 99 remaining candidates. No event contains titles or provider metadata. Each browser run has a fresh event session ID independent of the restored UI snapshot; there is no active-session exclusion.
+`content-v4` records ten-point ratings; older `content-v3` ratings remain on a five-point scale. Both record occurrence timestamps separately from receipt timestamps. `candidate_batch` events record provider, popular/personalized lane, retrieval-group ID, and up to 100 ordered provider IDs per fetched batch. `item_shown` records the actual locked card first and up to 99 remaining candidates. No event contains titles or provider metadata. Each browser run has a fresh event session ID independent of the restored UI snapshot; there is no active-session exclusion.
 
 `POST /api/recommendation-events` acknowledges valid events individually and identifies rejected events by ID/index/code. The client bounds batches by encoded bytes, splits oversized requests, retries transient failures, and quarantines permanently rejected events with a visible error so they cannot block later choices. The outbox uses `choice-fatigue-learning-v3-<userId>`; quarantine uses `choice-fatigue-learning-quarantine-<userId>`.
 

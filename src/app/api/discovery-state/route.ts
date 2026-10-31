@@ -87,7 +87,7 @@ function isIdList(value: unknown): value is string[] {
 }
 
 function isReviewRating(value: unknown): value is number {
-  return Number.isInteger(value) && typeof value === "number" && value >= 1 && value <= 5;
+  return Number.isInteger(value) && typeof value === "number" && value >= 1 && value <= 10;
 }
 
 function isSessionState(value: unknown): value is PersistedSessionState {
