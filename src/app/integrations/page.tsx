@@ -15,7 +15,7 @@ export default async function IntegrationsPage() {
     <header className={styles.header}><Link href="/" className={styles.brand}><span aria-hidden="true">✳</span> Choice Fatigue</Link><Link href="/" className={styles.back}>← Back to discovery</Link></header>
     <main className={styles.main}>
       <div className={styles.intro}><p className={styles.eyebrow}>INSTANCE SERVICES</p><h1>Connections</h1><p>Media services are configured by this instance’s administrator and shared with everyone using Choice Fatigue.</p></div>
-      <section className={styles.noticePanel} aria-label="Shared service connections"><span className={styles.lockIcon} aria-hidden="true">⌑</span><div><strong>Set up once for this instance</strong><p>When Seerr or Plex is configured, you can use it from the Saved list. Ask your administrator if a service you need is missing.</p></div></section>
+      <section className={styles.noticePanel} aria-label="Shared service connections"><span className={styles.lockIcon} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></svg></span><div><strong>Set up once for this instance</strong><p>When Seerr or Plex is configured, you can use it from the Saved list. Ask your administrator if a service you need is missing.</p></div></section>
     </main>
   </div>;
 }

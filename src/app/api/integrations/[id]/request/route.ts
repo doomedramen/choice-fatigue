@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthenticationError, requireSession } from "@/lib/auth-session";
 import { IntegrationCiphertextError, IntegrationEncryptionUnavailableError } from "@/lib/integrations/crypto";
-import { IntegrationTargetError, requestIntegrationService } from "@/lib/integrations/http";
+import { IntegrationTargetError, integrationTargetErrorMessage, requestIntegrationService } from "@/lib/integrations/http";
 import { IntegrationRequestError, readIntegrationJson, requireSameOrigin } from "@/lib/integrations/request";
 import { getSavedSeerrTitle } from "@/lib/integrations/saved-tmdb-title";
 import { getSeerrAvailability, SeerrApiError, seerrAlreadyTracksTitle } from "@/lib/integrations/seerr";
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (error instanceof IntegrationRequestError) return jsonError(error.message, error.status);
     if (error instanceof IntegrationEncryptionUnavailableError) return jsonError("Secure connection storage is not configured on this server.", 503);
     if (error instanceof IntegrationCiphertextError) return jsonError("This saved connection could not be decrypted. Re-enter its details and try again.", 503);
-    if (error instanceof IntegrationTargetError) return jsonError("Choice Fatigue could not safely reach this address. Check its URL and the server network settings.", 422);
+    if (error instanceof IntegrationTargetError) return jsonError(integrationTargetErrorMessage(error), 422);
     if (error instanceof SeerrApiError) return jsonError(error.message, error.status);
     console.error("Seerr title request failed.");
     return jsonError("Seerr could not accept this title. Check the connection and try again.", 502);

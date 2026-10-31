@@ -11,7 +11,8 @@
 .adminEmbedded .intro h2 { margin:0; color:#fff; font-family:"Manrope",sans-serif; font-size:clamp(27px,5vw,36px); font-weight:800; line-height:1.08; letter-spacing:-1px; }
 .intro>p:last-child { max-width:620px; margin:10px 0 0; color:#bac2d2; font-size:15px; line-height:1.5; }
 .noticePanel { display:grid; grid-template-columns:38px minmax(0,1fr); gap:12px; margin:20px 0 15px; padding:16px; border:1px solid #5a4c85; border-radius:12px; background:#211b36; }
-.lockIcon { display:grid; width:36px; height:36px; place-items:center; border:1px solid #645496; border-radius:10px; background:#30264e; color:#ded4ff; font-size:22px; }
+.lockIcon { display:grid; width:36px; height:36px; place-items:center; border:1px solid #645496; border-radius:10px; background:#30264e; color:#ded4ff; }
+.lockIcon svg { width:19px; height:19px; }
 .noticePanel strong { color:#fff; font-size:14px; font-weight:800; }
 .noticePanel p { margin:5px 0 0; color:#d3cbea; font-size:13px; line-height:1.5; }
 .panel,.connections { margin-top:15px; padding:20px; border:1px solid #354158; border-radius:13px; background:#151d2c; }

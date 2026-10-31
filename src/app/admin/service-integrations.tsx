@@ -142,7 +142,7 @@ export default function ServiceIntegrations({ adultSectionEnabled, allowPrivateN
   return <div className={styles.adminEmbedded}>
     <div className={styles.intro}><p className={styles.eyebrow}>INSTANCE SERVICES</p><h2 id="admin-section-title">Service connections</h2><p>Configure the services shared by everyone using this instance. Saved credentials are encrypted and never shown again.</p></div>
     <section className={styles.noticePanel} aria-label="Shared service access">
-      <span className={styles.lockIcon} aria-hidden="true">⌑</span>
+      <span className={styles.lockIcon} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></svg></span>
       <div><strong>Managed once for the whole instance</strong><p>Only administrators can add or change connections. Members can use configured Seerr and Plex services from their Saved list.</p></div>
     </section>
     {!encryptionConfigured && connections !== null && <div className={styles.alert} role="alert"><strong>Secure storage is not ready</strong><span>Credential storage is unavailable, so new service keys cannot be saved yet.</span></div>}

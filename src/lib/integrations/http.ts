@@ -18,6 +18,20 @@ export class IntegrationTargetError extends Error {
   }
 }
 
+export class PrivateNetworkTargetError extends IntegrationTargetError {
+  constructor() {
+    super();
+    this.name = "PrivateNetworkTargetError";
+  }
+}
+
+export function integrationTargetErrorMessage(error: IntegrationTargetError) {
+  if (error instanceof PrivateNetworkTargetError) {
+    return "This address resolves to a private network. Enable Allow private network service addresses in Admin settings → Global settings, then test again.";
+  }
+  return "Choice Fatigue could not safely reach this address. Check its URL and the server network settings.";
+}
+
 interface ServiceResponse {
   status: number;
   body: string;
@@ -140,7 +154,12 @@ async function resolveTarget(hostname: string, allowPrivate: boolean): Promise<L
     } finally {
       if (timeout) clearTimeout(timeout);
     }
-    if (!addresses.length || addresses.some(address => !safeAddress(address.address, allowPrivate))) throw new IntegrationTargetError();
+    if (!addresses.length) throw new IntegrationTargetError();
+    const rejected = addresses.filter(address => !safeAddress(address.address, allowPrivate));
+    if (rejected.length) {
+      if (!allowPrivate && rejected.some(address => privateAddress(address.address))) throw new PrivateNetworkTargetError();
+      throw new IntegrationTargetError();
+    }
     return addresses;
   } catch (error) {
     if (error instanceof IntegrationTargetError) throw error;
@@ -164,9 +183,9 @@ export async function requestIntegrationService(
   }
 
   if ((target.protocol !== "https:" && target.protocol !== "http:") || target.username || target.password || target.hash) throw new IntegrationTargetError();
-  if (!allowPrivate && target.protocol !== "https:") throw new IntegrationTargetError();
   const hostname = target.hostname.replace(/^\[|\]$/g, "");
   const addresses = await resolveTarget(hostname, allowPrivate);
+  if (target.protocol === "http:" && !allowPrivate) throw new IntegrationTargetError();
   if (target.protocol === "http:" && addresses.some(address => !privateAddress(address.address))) throw new IntegrationTargetError();
   const pinnedLookup: NonNullable<http.RequestOptions["lookup"]> = (_name, lookupOptions, callback) => {
     if (typeof lookupOptions === "object" && lookupOptions.all) callback(null, addresses);

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthenticationError, AuthorizationError, requireAdmin } from "@/lib/auth-session";
 import { getGlobalSettings } from "@/lib/global-settings";
 import { adminIntegrationEncryptionContext, decryptIntegrationConfig, IntegrationCiphertextError, IntegrationEncryptionUnavailableError } from "@/lib/integrations/crypto";
-import { IntegrationTargetError, requestIntegrationService } from "@/lib/integrations/http";
+import { IntegrationTargetError, integrationTargetErrorMessage, requestIntegrationService } from "@/lib/integrations/http";
 import { IntegrationRequestError, requireSameOrigin } from "@/lib/integrations/request";
 import { prisma } from "@/lib/prisma";
 
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } catch (error) {
     if (error instanceof IntegrationEncryptionUnavailableError) return jsonError("Secure connection storage is not available.", 503);
     if (error instanceof IntegrationCiphertextError) return jsonError("This saved service could not be decrypted. Re-enter its details and try again.", 503);
-    if (error instanceof IntegrationTargetError) return jsonError("Choice Fatigue could not safely reach this address. Check its URL and the server network settings.", 422);
+    if (error instanceof IntegrationTargetError) return jsonError(integrationTargetErrorMessage(error), 422);
     console.error("Admin media service connection check failed.");
     return jsonError("The service could not be reached. Check the server address and try again.", 502);
   }
