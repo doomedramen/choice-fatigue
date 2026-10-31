@@ -146,7 +146,17 @@ button:active:not(:disabled) { transform: scale(.98); }
 .seen-rating-options label { position: relative; display: grid; width: 29px; height: 38px; place-items: center; color: #79859b; cursor: pointer; }
 .seen-rating-options input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .seen-rating-options label span { color: #78849b; font-size: 22px; line-height: 1; transition: color 120ms ease-out, transform 120ms ease-out; }
-.seen-rating-options label:hover span, .seen-rating-options label:has(input:focus-visible) span { color: #ffe08a; transform: scale(1.12); }
+.seen-rating-options:has(label:nth-child(1) input:checked) label:nth-child(-n+1) span,
+.seen-rating-options:has(label:nth-child(2) input:checked) label:nth-child(-n+2) span,
+.seen-rating-options:has(label:nth-child(3) input:checked) label:nth-child(-n+3) span,
+.seen-rating-options:has(label:nth-child(4) input:checked) label:nth-child(-n+4) span,
+.seen-rating-options:has(label:nth-child(5) input:checked) label:nth-child(-n+5) span,
+.seen-rating-options:has(label:nth-child(1):hover) label:nth-child(-n+1) span,
+.seen-rating-options:has(label:nth-child(2):hover) label:nth-child(-n+2) span,
+.seen-rating-options:has(label:nth-child(3):hover) label:nth-child(-n+3) span,
+.seen-rating-options:has(label:nth-child(4):hover) label:nth-child(-n+4) span,
+.seen-rating-options:has(label:nth-child(5):hover) label:nth-child(-n+5) span { color: #ffe08a; }
+.seen-rating-options label:hover span, .seen-rating-options label:has(input:focus-visible) span { transform: scale(1.12); }
 .seen-rating-options input:focus-visible + span { outline: 2px solid #c7b6ff; outline-offset: 3px; border-radius: 2px; }
 .rating-cancel { min-height: 38px; padding: 0 5px; border: 0; background: none; color: #b9c3d4; font-size: 11px; font-weight: 700; }
 .rating-cancel:hover { color: #fff; }
