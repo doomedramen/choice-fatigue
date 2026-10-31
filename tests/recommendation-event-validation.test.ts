@@ -54,3 +54,11 @@ test("v5 relationship provenance is restricted to valid show batches", () => {
   assert.equal(isValidRecommendationEvent({ ...batch, provenance: { ...provenance, name: "metadata" } }), false);
   assert.equal(isValidRecommendationEvent({ ...decision, provenance }), false);
 });
+
+test("v6 snapshots accept only bounded category-specific IDs and real resolution subsets", () => {
+  const snapshot = { ...base, algorithmVersion: "content-v6", eventType: "retrieval_snapshot", source: null, lane: null, candidateIds: ["tmdb-movie-12"], provenance: { candidateRequestedIds: ["tmdb-movie-12"], candidateResolvedIds: ["tmdb-movie-12"], historicalRequestedIds: ["tmdb-movie-13"], historicalResolvedIds: [] } };
+  assert.equal(isValidRecommendationEvent(snapshot), true);
+  assert.equal(isValidRecommendationEvent({ ...snapshot, provenance: { ...snapshot.provenance, candidateResolvedIds: ["tmdb-movie-13"] } }), false);
+  assert.equal(isValidRecommendationEvent({ ...snapshot, provenance: { ...snapshot.provenance, historicalRequestedIds: ["tmdb-tv-1"] } }), false);
+  assert.equal(isValidRecommendationEvent({ ...snapshot, algorithmVersion: "content-v5" }), false);
+});

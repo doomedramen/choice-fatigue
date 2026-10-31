@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { categories, type Category, type MediaItem } from "@/data";
 import { signOut } from "@/lib/auth-client";
 import { rankRecommendations, buildRecommendationProfile, mergeRecommendationEvents, recommendationFeatureKeys, shownCandidateIds, type RecommendationFeatures } from "@/lib/recommendations";
-import { isValidRecommendationEvent, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
+import { isValidRecommendationEvent, isRelatedProvenance, type RecommendationEventInput, type RejectedRecommendationEvent } from "@/lib/recommendation-event-validation";
 import { recommendationEventBatch, settleRecommendationBatch } from "@/lib/recommendation-outbox";
 import { mergeDiscoveryState } from "@/lib/discovery-state-merge";
 import { createClientUuid } from "@/lib/client-uuid";
@@ -14,7 +14,7 @@ import { deduplicateTitles, type DiscoveryFeed, type CandidateBatch } from "@/li
 type Decision = "keep" | "pass" | "seen";
 type DiscoveryPageState = Record<Category, { feed: DiscoveryFeed; loading: boolean; error: string }>;
 function discoveryPageState(feed: DiscoveryFeed) {
-  return { feed, loading: false, error: feed.sources.some(source => source.outcome === "unavailable") ? "A metadata source could not load. Try again to request more titles." : "" };
+  return { feed, loading: false, error: feed.status.outcome === "unavailable" ? "A metadata source could not load. Try again to request more titles." : "" };
 }
 interface SessionState {
   sessionId: string;
@@ -130,10 +130,14 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const [savedOpen, setSavedOpen] = useState(false);
   const [resolvedSavedItems, setResolvedSavedItems] = useState<Record<string, MediaItem>>({});
   const [catalogueItems, setCatalogueItems] = useState(mediaItems);
+  const catalogueItemsRef = useRef(mediaItems);
   const [discoveryPages, setDiscoveryPages] = useState<DiscoveryPageState>(() => Object.fromEntries(
     categories.map(category => [category, discoveryPageState(initialFeeds[category])]),
   ) as DiscoveryPageState);
   const discoveryPagesInFlight = useRef(new Set<Category>());
+  const refreshGeneration = useRef<Record<Category, number>>({ Movies: 0, Shows: 0, Adult: 0 });
+  const refreshedGeneration = useRef<Record<Category, number>>({ Movies: 0, Shows: 0, Adult: 0 });
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const feedCursors = useRef<Record<Category, string | null>>({ Movies: initialFeeds.Movies.cursor, Shows: initialFeeds.Shows.cursor, Adult: initialFeeds.Adult.cursor });
   const resolvingSavedIds = useRef(new Set<string>());
   const [selectedSeerrId, setSelectedSeerrId] = useState(seerrConnections[0]?.id ?? "");
@@ -165,6 +169,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const runId = useRef("");
   const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
   const [featuresByItemId, setFeaturesByItemId] = useState<RecommendationFeatures>(() => Object.assign({}, ...Object.values(initialFeeds).map(feed => feed.candidateFeatures ?? {})));
+  const resolvedCreditIds = useRef(new Set(Object.values(initialFeeds).flatMap(feed => Object.keys(feed.candidateFeatures ?? {}))));
   const [learningError, setLearningError] = useState("");
   const [loadedProfileCategories, setLoadedProfileCategories] = useState<Set<Category>>(() => new Set());
   const activeCategory = useRef(session.category);
@@ -176,8 +181,9 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   for (const [id, keys] of Object.entries(localFeatures)) combinedFeatures[id] = [...new Set([...(combinedFeatures[id] ?? []), ...keys])];
   const profile = buildRecommendationProfile(learningEvents, combinedFeatures, session.category);
   const relatedRanks: Record<string, number> = {};
-  for (const event of learningEvents) if (event.sessionId === runId.current && event.category === session.category && event.eventType === "candidate_batch" && event.lane === "related" && event.provenance) {
-    event.candidateIds?.forEach((id, index) => { const rank = (event.provenance!.page - 1) * 20 + event.provenance!.positions[index]; relatedRanks[id] = Math.min(relatedRanks[id] ?? Infinity, rank); });
+  for (const event of learningEvents) if (event.sessionId === runId.current && event.category === session.category && event.eventType === "candidate_batch" && event.lane === "related" && isRelatedProvenance(event.provenance)) {
+    const provenance = event.provenance;
+    event.candidateIds?.forEach((id, index) => { const rank = (provenance.page - 1) * 20 + provenance.positions[index]; relatedRanks[id] = Math.min(relatedRanks[id] ?? Infinity, rank); });
   }
   const recommendations = rankRecommendations(categoryItems, profile.signals, profile.comparisons, combinedFeatures, relatedRanks);
   const items = recommendations.items;
@@ -194,7 +200,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   const seenCount = categoryItems.length - categoryItems.filter(candidate => !session.decisions[candidate.id]).length;
 
   async function loadMoreDiscoveries(category: Category, refresh = false) {
-    if (discoveryPagesInFlight.current.has(category) || (!refresh && !discoveryPages[category].feed.hasMore)) return;
+    if (discoveryPagesInFlight.current.has(category) || (!refresh && !discoveryPages[category].feed.hasMore)) return false;
     discoveryPagesInFlight.current.add(category);
     setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], loading: true, error: "" } }));
     try {
@@ -202,24 +208,61 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
       const cursor = feedCursors.current[category];
       if (cursor) query.set("cursor", cursor);
       if (refresh) query.set("refresh", "1");
+      for (const event of learningQueue.current.filter(event => event.category === category && event.eventType === "decision").slice(-100)) if (event.itemId) query.append("excludeId", event.itemId);
       const response = await fetch(`/api/discovery-feed?${query}`, { cache: "no-store" });
       if (response.status === 401) { window.location.replace("/sign-in"); return; }
       const result = await response.json() as DiscoveryFeed & { error?: string };
       if (!response.ok || !Array.isArray(result.items) || !Array.isArray(result.batches) || !result.status) throw new Error(result.error || "More titles could not be loaded.");
       feedCursors.current[category] = result.cursor;
       setFeaturesByItemId(current => ({ ...current, ...result.candidateFeatures }));
+      Object.keys(result.candidateFeatures ?? {}).forEach(id => resolvedCreditIds.current.add(id));
       const retrievalId = createClientUuid();
       for (const batch of result.batches) recordCandidateBatch(category, batch, retrievalId);
-      setCatalogueItems(current => deduplicateTitles([...current, ...result.items.filter(candidate => candidate.category === category)]));
-      const failed = result.sources.some(source => source.outcome === "unavailable");
+      const previousItems = catalogueItemsRef.current;
+      const mergedItems = deduplicateTitles([...previousItems, ...result.items.filter(candidate => candidate.category === category)]);
+      catalogueItemsRef.current = mergedItems;
+      recordFeedSnapshot(category, result, retrievalId, mergedItems.slice(previousItems.length).map(candidate => candidate.id));
+      setCatalogueItems(mergedItems);
+      const failed = result.status.outcome === "unavailable";
       setDiscoveryPages(current => ({ ...current, [category]: { feed: { ...result, status: current[category].feed.status.hasTitles ? { ...result.status, outcome: "ready", hasTitles: true } : result.status }, loading: false, error: failed ? "A metadata source could not load. Available titles are still shown." : "" } }));
+      return !failed;
     } catch (error) {
       setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], error: error instanceof Error ? error.message : "More titles could not be loaded." } }));
+      return false;
     } finally {
       discoveryPagesInFlight.current.delete(category);
       setDiscoveryPages(current => ({ ...current, [category]: { ...current[category], loading: false } }));
     }
   }
+
+  useEffect(() => {
+    if (!ready) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        await flushLearningQueue();
+        for (const category of categories) {
+          const generation = refreshGeneration.current[category];
+          if (generation === refreshedGeneration.current[category] || learningQueue.current.some(event => event.category === category && ["decision", "decision_undone", "saved"].includes(event.eventType))) continue;
+          if (discoveryPagesInFlight.current.has(category)) continue;
+          await refreshHistoricalProfile(category);
+          if (await loadMoreDiscoveries(category, true)) refreshedGeneration.current[category] = generation;
+        }
+      })();
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [ready, refreshRevision, discoveryPages]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (categories.some(category => refreshGeneration.current[category] !== refreshedGeneration.current[category])) setRefreshRevision(value => value + 1);
+      setDiscoveryPages(current => {
+        const next = { ...current };
+        for (const category of categories) if (current[category].error && current[category].feed.sources.some(source => source.retryAt !== null && source.retryAt <= Date.now())) next[category] = { ...current[category], error: "" };
+        return next;
+      });
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const category = session.category;
@@ -352,16 +395,17 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     return learningWriteQueue.current;
   }
 
-  async function refreshHistoricalProfile() {
-    const category = activeCategory.current;
+  async function refreshHistoricalProfile(category = activeCategory.current) {
     try {
       const query = new URLSearchParams({ category });
-      for (const candidate of catalogue.filter(item => item.category === category).slice(0, 100)) query.append("candidateId", candidate.id);
+      for (const id of [...resolvedCreditIds.current].filter(id => categoryForId(id) === category).slice(0, 100)) query.append("resolvedCreditId", id);
       const response = await fetch(`/api/recommendation-events?${query}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures };
+      const data = await response.json() as { events: LearningEvent[]; featuresByItemId: RecommendationFeatures; resolvedCreditItemIds?: string[]; requestedCreditItemIds?: string[] };
+      data.resolvedCreditItemIds?.forEach(id => resolvedCreditIds.current.add(id));
       setLearningEvents(current => mergeRecommendationEvents(current, data.events, learningQueue.current));
       setFeaturesByItemId(current => ({ ...current, ...data.featuresByItemId }));
+      if (data.requestedCreditItemIds?.length) enqueueLearningEvent("retrieval_snapshot", null, category, null, null, null, null, [], null, null, createClientUuid(), { candidateRequestedIds: [], candidateResolvedIds: [], historicalRequestedIds: data.requestedCreditItemIds, historicalResolvedIds: data.resolvedCreditItemIds ?? [] });
     } catch { /* Local decisions remain usable while profile resolution is unavailable. */ }
     finally { setLoadedProfileCategories(current => new Set([...current, category])); }
   }
@@ -369,9 +413,13 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
   function enqueueLearningEvent(eventType: LearningEvent["eventType"], itemId: string | null, category: Category, decision: Decision | null = null, rating: number | null = null, targetEventId: string | null = null, reviewId = session.reviewId, candidateIds: string[] | null = null, source: LearningEvent["source"] = null, lane: LearningEvent["lane"] = null, retrievalId: string | null = null, provenance: LearningEvent["provenance"] = null) {
     const event: LearningEvent = {
       id: createClientUuid(), sessionId: runId.current, reviewId, sequence: learningSequence.current++, itemId, candidateIds, category,
-      eventType, decision, rating, targetEventId, algorithmVersion: "content-v5", occurredAt: new Date().toISOString(), retrievalId, source, lane, provenance,
+      eventType, decision, rating, targetEventId, algorithmVersion: "content-v6", occurredAt: new Date().toISOString(), retrievalId, source, lane, provenance,
     };
     learningQueue.current = [...learningQueue.current, event];
+    if (["decision", "decision_undone", "saved"].includes(eventType)) {
+      refreshGeneration.current[category] += 1;
+      setRefreshRevision(value => value + 1);
+    }
     setLearningEvents(current => mergeRecommendationEvents(current, [event]));
     persistOutbox();
     void flushLearningQueue();
@@ -380,6 +428,10 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
 
   function recordCandidateBatch(category: Category, batch: CandidateBatch, retrievalId: string) {
     enqueueLearningEvent("candidate_batch", null, category, null, null, null, null, batch.candidateIds, batch.source, batch.lane, retrievalId, batch.provenance ?? null);
+  }
+
+  function recordFeedSnapshot(category: Category, feed: DiscoveryFeed, retrievalId: string, retainedIds = feed.items.map(item => item.id)) {
+    if (feed.snapshot) enqueueLearningEvent("retrieval_snapshot", null, category, null, null, null, null, retainedIds, null, null, retrievalId, feed.snapshot);
   }
 
   useEffect(() => {
@@ -421,12 +473,15 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     if (previousInitialFeeds.current === initialFeeds) return;
     previousInitialFeeds.current = initialFeeds;
     setCatalogueItems(mediaItems);
+    catalogueItemsRef.current = mediaItems;
     setFeaturesByItemId(current => ({ ...current, ...Object.assign({}, ...Object.values(initialFeeds).map(feed => feed.candidateFeatures ?? {})) }));
+    Object.values(initialFeeds).flatMap(feed => Object.keys(feed.candidateFeatures ?? {})).forEach(id => resolvedCreditIds.current.add(id));
     setDiscoveryPages(Object.fromEntries(categories.map(category => [category, discoveryPageState(initialFeeds[category])])) as DiscoveryPageState);
     feedCursors.current = { Movies: initialFeeds.Movies.cursor, Shows: initialFeeds.Shows.cursor, Adult: initialFeeds.Adult.cursor };
     if (ready) for (const category of categories) if (category !== "Adult" || adultSectionEnabled) {
       const retrievalId = createClientUuid();
       for (const batch of initialFeeds[category].batches) recordCandidateBatch(category, batch, retrievalId);
+      recordFeedSnapshot(category, initialFeeds[category], retrievalId);
     }
   }, [initialFeeds, mediaItems, ready, adultSectionEnabled]);
 
@@ -437,6 +492,7 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     for (const category of categories) if (category !== "Adult" || adultSectionEnabled) {
       const retrievalId = createClientUuid();
       for (const batch of initialFeeds[category].batches) recordCandidateBatch(category, batch, retrievalId);
+      recordFeedSnapshot(category, initialFeeds[category], retrievalId);
     }
   }, [ready, initialFeeds, adultSectionEnabled]);
 
@@ -641,7 +697,6 @@ export default function DiscoveryClient({ appName, userName, userId, isAdmin, ad
     }
     setSession(current=>({...current, saved:[...new Set([...current.saved,...visiblePickIds])], shortlisted:current.shortlisted.filter(id=>!visiblePickIds.includes(id)), reviewRemoved:current.reviewRemoved.filter(id=>!visiblePickIds.includes(id)), view:"discover"}));
     setSavedOpen(true); showNotice(`${count} ${count===1?"title":"titles"} saved for later`);
-    void flushLearningQueue().then(async () => { await refreshHistoricalProfile(); await loadMoreDiscoveries(session.category, true); });
   }
   function onCardPointerDown(event:PointerEvent<HTMLElement>) {
     if (swipeExit.current || (event.target as HTMLElement).closest("button, input, label, select, textarea, a")) return;

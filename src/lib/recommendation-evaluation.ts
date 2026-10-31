@@ -1,5 +1,5 @@
 import type { MediaItem } from "@/data";
-import type { RecommendationEventInput } from "@/lib/recommendation-event-validation";
+import { isRelatedProvenance, type RecommendationEventInput, type RelatedProvenance } from "@/lib/recommendation-event-validation";
 import { buildRecommendationProfile, mergeRecommendationEvents, rankRecommendations, recommendationFeatureItemIds, recommendationFeatureKeys, relatedShowSeeds } from "@/lib/recommendations";
 import { deduplicateTitles, interleaveItems } from "@/lib/discovery-feed";
 
@@ -65,13 +65,16 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
   return (["Movies", "Shows", "Adult"] as const).map(category => {
     const categoryEvents = ordered.filter(event => event.category === category);
     const prior: RecommendationEventInput[] = [];
-    const batches = new Map<string, Array<{ ids: string[]; lane: string; source: string; provenance?: RecommendationEventInput["provenance"]; version: string }>>();
+    const batches = new Map<string, Array<{ ids: string[]; lane: string; source: string; provenance?: RelatedProvenance | null; version: string }>>();
+    const snapshots = new Map<string, string[]>();
+    const creditsBySession = new Map<string, Set<string>>();
+    let snapshotCount = 0, incompleteImpressions = 0;
     const traces: Parameters<typeof compareRankings>[0] = [];
     const contentTraces: Parameters<typeof compareRankings>[0] = [];
     const popularTraces: Parameters<typeof compareRankings>[0] = [];
     let candidateIds = 0, resolvedCandidateIds = 0, shown = 0, featureRequested = 0, featureEligible = 0, featureResolved = 0;
     let relatedSeedBatches = 0, matchingRelatedSeedBatches = 0;
-    const creditRequested = new Set<string>();
+    const creditRequested = new Set<string>(), recordedCreditRequested = new Set<string>(), recordedCreditResolved = new Set<string>();
     const lanes = new Map<string, { candidateIds: Set<string>; shownIds: Set<string>; shortlistedIds: Set<string>; savedIds: Set<string> }>();
     const outcomes = new Map<string, { shortlisted: Set<string>; saved: Set<string> }>();
     const undone = new Set(categoryEvents.filter(row => row.eventType === "decision_undone").map(row => row.targetEventId));
@@ -91,14 +94,26 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
       }
     }
     for (const event of categoryEvents) {
+      if (event.eventType === "retrieval_snapshot" && event.retrievalId && event.provenance && !isRelatedProvenance(event.provenance)) {
+        const snapshotKey = `${event.sessionId}:${event.retrievalId}`;
+        const feedSnapshot = batches.has(snapshotKey);
+        const credits = creditsBySession.get(event.sessionId) ?? new Set<string>();
+        for (const id of [...event.provenance.candidateResolvedIds, ...(feedSnapshot ? [] : event.provenance.historicalResolvedIds)]) credits.add(id);
+        creditsBySession.set(event.sessionId, credits);
+        event.provenance.candidateRequestedIds.forEach(id => creditRequested.add(id));
+        event.provenance.candidateRequestedIds.forEach(id => recordedCreditRequested.add(id));
+        event.provenance.candidateResolvedIds.forEach(id => recordedCreditResolved.add(id));
+        if (feedSnapshot) { snapshots.set(snapshotKey, event.candidateIds ?? []); snapshotCount++; }
+      }
       if (event.eventType === "candidate_batch" && event.retrievalId && event.candidateIds) {
-        if (event.lane === "related" && event.provenance?.page === 1) {
+        if (event.lane === "related" && isRelatedProvenance(event.provenance) && event.provenance.page === 1) {
           relatedSeedBatches += 1;
-          if (relatedShowSeeds(prior).some(seed => seed.itemId === event.provenance?.seedItemId && seed.eventId === event.provenance?.seedEventId)) matchingRelatedSeedBatches += 1;
+          const provenance = event.provenance;
+          if (relatedShowSeeds(prior).some(seed => seed.itemId === provenance.seedItemId && seed.eventId === provenance.seedEventId)) matchingRelatedSeedBatches += 1;
         }
         const key = `${event.sessionId}:${event.retrievalId}`;
         const group = batches.get(key) ?? [];
-        group.push({ ids: event.candidateIds, lane: event.lane!, source: event.source!, provenance: event.provenance, version: event.algorithmVersion });
+        group.push({ ids: event.candidateIds, lane: event.lane!, source: event.source!, provenance: isRelatedProvenance(event.provenance) ? event.provenance : null, version: event.algorithmVersion });
         batches.set(key, group);
         candidateIds += event.candidateIds.length;
         resolvedCandidateIds += event.candidateIds.filter(id => metadata.has(id)).length;
@@ -109,8 +124,10 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
       }
       if (event.eventType === "item_shown" && event.itemId && event.candidateIds) {
         shown += 1;
-        const runGroups = [...batches].filter(([key]) => key.startsWith(`${event.sessionId}:`)).map(([, group]) => group);
-        const available = deduplicateTitles(runGroups.flatMap(group => interleaveItems(group.map(batch => batch.ids.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])))));
+        const runEntries = [...batches].filter(([key]) => key.startsWith(`${event.sessionId}:`));
+        const runGroups = runEntries.map(([, group]) => group);
+        if (runEntries.some(([key]) => !snapshots.has(key))) incompleteImpressions++;
+        const available = deduplicateTitles(runEntries.flatMap(([key, group]) => snapshots.has(key) ? snapshots.get(key)!.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : []) : interleaveItems(group.map(batch => batch.ids.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])))));
         for (const group of runGroups) if (group.some(batch => batch.version === "content-v5")) {
           const ids: string[] = [];
           for (let index = 0; index < Math.max(0, ...group.map(batch => batch.ids.length)) && ids.length < 10; index++) {
@@ -125,7 +142,8 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
         const missing = recommendationFeatureItemIds(prior, category).filter(id => !availableIds.has(id));
         const selected = missing.slice(0, 12);
         const featureItems = [...available, ...selected.flatMap(id => metadata.has(id) ? [metadata.get(id)!] : [])];
-        const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type }), ...(!availableIds.has(item.id) || creditRequested.has(item.id) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
+        const resolved = creditsBySession.get(event.sessionId) ?? new Set<string>();
+        const features = Object.fromEntries(featureItems.map(item => [item.id, [...recommendationFeatureKeys({ genres: item.genre, year: item.year, type: item.type }), ...((event.algorithmVersion === "content-v6" ? resolved.has(item.id) : !availableIds.has(item.id) || creditRequested.has(item.id)) ? ((item as MediaItem & { creditKeys?: string[] }).creditKeys ?? []) : [])]]));
         featureEligible += missing.length; featureRequested += selected.length; featureResolved += selected.filter(id => metadata.has(id)).length;
         const profile = buildRecommendationProfile(prior, features, category);
         const window = new Set(event.candidateIds);
@@ -170,7 +188,9 @@ export function replayRecommendationEvents(events: RecommendationEventInput[], m
       historicalFeatureCoverage: summarizeMetadataCoverage(featureEligible, featureRequested, featureResolved),
       matchedCandidateMixRanking: compareRankings(traces), matchedContentVsNewRanking: compareRankings(contentTraces), creditCoverage: summarizeMetadataCoverage(creditRequested.size, creditRequested.size, [...creditRequested].filter(id => Boolean((metadata.get(id) as (MediaItem & { creditKeys?: string[] }) | undefined)?.creditKeys)).length), matchedPopularityRanking: compareRankings(popularTraces),
       reviewRetention: keeps ? retained / keeps : null, medianObservedCardsToFirstSave: median,
-      relatedSeedBatches, matchingRelatedSeedBatches,
+      relatedSeedBatches, matchingRelatedSeedBatches, snapshotCoverage: { snapshots: snapshotCount, incompleteImpressions },
+      recordedCreditCoverage: summarizeMetadataCoverage(recordedCreditRequested.size, recordedCreditRequested.size, recordedCreditResolved.size),
+      replayLimitations: "Older traces lack retrieval snapshots; current provider metadata may differ from the original session.",
       retrievalLanes: Object.fromEntries([...lanes].map(([key, lane]) => [key, { candidates: lane.candidateIds.size, shown: lane.shownIds.size, shortlisted: lane.shortlistedIds.size, saved: lane.savedIds.size }])),
     };
   });

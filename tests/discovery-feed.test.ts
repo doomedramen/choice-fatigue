@@ -1,12 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceFeedStreams, interleaveItems, type FeedStream } from "../src/lib/discovery-feed";
+import { advanceFeedStreams, interleaveItems, reconcileFeedStreams, type FeedStream } from "../src/lib/discovery-feed";
 import { retryAfterTime, requestProviderJson, ProviderRequestError } from "../src/lib/providers/request";
 import type { MediaItem } from "../src/data";
 const item = (id: string): MediaItem => ({ id, title: id, type: "Movie", runtime: "—", rating: "—", genre: [], synopsis: "", category: "Movies", palette: ["", "", ""], art: "mist", label: id });
 const stream = (source: FeedStream["source"], lane: FeedStream["lane"] = "popular"): FeedStream => ({ source, lane, page: 1, features: lane === "popular" ? [] : ["genre:drama"], done: false, retryAt: null, fingerprint: null });
 test("mixes lanes deterministically and deduplicates matching IDs/titles", () => {
   assert.deepEqual(interleaveItems([[item("a"), item("b")], [item("c"), item("a")]]).map(row => row.id), ["a", "c", "b"]);
+});
+test("refresh preserves unchanged lanes and restarts only changed queries", () => {
+  const existing = [{ ...stream("tmdb"), page: 3, retryAt: 100 }, { ...stream("tmdb", "person"), features: ["actor:1"], page: 4 }];
+  const desired = [stream("tmdb"), { ...stream("tmdb", "person"), features: ["actor:2"] }];
+  const result = reconcileFeedStreams(existing, desired);
+  assert.equal(result[0].page, 3);
+  assert.equal(result[0].retryAt, 100);
+  assert.equal(result[1].page, 1);
+});
+test("selective refresh does not advance unchanged streams", async () => {
+  const popular = { ...stream("tmdb"), page: 3 };
+  const person = { ...stream("tmdb", "person"), features: ["actor:2"] };
+  const result = await advanceFeedStreams([popular, person], async () => ({ items: [item("new")], hasMore: true }), ids => ids.join(","), Date.now(), lane => lane.lane === "person");
+  assert.deepEqual(result.streams.map(lane => lane.page), [3, 2]);
 });
 test("related streams preserve duplicate origins and advance independently", async () => {
   const related: FeedStream = { ...stream("tmdb"), lane: "related", seedItemId: "tmdb-tv-1", seedEventId: "event-1", page: 2 };

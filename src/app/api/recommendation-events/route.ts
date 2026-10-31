@@ -25,9 +25,9 @@ export async function GET(request: NextRequest) {
     const category = request.nextUrl.searchParams.get("category") as RecommendationCategory;
     if (!recommendationCategories.includes(category)) return NextResponse.json({ error: "Choose a valid category." }, { status: 400 });
     if (category === "Adult" && !await canAccessAdult(session.user.id)) return NextResponse.json({ error: "The Adult category is currently disabled." }, { status: 403 });
-    const candidates = request.nextUrl.searchParams.getAll("candidateId").filter(id => id.length > 0 && id.length <= 200).slice(0, 100);
-    const { events, featuresByItemId, coverage, creditCoverage } = await loadRecommendationProfile(session.user.id, category, candidates);
-    return NextResponse.json({ events, featuresByItemId, coverage, creditCoverage }, { headers });
+    const resolvedIds = request.nextUrl.searchParams.getAll("resolvedCreditId").filter(id => id.length <= 200).slice(0, 100);
+    const { events, featuresByItemId, coverage, creditCoverage, resolvedCreditItemIds, requestedCreditItemIds } = await loadRecommendationProfile(session.user.id, category, resolvedIds);
+    return NextResponse.json({ events, featuresByItemId, coverage, creditCoverage, resolvedCreditItemIds, requestedCreditItemIds }, { headers });
   } catch (error) { return errorResponse(error); }
 }
 export async function POST(request: NextRequest) {

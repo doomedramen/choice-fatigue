@@ -91,3 +91,20 @@ test("replay checks related seeds against choices already made, never future rat
   assert.equal(report.relatedSeedBatches, 1);
   assert.equal(report.matchingRelatedSeedBatches, 0);
 });
+
+test("v6 replay uses retained order and recorded hydration outcomes", () => {
+  const metadata = new Map([replayItem("tmdb-movie-1", "Drama"), replayItem("tmdb-movie-2", "Drama")].map(item => [item.id, item]));
+  const events = [
+    replayEvent(0, { eventType: "candidate_batch", candidateIds: ["tmdb-movie-1", "tmdb-movie-2"], retrievalId: "first", source: "tmdb", lane: "popular", algorithmVersion: "content-v6" }),
+    replayEvent(1, { eventType: "retrieval_snapshot", candidateIds: ["tmdb-movie-2", "tmdb-movie-1"], retrievalId: "first", algorithmVersion: "content-v6", provenance: { candidateRequestedIds: ["tmdb-movie-1", "tmdb-movie-2"], candidateResolvedIds: ["tmdb-movie-2"], historicalRequestedIds: [], historicalResolvedIds: [] } }),
+    replayEvent(2, { itemId: "tmdb-movie-2", candidateIds: ["tmdb-movie-2", "tmdb-movie-1"], algorithmVersion: "content-v6" }),
+    replayEvent(3, { eventType: "decision", itemId: "tmdb-movie-2", decision: "keep", algorithmVersion: "content-v6" }),
+  ];
+  const report = replayRecommendationEvents(events, metadata)[0];
+  assert.equal(report.matchedCandidateMixRanking.providerOrder.shortlisted.meanReciprocalRank, 1);
+  assert.equal(report.recordedCreditCoverage.requested, 2);
+  assert.equal(report.recordedCreditCoverage.resolved, 1);
+  assert.deepEqual(report.snapshotCoverage, { snapshots: 1, incompleteImpressions: 0 });
+  const missing = replayRecommendationEvents(events.filter(event => event.eventType !== "retrieval_snapshot"), metadata)[0];
+  assert.equal(missing.snapshotCoverage.incompleteImpressions, 1);
+});

@@ -218,7 +218,7 @@ test("first run, account access, provider discovery, saved state and account con
 });
 
 test("private account APIs reject anonymous access", async ({ request }) => {
-  const response = await request.get("http://127.0.0.1:4173/api/discovery-state");
+  const response = await request.get("/api/discovery-state");
   expect(response.status()).toBe(401);
 });
 
@@ -355,4 +355,42 @@ test("related shows and credit lanes preserve provenance and category boundaries
   })).toBe(2);
   const rejected = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Adult")).status);
   expect(rejected).toBe(403);
+});
+
+test("a high show rating refreshes related discovery without moving the locked card", async ({ page }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Media categories" }).getByRole("button", { name: "Shows" }).click();
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Show One");
+  await page.getByRole("button", { name: "Seen it: rate Mock Show One" }).click();
+  await page.getByRole("radio", { name: "9 out of 10" }).click({ force: true });
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Show Two");
+  await expect.poll(async () => page.evaluate(async () => {
+    const { events } = await (await fetch("/api/recommendation-events?category=Shows")).json();
+    return events.some((event: { lane: string; eventType: string }) => event.lane === "related" && event.eventType === "candidate_batch");
+  }), { timeout: 30_000 }).toBe(true);
+  await expect(page.locator(".card-active h2")).toHaveText("Mock Show Two");
+  await page.getByRole("button", { name: "Seen it: rate Mock Show Two" }).click();
+  await page.getByRole("radio", { name: "9 out of 10" }).click({ force: true });
+  await expect.poll(async () => page.evaluate(async () => {
+    const { events } = await (await fetch("/api/recommendation-events?category=Shows")).json();
+    return events.some((event: { lane: string }) => event.lane === "person") && events.some((event: { lane: string }) => event.lane === "company");
+  }), { timeout: 30_000 }).toBe(true);
+  const events = await page.evaluate(async () => (await (await fetch("/api/recommendation-events?category=Shows")).json()).events);
+  expect(events.some((event: { eventType: string; algorithmVersion: string }) => event.eventType === "retrieval_snapshot" && event.algorithmVersion === "content-v6")).toBe(true);
+});
+
+test("credit hydration skips considered titles and missing credits stay neutral", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await setupRecommendationAdmin(page);
+  await request.post("http://127.0.0.1:4199/__control", { data: { extended: true, missingCredits: true } });
+  const events = [learningDecision("tmdb-movie-101", 0), learningDecision("tmdb-movie-102", 1)];
+  await page.evaluate(async rows => fetch("/api/recommendation-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events: rows }) }), events);
+  const feed = await page.evaluate(async () => (await fetch("/api/discovery-feed?category=Movies")).json());
+  expect(feed.snapshot.candidateRequestedIds).not.toContain("tmdb-movie-101");
+  expect(feed.snapshot.candidateRequestedIds).not.toContain("tmdb-movie-102");
+  expect(feed.snapshot.candidateRequestedIds).toHaveLength(10);
+  expect(feed.snapshot.candidateResolvedIds).toHaveLength(0);
+  expect(feed.creditCoverage.resolved).toBe(0);
 });

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 const port = Number(process.env.METADATA_STUB_PORT || 4199);
-type Control = { failTmdb: boolean; failMovies: boolean; failAdult: boolean; malformedTmdb: boolean; malformedAdult: boolean; emptyTmdb: boolean; emptyAdult: boolean; extended: boolean; throttleMovies: boolean };
-const defaults = (): Control => ({ failTmdb: false, failMovies: false, failAdult: false, malformedTmdb: false, malformedAdult: false, emptyTmdb: false, emptyAdult: false, extended: false, throttleMovies: false });
+type Control = { failTmdb: boolean; failMovies: boolean; failAdult: boolean; malformedTmdb: boolean; malformedAdult: boolean; emptyTmdb: boolean; emptyAdult: boolean; extended: boolean; throttleMovies: boolean; missingCredits: boolean };
+const defaults = (): Control => ({ failTmdb: false, failMovies: false, failAdult: false, malformedTmdb: false, malformedAdult: false, emptyTmdb: false, emptyAdult: false, extended: false, throttleMovies: false, missingCredits: false });
 let control = defaults();
 let requests: Array<{ path: string; search: string; input?: unknown }> = [];
 const genres = [{ id: 18, name: "Drama" }, { id: 35, name: "Comedy" }, { id: 16, name: "Animation" }];
@@ -53,6 +53,7 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ results: records, total_pages: personalized ? 1 : control.extended ? 8 : 1 }));
   } else if (/^\/3\/(movie|tv)\/\d+$/.test(url.pathname)) {
     const id = Number(url.pathname.split("/").at(-1));
+    if (control.missingCredits && url.searchParams.has("append_to_response")) { const record = url.pathname.includes("/tv/") ? show(id, `Mock Show ${id}`, 18) : movie(id, `Mock Movie ${id}`, 18); response.end(JSON.stringify({ ...record, credits: undefined, aggregate_credits: undefined })); return; }
     if (url.pathname.includes("/tv/")) response.end(JSON.stringify(show(id, id === 201 ? "Mock Show One" : `Mock Show ${id}`, 18)));
     else response.end(JSON.stringify(movie(id, id === 101 && !control.extended ? "Mock Movie One" : id === 102 && !control.extended ? "Mock Movie Two" : `Mock Movie ${id}`, id >= 901 && id <= 903 || id >= 9001 ? 16 : control.extended ? id % 3 === 1 ? 35 : 18 : id === 102 ? 35 : 18)));
   } else if (/^\/theporndb\/(scenes|movies)(\/[^/]+)?$/.test(url.pathname)) {

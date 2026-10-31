@@ -5,10 +5,10 @@ import { getTmdbProviderStatus } from "@/lib/providers/tmdb-config";
 import { getAdultMetadataProviderStatus } from "@/lib/providers/adult-metadata-config";
 import { getThePornDBCataloguePage } from "@/lib/providers/theporndb";
 import { getStashDbCataloguePage } from "@/lib/providers/stashdb";
-import { relatedShowSeeds } from "@/lib/recommendations";
+import { relatedShowSeeds, buildRecommendationProfile } from "@/lib/recommendations";
 import { parseProviderTitleId } from "@/lib/media-provider-id";
 import { loadRecommendationProfile } from "@/lib/recommendation-profile";
-import { advanceFeedStreams, type DiscoveryFeed, type FeedCursor, type FeedStream } from "@/lib/discovery-feed";
+import { advanceFeedStreams, reconcileFeedStreams, type DiscoveryFeed, type FeedCursor, type FeedStream } from "@/lib/discovery-feed";
 import type { RecommendationCategory } from "@/lib/recommendation-event-validation";
 export type { CategoryFeedStatus } from "@/lib/discovery-feed";
 
@@ -41,20 +41,19 @@ function decodeCursor(value: string, category: RecommendationCategory): FeedCurs
 }
 
 /** Authorization is enforced by the page/API before Adult retrieval is requested. */
-export async function getDiscoveryFeed(userId: string, category: RecommendationCategory, cursorValue: string | null = null, refresh = false): Promise<DiscoveryFeed> {
+export async function getDiscoveryFeed(userId: string, category: RecommendationCategory, cursorValue: string | null = null, refresh = false, pendingExcludedIds: string[] = []): Promise<DiscoveryFeed> {
   const enabled = new Set<string>();
   if (category === "Adult") {
     const statuses = await Promise.all([getAdultMetadataProviderStatus("theporndb"), getAdultMetadataProviderStatus("stashdb")]);
     if (statuses[0].enabled) enabled.add("theporndb");
     if (statuses[1].enabled) enabled.add("stashdb");
   } else if ((await getTmdbProviderStatus()).enabled) enabled.add("tmdb");
-  const streams = cursorValue ? decodeCursor(cursorValue, category).streams.filter(stream => enabled.has(stream.source)) : [];
+  let streams = cursorValue ? decodeCursor(cursorValue, category).streams.filter(stream => enabled.has(stream.source)) : [];
+  const previousStreams = streams;
+  const profile = enabled.size ? await loadRecommendationProfile(userId, category, [], !cursorValue || refresh) : null;
   if (!cursorValue || refresh) {
-    const profile = enabled.size ? await loadRecommendationProfile(userId, category) : null;
-    if (refresh) {
-      // A review refresh resets only personalized lanes, preserving popular pagination.
-      for (let index = streams.length - 1; index >= 0; index--) if (["personalized", "related", "person", "company"].includes(streams[index].lane)) streams.splice(index, 1);
-    }
+    const previous = streams;
+    streams = refresh ? previous.filter(stream => stream.lane === "popular") : [];
     const add = (source: FeedStream["source"], lane: FeedStream["lane"], features: string[] = [], kind?: FeedStream["kind"]) => {
       streams.push({ source, lane, ...(kind ? { kind } : {}), features, page: 1, done: false, retryAt: null, fingerprint: null });
     };
@@ -72,6 +71,7 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
       if (person) add("tmdb", "person", [person.key]);
       if (company) add("tmdb", "company", [company.key]);
     }
+    if (refresh) streams = reconcileFeedStreams(previous, streams);
   }
   const result = await advanceFeedStreams(streams, stream => {
     if (stream.source === "tmdb") {
@@ -81,9 +81,11 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
     }
     if (stream.source === "theporndb") return getThePornDBCataloguePage(stream.kind!, stream.page);
     return getStashDbCataloguePage(stream.page, stream.features);
-  }, ids => createHash("sha256").update(ids.join("\n")).digest("hex"));
+  }, ids => createHash("sha256").update(ids.join("\n")).digest("hex"), Date.now(), stream => !refresh || !previousStreams.includes(stream));
   const candidateFeatures: Record<string, string[]> = {};
-  const candidates = category === "Adult" ? [] : result.items.slice(0, 10);
+  const considered = new Set(profile ? buildRecommendationProfile(profile.events, profile.featuresByItemId, category).consideredIds : []);
+  for (const id of pendingExcludedIds) if (parseProviderTitleId(id)?.category === category) considered.add(id);
+  const candidates = category === "Adult" ? [] : result.items.filter(item => !considered.has(item.id)).slice(0, 10);
   await Promise.all(candidates.map(async item => {
     const reference = parseProviderTitleId(item.id);
     if (!reference || reference.provider !== "tmdb") return;
@@ -91,6 +93,7 @@ export async function getDiscoveryFeed(userId: string, category: RecommendationC
   }));
   return {
     candidateFeatures, creditCoverage: { requested: candidates.length, resolved: Object.keys(candidateFeatures).length },
+    snapshot: { candidateRequestedIds: candidates.map(item => item.id), candidateResolvedIds: Object.keys(candidateFeatures), historicalRequestedIds: profile?.requestedCreditItemIds ?? [], historicalResolvedIds: profile?.resolvedCreditItemIds ?? [] },
     items: result.items, batches: result.batches, sources: result.sources, status: result.status,
     hasMore: result.streams.some(stream => !stream.done),
     cursor: result.streams.length ? Buffer.from(JSON.stringify({ category, streams: result.streams })).toString("base64url") : null,

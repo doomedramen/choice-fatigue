@@ -9,9 +9,9 @@ import { getStashDbRecommendationMetadata } from "@/lib/providers/stashdb";
 import type { RecommendationCategory, RecommendationEventInput } from "@/lib/recommendation-event-validation";
 
 /** The caller must authorize Adult access before entering this function. */
-export async function loadRecommendationProfile(userId: string, category: RecommendationCategory, candidateIds: string[] = []) {
+export async function loadRecommendationProfile(userId: string, category: RecommendationCategory, resolvedCreditIds: string[] = [], hydrate = true) {
   const rows = await prisma.recommendationEvent.findMany({
-    where: { userId, category, algorithmVersion: { in: ["content-v3", "content-v4", "content-v5"] } },
+    where: { userId, category, algorithmVersion: { in: ["content-v3", "content-v4", "content-v5", "content-v6"] } },
     orderBy: [{ occurredAt: "asc" }, { sessionId: "asc" }, { sequence: "asc" }, { id: "asc" }],
   });
   const events: RecommendationEventInput[] = rows.map(row => ({
@@ -21,11 +21,13 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
     algorithmVersion: row.algorithmVersion as RecommendationEventInput["algorithmVersion"], occurredAt: row.occurredAt.toISOString(),
     provenance: row.provenance as RecommendationEventInput["provenance"], retrievalId: row.retrievalId, source: row.source as RecommendationEventInput["source"], lane: row.lane as RecommendationEventInput["lane"],
   }));
-  const known = new Set(candidateIds);
+  const known = new Set(resolvedCreditIds);
   const eligibleIds = recommendationFeatureItemIds(events, category).filter(id => !known.has(id));
-  const requestedIds = eligibleIds.slice(0, 12);
+  const requestedIds = hydrate ? eligibleIds.slice(0, 12) : [];
   const featuresByItemId: RecommendationFeatures = {};
   let creditRequested = 0, creditResolved = 0;
+  const resolvedCreditItemIds: string[] = [];
+  const requestedCreditItemIds: string[] = [];
   const stashTags: Record<string, string> = {};
   for (let index = 0; index < requestedIds.length; index += 4) {
     await Promise.all(requestedIds.slice(index, index + 4).map(async id => {
@@ -34,7 +36,8 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
         if (!reference || reference.category !== category) return;
         if (reference.provider === "tmdb") {
           creditRequested += 1;
-          try { featuresByItemId[id] = await getTmdbCreditFeatures(reference.mediaType, reference.sourceId); creditResolved += 1; }
+          requestedCreditItemIds.push(id);
+          try { featuresByItemId[id] = await getTmdbCreditFeatures(reference.mediaType, reference.sourceId); creditResolved += 1; resolvedCreditItemIds.push(id); }
           catch { featuresByItemId[id] = await getTmdbRecommendationFeatures(reference.mediaType, reference.sourceId); }
         }
         else if (reference.provider === "theporndb") featuresByItemId[id] = await getThePornDBRecommendationFeatures(reference.kind, reference.sourceId);
@@ -51,7 +54,7 @@ export async function loadRecommendationProfile(userId: string, category: Recomm
   return {
     events, featuresByItemId,
     coverage: { eligible: eligibleIds.length, requested: requestedIds.length, resolved: Object.keys(featuresByItemId).length, omittedByLimit: Math.max(0, eligibleIds.length - requestedIds.length) },
-    creditCoverage: { requested: creditRequested, resolved: creditResolved },
+    creditCoverage: { requested: creditRequested, resolved: creditResolved }, resolvedCreditItemIds, requestedCreditItemIds,
     creditFeatures: creditPreferences(profile.signals).filter(feature => feature.positiveTitles >= 2 && feature.score > 0),
     retrievalFeatures, stashTagIds: retrievalFeatures.flatMap(key => stashTags[key] ? [stashTags[key]] : []),
   };
